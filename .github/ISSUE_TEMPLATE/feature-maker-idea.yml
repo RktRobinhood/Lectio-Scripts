@@ -1,0 +1,82 @@
+name: Feature / maker idea
+description: Suggest an improvement, customization, new script, or share a useful local modification.
+title: "[Idea] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This project is intended to be hackable.
+
+        Use this form for ideas that are **not simply bugs**: new functionality, UI changes, better defaults, a new Lectio script, or a modification you made locally that could be useful to other students or teachers.
+
+  - type: dropdown
+    id: script
+    attributes:
+      label: Which script does this relate to?
+      options:
+        - Chairs Up
+        - English Mode
+        - Unread Message Notifications
+        - All / shared infrastructure
+        - New script idea
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: Start with the real Lectio annoyance or workflow, not just the code change.
+      placeholder: "Example: I keep missing ... / At our school ... / I would like ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: What should the script do?
+      description: Describe the behaviour you would like.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: audience
+    attributes:
+      label: Who would benefit?
+      multiple: true
+      options:
+        - Students
+        - Teachers
+        - Other staff
+        - One specific school
+        - Lectio users generally
+    validations:
+      required: true
+
+  - type: textarea
+    id: modification
+    attributes:
+      label: Have you already hacked on it?
+      description: Optional. If you changed the script yourself or with an LLM, describe the change or paste a small relevant diff.
+      placeholder: "What did you try? What worked? What did not?"
+
+  - type: textarea
+    id: permissions
+    attributes:
+      label: Does the idea require new permissions or external services?
+      description: Optional. Mention new network requests, APIs, browser permissions, stored data, or other privacy/security implications.
+
+  - type: upload
+    id: screenshots
+    attributes:
+      label: Mockup or screenshot
+      description: Optional. Redact private Lectio information before uploading.
+
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I removed or redacted student data, private messages, grades, passwords, cookies, tokens, and other sensitive information.
+          required: true

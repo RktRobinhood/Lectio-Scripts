@@ -1,0 +1,130 @@
+name: School compatibility
+description: A script contains assumptions that do not work with another Lectio school/setup.
+title: "[School compatibility] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form when a script appears to be biased toward the Lectio setup it was developed against — for example school ID `223`, room IDs, page layout, naming, or another school-specific assumption.
+
+        Please redact student and private school information before submitting.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I checked that the latest unmodified script is installed.
+          required: true
+        - label: I searched existing Issues for this school/setup problem.
+          required: true
+        - label: I removed or redacted private/personal Lectio information.
+          required: true
+
+  - type: dropdown
+    id: script
+    attributes:
+      label: Script
+      options:
+        - Chairs Up
+        - English Mode
+        - Unread Message Notifications
+        - More than one script
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: script-version
+    attributes:
+      label: Script version
+      placeholder: "Value from the @version line"
+    validations:
+      required: true
+
+  - type: input
+    id: school-id
+    attributes:
+      label: Your Lectio school ID
+      description: This is normally the number in /lectio/XXX/. Do not provide personal IDs.
+      placeholder: "Example: 456"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: browser
+    attributes:
+      label: Browser
+      options:
+        - Firefox
+        - Google Chrome
+        - Microsoft Edge
+        - Safari
+        - Opera
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: page
+    attributes:
+      label: Lectio page / area
+      placeholder: "Example: timetable / messages / room schedule"
+    validations:
+      required: true
+
+  - type: textarea
+    id: difference
+    attributes:
+      label: What appears to be school-specific?
+      description: Describe what differs at your school or where the script stops matching your Lectio setup.
+      placeholder: |
+        Example:
+        The script expects room links in ..., but our timetable shows ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Install ...
+        2. Open ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: console
+    attributes:
+      label: Relevant Console output
+      description: Optional. Paste only redacted Console output. Do not paste full Network/HAR data.
+      render: text
+
+  - type: upload
+    id: screenshots
+    attributes:
+      label: Redacted screenshots
+      description: Optional. Screenshots of the relevant page/layout are especially useful for school compatibility.
+
+  - type: textarea
+    id: local-fix
+    attributes:
+      label: Have you already found a local fix?
+      description: If you or an LLM changed the script successfully, paste the small diff or describe the change. Make clear that it is a modified version.
+      placeholder: "Optional: describe or paste the relevant change."
+
+  - type: textarea
+    id: generalization
+    attributes:
+      label: What would a general solution look like?
+      description: Optional. For example, auto-detect school ID, avoid hard-coded room IDs, or use a more general selector.
+
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I checked this report and attachments for student data, private messages, grades, passwords, cookies, tokens, and other sensitive information.
+          required: true
