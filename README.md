@@ -26,10 +26,14 @@ For most people, installation is:
 1. Install **Tampermonkey**.
 2. Open the script you want from the [`/scripts`](scripts/) folder.
 3. Copy the complete JavaScript file.
-4. In Tampermonkey, choose **Dashboard → Add a new script**.
+4. Click the Tampermonkey icon and choose **Create a new script...**
 5. Delete the example code and paste in the Lectio script.
 6. Save.
 7. Reload Lectio.
+
+Current Tampermonkey menu:
+
+![Current Tampermonkey menu showing Create a new script](assets/tampermonkey-menu.png)
 
 The detailed instructions below walk through every step.
 
@@ -147,6 +151,17 @@ The first successful check establishes a baseline, so installing the script whil
 
 ---
 
+# 3A. Phones and tablets
+
+**Yes, Tampermonkey can run on supported phones and tablets**, but the installation route depends on the browser.
+
+- **Android:** use Microsoft Edge or Firefox; standard Chrome for Android does not install extensions.
+- **iPhone/iPad:** Tampermonkey is available for Safari through the App Store.
+
+See the **Mobile and tablet support** section below for the detailed setup and the limitations of background message checking.
+
+---
+
 # 3. Recommended installation: copy and paste
 
 The files in this repository currently end in ordinary **`.js`** rather than **`.user.js`**.
@@ -188,15 +203,20 @@ Click the Tampermonkey icon in your browser toolbar.
 
 If you cannot see the icon, open your browser's extension menu and pin Tampermonkey.
 
-Choose:
+In current Tampermonkey versions, the popup includes:
 
-**Dashboard**
+**Create a new script...**
+
+![Current Tampermonkey menu showing Create a new script](assets/tampermonkey-menu.png)
+
+Click **Create a new script...**.
+
+> [!TIP]
+> You can also open **Dashboard** and create a script from there, but the direct **Create a new script...** menu item is the quickest route.
 
 ---
 
-## Step 4 — Add a new script
-
-In the Tampermonkey Dashboard, click the **+** tab / **Add a new script**.
+## Step 4 — Create the script
 
 Tampermonkey will open its code editor with an example userscript.
 
@@ -273,8 +293,8 @@ Repeat the copy-and-paste process for each file:
 
 1. Open the script on GitHub.
 2. Copy the complete file.
-3. Tampermonkey → **Dashboard**.
-4. **Add a new script**.
+3. Click the Tampermonkey icon.
+4. Choose **Create a new script...**.
 5. Delete the template.
 6. Paste.
 7. Save.
@@ -341,6 +361,159 @@ For notification sound:
 - check your browser/operating-system audio settings if necessary
 
 The script intentionally checks at a modest rate rather than continuously requesting the inbox.
+
+---
+
+# 7A. Mobile and tablet support
+
+**Yes — these userscripts can potentially run on phones and tablets as well as computers.**
+
+The important limitation is that the mobile browser must support Tampermonkey or another compatible userscript manager. Mobile Chrome is **not** the same as desktop Chrome in this respect.
+
+## Android
+
+### Recommended: Microsoft Edge
+
+Microsoft now provides an **Extensions for Mobile** collection for Edge on Android, and **Tampermonkey is one of the extensions offered there**.
+
+1. Install **Microsoft Edge** on the Android phone/tablet.
+2. Install **Tampermonkey** from Edge's mobile extensions collection.
+3. Open Lectio in Edge.
+4. Open Tampermonkey.
+5. Create a new script and paste the Lectio script, just as on desktop.
+6. Reload Lectio.
+
+Official links:
+
+- **[Microsoft Edge — Extensions for Mobile](https://microsoftedge.microsoft.com/addons/collections/mobile_android_extensions)**
+- **[Tampermonkey — official versions / mobile options](https://www.tampermonkey.net/faq.php?q=Q406)**
+
+### Also supported: Firefox for Android
+
+Tampermonkey also has an official **Firefox Android** add-on.
+
+1. Install **Firefox** on Android.
+2. Install Tampermonkey from Mozilla's Android add-on page.
+3. Open Lectio in Firefox.
+4. Add the userscript to Tampermonkey.
+5. Reload Lectio.
+
+Official link:
+
+- **[Tampermonkey for Firefox Android](https://addons.mozilla.org/en-US/android/addon/tampermonkey/)**
+
+### Google Chrome on Android
+
+Standard **Chrome for Android does not install Chrome extensions**.
+
+Google's current Chrome Web Store help states that extensions can only be used on computers, not mobile devices.
+
+So, on Android, use **Edge** or **Firefox** rather than Chrome if you want these Lectio userscripts.
+
+---
+
+## iPhone and iPad
+
+Tampermonkey is available as a **Safari extension/app for iPhone and iPad**.
+
+The current App Store version requires:
+
+- **iOS 15 or later** on iPhone
+- **iPadOS 15 or later** on iPad
+
+Install Tampermonkey from the App Store, enable it for Safari, then open Lectio in Safari and install/add the userscript there.
+
+Official links:
+
+- **[Tampermonkey on the Danish App Store](https://apps.apple.com/dk/app/tampermonkey/id6738342400)**
+- **[Tampermonkey — official versions](https://www.tampermonkey.net/faq.php?q=Q406)**
+
+> [!NOTE]
+> The iPhone/iPad version is an App Store product and may not be free. App Store price and availability can change.
+
+---
+
+## Will these particular Lectio scripts work on mobile?
+
+They are ordinary webpage userscripts rather than desktop applications, so there is no fundamental reason they must be limited to a computer. However, **mobile testing should currently be considered experimental** until each script has been tested on the relevant browser/device.
+
+### English Mode
+
+**Expected to work reasonably well.**
+
+It runs on all Lectio school pages and uses standard Tampermonkey APIs for storage and translation requests.
+
+Potential mobile issues are mainly:
+
+- the **DA / EN** control may need layout adjustments on very narrow screens
+- translated Lectio elements can have different wrapping on mobile
+- the same Google Translate privacy considerations described elsewhere in this README still apply
+
+If you test it successfully on a particular phone/browser combination, please report that in GitHub Issues so confirmed platforms can be documented.
+
+### Chairs Up
+
+**Likely to work, but needs mobile layout testing.**
+
+The underlying logic uses ordinary webpage requests and Lectio's timetable information. The main uncertainty is presentation: Lectio's mobile layout may place lesson elements differently or make the reminder too large/small.
+
+If the logic works but the badge/display looks wrong, use a **Feature / maker idea** or **School compatibility** Issue and include a redacted screenshot.
+
+### Unread Message Notifications
+
+**The unread badge/checking logic should be capable of running on mobile, but this is not a true background push-notification service.**
+
+The current script deliberately checks:
+
+- when a Lectio page loads
+- every 10 minutes **while the Lectio tab is visible**
+- when you return to the Lectio tab after 10 or more minutes
+
+Phones aggressively suspend background browser tabs to save power. Therefore:
+
+> [!IMPORTANT]
+> Do **not** expect this userscript to notify you reliably while the browser is closed, while Lectio has been suspended in the background, or when no Lectio page is open.
+
+When you return to Lectio, the script is designed to notice that the page has become visible again and check if enough time has passed.
+
+The notification chime may also require you to tap/interact with the Lectio page once because mobile browsers apply strict autoplay/audio rules.
+
+So on a phone, think of this script as:
+
+**"Make unread messages obvious whenever I am using Lectio"**
+
+rather than:
+
+**"Replace a native push-notification service even when Lectio is closed."**
+
+---
+
+## Mobile compatibility reports are especially useful
+
+If you try one of the scripts on mobile, a GitHub Issue can help establish a tested compatibility matrix.
+
+Useful information:
+
+```text
+Device: iPhone 15 / Pixel 9 / iPad / etc.
+OS: iOS 19 / Android 17 / etc.
+Browser: Safari / Edge / Firefox
+Browser version:
+Tampermonkey version:
+Script:
+Script version:
+
+Works:
+- ...
+
+Problems:
+- ...
+
+Console errors:
+[redacted output if relevant]
+```
+
+Do not include private Lectio data.
 
 ---
 
@@ -472,7 +645,7 @@ That is expected with some browser/userscript-manager combinations, especially b
 
 Use the recommended manual method:
 
-**copy the entire file → Tampermonkey → Add a new script → paste → save.**
+**copy the entire file → Tampermonkey → **Create a new script...** → paste → save.**
 
 ---
 
@@ -957,6 +1130,8 @@ Lectio-Scripts/
 │       ├── bug-report.yml
 │       ├── school-compatibility.yml
 │       └── feature-maker-idea.yml
+├── assets/
+│   └── tampermonkey-menu.png
 ├── scripts/
 │   ├── Chairs Up.js
 │   ├── English Mode.js
