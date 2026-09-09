@@ -1,10 +1,10 @@
 // ==UserScript==
-// @name         Lectio - Chairs Up Smart Cache
-// @namespace    https://www.lectio.dk/lectio/223/
-// @version      0.8.0
-// @description  Shows a chairs-up reminder when a lesson is the final booking of the day in its room.
-// @match        https://www.lectio.dk/lectio/223/SkemaNy.aspx*
-// @match        https://www.lectio.dk/lectio/223/aktivitet/aktivitetforside2.aspx*
+// @name         Lectio - Chairs Up
+// @namespace    https://www.lectio.dk/
+// @version      1.0.3
+// @description  Shows when a lesson or activity is the final booking of the day in its room. Universal Lectio version.
+// @match        https://www.lectio.dk/lectio/*/SkemaNy.aspx*
+// @match        https://www.lectio.dk/lectio/*/aktivitet/aktivitetforside2.aspx*
 // @grant        none
 // ==/UserScript==
 
@@ -12,45 +12,53 @@
   'use strict';
 
   // =========================================================
+  // SCHOOL
+  // =========================================================
+
+  const schoolMatch =
+    location.pathname.match(/^\/lectio\/(\d+)\//);
+
+  if (!schoolMatch) return;
+
+  const SCHOOL = schoolMatch[1];
+
+  console.info(
+    `[Lectio Chairs Up] v1.0.3 started - school ${SCHOOL}`
+  );
+
+
+  // =========================================================
   // CONFIG
   // =========================================================
 
-  const SCHOOL = '223';
-
-  // Room 100. We only use this page to discover Lectio's room IDs.
-  const ROOM_INDEX_SEED_ID = '1420165716';
-
-  const ROOM_INDEX_URL =
-    `/lectio/${SCHOOL}/SkemaNy.aspx` +
-    `?type=lokale&nosubnav=1&id=${ROOM_INDEX_SEED_ID}&showtype=0`;
-
-  // Future schedules: at most once per day.
   const FUTURE_REFRESH_MS =
     24 * 60 * 60 * 1000;
 
-  // Room-ID list: effectively static.
   const ROOM_MAP_REFRESH_MS =
     30 * 24 * 60 * 60 * 1000;
 
-  // On the actual day, do a fresh verification shortly before class.
-  const SAME_DAY_CHECK_WINDOW_MINUTES = 15;
+  const SAME_DAY_CHECK_WINDOW_MINUTES =
+    15;
 
-  // Don't repeatedly hit Lectio if pages are reopened.
   const SAME_DAY_RECHECK_MS =
     10 * 60 * 1000;
 
-  const LOOKAHEAD_DAYS = 7;
+  const LOOKAHEAD_DAYS =
+    7;
+
+
+  // =========================================================
+  // CACHE
+  // =========================================================
 
   /*
-   * IMPORTANT:
-   * Keep using the v7 cache namespace.
+   * Keep the v1.0.2 cache.
    *
-   * This means updating from the previous script does NOT
-   * unnecessarily throw away all the room schedules that
-   * have already been cached.
+   * Room discovery is now working, so there is no reason
+   * to force Lectio to rediscover all 74 rooms again.
    */
   const CACHE_PREFIX =
-    'lectioChairsUp.v7';
+    `lectioChairsUp.v102.${SCHOOL}`;
 
   const ROOM_MAP_KEY =
     `${CACHE_PREFIX}.roomMap`;
@@ -61,7 +69,11 @@
   const ROOM_WEEK_PREFIX =
     `${CACHE_PREFIX}.roomWeek`;
 
+
+  // =========================================================
   // CSS
+  // =========================================================
+
   const LAST_CLASS =
     'lectio-chairs-up-last';
 
@@ -94,15 +106,12 @@
     const url =
       new URL(location.href);
 
-    // -----------------------------------------
-    // Normal timetable
-    // -----------------------------------------
 
     if (
       url.pathname.endsWith('/SkemaNy.aspx')
     ) {
       /*
-       * Don't decorate actual room timetables.
+       * Do not decorate room schedule pages.
        */
       if (
         url.searchParams.get('type') === 'lokale'
@@ -111,13 +120,9 @@
       }
 
       await runTimetablePage();
-
       return;
     }
 
-    // -----------------------------------------
-    // Lesson / activity page
-    // -----------------------------------------
 
     if (
       url.pathname.endsWith(
@@ -137,27 +142,44 @@
     const lessons =
       getTimetableLessons();
 
+
     if (!lessons.length) {
       console.info(
-        '[Lectio Chairs Up] No timetable lessons found.'
+        '[Lectio Chairs Up] No activities with rooms found.'
       );
 
       return;
     }
 
+
+    console.info(
+      '[Lectio Chairs Up] Room candidates:',
+      uniqueRoomNamesFromLessons(lessons)
+    );
+
+
     const roomMap =
-      await getRoomMap();
+      await getRoomMap(
+        lessons
+      );
+
+
+    console.info(
+      `[Lectio Chairs Up] Room map ready: ${roomMap.size} rooms.`
+    );
+
 
     /*
-     * Instant UI from previously cached room data.
+     * Paint instantly from cached room-week data.
      */
     paintTimetableFromCache(
       lessons,
       roomMap
     );
 
+
     /*
-     * Then quietly refresh stale schedules.
+     * Refresh only data that needs it.
      */
     const jobs =
       buildRefreshPlan(
@@ -165,20 +187,23 @@
         roomMap
       );
 
+
     if (!jobs.length) {
       console.info(
-        '[Lectio Chairs Up] Cached room schedules are fresh.'
+        '[Lectio Chairs Up] Room schedule cache is fresh.'
       );
 
       return;
     }
 
+
     await refreshRoomWeeks(
       jobs
     );
 
+
     /*
-     * Reflect any schedule changes.
+     * Recalculate after fresh room data arrives.
      */
     paintTimetableFromCache(
       lessons,
@@ -193,102 +218,83 @@
         'a.s2skemabrik.s2brik[data-tooltip]'
       )
     ]
-      .map(parseLectioActivity)
+      .map(
+        parseLectioActivity
+      )
       .filter(Boolean);
   }
 
 
   // =========================================================
-  // ACTIVITY / LESSON PAGE
+  // ACTIVITY PAGE
   // =========================================================
 
   async function runActivityPage() {
-    /*
-     * THIS is the important fix.
-     *
-     * Lectio puts the real activity brick in:
-     *
-     * #s_m_Content_Content_tocAndToolbar_actHeader
-     *
-     * and its data-tooltip already contains exact date,
-     * start/end times, and room.
-     *
-     * We no longer try to infer anything from headings.
-     */
-
     const activityBrick =
       document.querySelector(
         '#s_m_Content_Content_tocAndToolbar_actHeader ' +
         'a.s2skemabrik[data-tooltip]'
       ) ||
 
-      /*
-       * Fallback in case Lectio changes the generated ID
-       * but keeps its activity structure.
-       */
       document.querySelector(
         '#homeworkContentContainer ' +
         'a.s2skemabrik[data-tooltip]'
       );
 
+
     if (!activityBrick) {
       console.warn(
-        '[Lectio Chairs Up] Activity-page lesson brick was not found.'
+        '[Lectio Chairs Up] Activity brick not found.'
       );
 
       return;
     }
+
 
     const lesson =
       parseLectioActivity(
         activityBrick
       );
 
+
     if (!lesson) {
       console.warn(
-        '[Lectio Chairs Up] Could not parse activity-page lesson data.',
-        activityBrick.getAttribute('data-tooltip')
+        '[Lectio Chairs Up] Could not parse activity.'
       );
 
       return;
     }
 
-    console.info(
-      '[Lectio Chairs Up] Activity:',
-      lesson
-    );
 
     const roomMap =
-      await getRoomMap();
+      await getRoomMap(
+        [lesson]
+      );
 
-    /*
-     * Display from cache immediately if possible.
-     */
+
     renderActivityStatusFromCache(
       lesson,
       roomMap
     );
 
-    /*
-     * Apply exactly the same conservative refresh policy.
-     */
+
     const jobs =
       buildRefreshPlan(
         [lesson],
         roomMap
       );
 
+
     if (!jobs.length) {
       return;
     }
+
 
     await refreshRoomWeeks(
       jobs
     );
 
-    /*
-     * Re-render after fresh data.
-     */
+
     renderActivityStatusFromCache(
       lesson,
       roomMap
@@ -302,11 +308,13 @@
   ) {
     removeActivityNotice();
 
+
     const statuses =
       calculateLessonRoomStatuses(
         lesson,
         roomMap
       );
+
 
     const lastRooms =
       statuses
@@ -315,16 +323,15 @@
             item.status === 'last'
         )
         .map(
-          item => item.room
+          item =>
+            item.room
         );
 
-    if (!lastRooms.length) {
-      console.info(
-        '[Lectio Chairs Up] This activity is not the last booking in its room.'
-      );
 
+    if (!lastRooms.length) {
       return;
     }
+
 
     createActivityNotice(
       lastRooms
@@ -335,41 +342,38 @@
   function createActivityNotice(
     lastRooms
   ) {
-    /*
-     * The saved page shows that the actual lesson card is:
-     *
-     * <div class="ls-texteditor-paper-container">
-     *   <div id="homeworkContentContainer" class="ls-paper">
-     *
-     * So target that exact element.
-     */
-
     const card =
       document.querySelector(
         '#homeworkContentContainer'
       );
 
+
     if (!card) {
       console.warn(
-        '[Lectio Chairs Up] homeworkContentContainer not found.'
+        '[Lectio Chairs Up] Lesson card not found.'
       );
 
       return;
     }
 
+
     card.style.position =
       'relative';
+
 
     const notice =
       document.createElement(
         'div'
       );
 
+
     notice.className =
       LESSON_NOTICE_CLASS;
 
+
     const roomText =
       lastRooms.join(', ');
+
 
     notice.innerHTML = `
       <div class="lectio-chairs-up-lesson-chair">
@@ -381,6 +385,7 @@
         <span>Last booking in room ${escapeHtml(roomText)}</span>
       </div>
     `;
+
 
     card.appendChild(
       notice
@@ -401,49 +406,39 @@
 
 
   // =========================================================
-  // GENERIC LECTIO ACTIVITY PARSER
+  // ACTIVITY PARSER
   // =========================================================
 
   function parseLectioActivity(
-    el
+    element
   ) {
     const tooltip =
-      el.getAttribute(
+      element.getAttribute(
         'data-tooltip'
       ) || '';
 
-    /*
-     * Example from your actual lesson page:
-     *
-     * 9/9-2026 15:15 til 16:25
-     * Hold: 2i TOK/3
-     * Lærer: Matthew Pilley (MP)
-     * Lokale: 225
-     */
 
     const timed =
       tooltip.match(
         /(\d{1,2})\/(\d{1,2})-(\d{4})\s+(\d{1,2}):(\d{2})\s+til\s+(\d{1,2}):(\d{2})/i
       );
 
+
     if (!timed) {
       return null;
     }
 
-    /*
-     * Supports both:
-     *
-     * Lokale: 225
-     * Lokaler: 100, 103, 104
-     */
+
     const roomsMatch =
       tooltip.match(
         /Lokaler?\s*:\s*([^\n\r]+)/i
       );
 
+
     if (!roomsMatch) {
       return null;
     }
+
 
     const [
       ,
@@ -457,6 +452,7 @@
     ] =
       timed;
 
+
     const rooms =
       roomsMatch[1]
         .split(
@@ -467,9 +463,11 @@
         )
         .filter(Boolean);
 
+
     if (!rooms.length) {
       return null;
     }
+
 
     const dateObj =
       new Date(
@@ -482,13 +480,17 @@
         0
       );
 
+
     return {
-      el,
+      el:
+        element,
 
       rooms,
 
       absid:
-        getAbsId(el),
+        getAbsId(
+          element
+        ),
 
       dateObj,
 
@@ -507,7 +509,1021 @@
 
 
   // =========================================================
-  // CALCULATE STATUS
+  // UNIVERSAL ROOM DISCOVERY
+  // =========================================================
+
+  async function getRoomMap(
+    lessons = []
+  ) {
+    // -------------------------------------------------------
+    // Existing successful cache
+    // -------------------------------------------------------
+
+    const cached =
+      loadCachedRoomMap();
+
+
+    if (cached) {
+      console.info(
+        `[Lectio Chairs Up] Using cached room map: ${cached.size} rooms.`
+      );
+
+      return cached;
+    }
+
+
+    const targetRooms =
+      uniqueRoomNamesFromLessons(
+        lessons
+      );
+
+
+    console.info(
+      `[Lectio Chairs Up] Building universal room map for school ${SCHOOL}.`
+    );
+
+
+    console.info(
+      '[Lectio Chairs Up] Need rooms:',
+      targetRooms
+    );
+
+
+    // -------------------------------------------------------
+    // Current page
+    // -------------------------------------------------------
+
+    const directlyFound =
+      new Map();
+
+
+    discoverRoomLinks(
+      document,
+      directlyFound
+    );
+
+
+    if (
+      directlyFound.size
+    ) {
+      const seed =
+        firstMapValue(
+          directlyFound
+        );
+
+
+      if (seed) {
+        const fullMap =
+          await tryHarvestFullMap(
+            seed
+          );
+
+
+        if (
+          fullMap &&
+          fullMap.size
+        ) {
+          saveRoomMap(
+            fullMap
+          );
+
+          return fullMap;
+        }
+      }
+    }
+
+
+    // -------------------------------------------------------
+    // Activity edit page bootstrap
+    // -------------------------------------------------------
+
+    const seedResult =
+      await discoverSeedFromActivities(
+        lessons
+      );
+
+
+    if (
+      seedResult &&
+      seedResult.roomId
+    ) {
+      console.info(
+        `[Lectio Chairs Up] Resolved seed room ${seedResult.roomName} -> ${seedResult.roomId}`
+      );
+
+
+      const fullMap =
+        await tryHarvestFullMap(
+          seedResult.roomId
+        );
+
+
+      if (
+        fullMap &&
+        fullMap.size
+      ) {
+        console.info(
+          `[Lectio Chairs Up] SUCCESS - harvested ${fullMap.size} rooms.`
+        );
+
+
+        saveRoomMap(
+          fullMap
+        );
+
+
+        return fullMap;
+      }
+    }
+
+
+    // -------------------------------------------------------
+    // Schedule-front-page fallback
+    // -------------------------------------------------------
+
+    const frontPageMap =
+      await tryScheduleFrontPage();
+
+
+    if (
+      frontPageMap.size
+    ) {
+      const seed =
+        firstMapValue(
+          frontPageMap
+        );
+
+
+      if (seed) {
+        const fullMap =
+          await tryHarvestFullMap(
+            seed
+          );
+
+
+        if (
+          fullMap &&
+          fullMap.size
+        ) {
+          saveRoomMap(
+            fullMap
+          );
+
+          return fullMap;
+        }
+      }
+    }
+
+
+    throw new Error(
+      `Could not discover room IDs for Lectio school ${SCHOOL}.`
+    );
+  }
+
+
+  // =========================================================
+  // ACTIVITY EDIT PAGE BOOTSTRAP
+  // =========================================================
+
+  async function discoverSeedFromActivities(
+    lessons
+  ) {
+    const tried =
+      new Set();
+
+
+    const candidates =
+      lessons
+        .filter(
+          lesson =>
+            lesson.absid &&
+            lesson.rooms.length
+        )
+        .slice(
+          0,
+          4
+        );
+
+
+    for (
+      const lesson of candidates
+    ) {
+      if (
+        tried.has(
+          lesson.absid
+        )
+      ) {
+        continue;
+      }
+
+
+      tried.add(
+        lesson.absid
+      );
+
+
+      const url =
+        `/lectio/${SCHOOL}/aktivitet/aktivitetrediger.aspx` +
+        `?action=edit` +
+        `&id=${encodeURIComponent(lesson.absid)}`;
+
+
+      console.info(
+        '[Lectio Chairs Up] Inspecting activity edit page:',
+        {
+          absid:
+            lesson.absid,
+
+          rooms:
+            lesson.rooms
+        }
+      );
+
+
+      try {
+        const doc =
+          await fetchHtml(
+            url
+          );
+
+
+        for (
+          const room of lesson.rooms
+        ) {
+          const roomId =
+            findRoomIdInEditDocument(
+              doc,
+              room
+            );
+
+
+          if (roomId) {
+            return {
+              roomName:
+                room,
+
+              roomId
+            };
+          }
+        }
+
+
+        const rawHtml =
+          doc.documentElement.outerHTML;
+
+
+        for (
+          const room of lesson.rooms
+        ) {
+          const roomId =
+            findRoomIdNearRoomName(
+              rawHtml,
+              room
+            );
+
+
+          if (roomId) {
+            return {
+              roomName:
+                room,
+
+              roomId
+            };
+          }
+        }
+      }
+
+      catch (error) {
+        console.warn(
+          '[Lectio Chairs Up] Could not inspect activity edit page:',
+          error
+        );
+      }
+    }
+
+
+    return null;
+  }
+
+
+  function findRoomIdInEditDocument(
+    doc,
+    targetRoom
+  ) {
+    const wanted =
+      normalizeRoom(
+        targetRoom
+      );
+
+
+    for (
+      const option of doc.querySelectorAll(
+        'option'
+      )
+    ) {
+      const text =
+        normalizeRoom(
+          option.textContent
+        );
+
+
+      if (
+        !roomNamesMatch(
+          text,
+          wanted
+        )
+      ) {
+        continue;
+      }
+
+
+      const id =
+        extractRoomIdFromElement(
+          option
+        );
+
+
+      if (id) {
+        console.info(
+          '[Lectio Chairs Up] Room found on edit control:',
+          wanted,
+          id
+        );
+
+        return id;
+      }
+    }
+
+
+    const elements =
+      doc.querySelectorAll(
+        'input, a, span, div, li, label, [data-value], [data-id]'
+      );
+
+
+    for (
+      const element of elements
+    ) {
+      const text =
+        normalizeRoom(
+          element.textContent
+        );
+
+
+      const value =
+        normalizeRoom(
+          element.getAttribute?.(
+            'value'
+          )
+        );
+
+
+      const smallTextMatch =
+        text &&
+        text.length <= 100 &&
+        roomTextContains(
+          text,
+          wanted
+        );
+
+
+      const valueMatch =
+        value &&
+        value.length <= 100 &&
+        roomTextContains(
+          value,
+          wanted
+        );
+
+
+      if (
+        !smallTextMatch &&
+        !valueMatch
+      ) {
+        continue;
+      }
+
+
+      let id =
+        extractRoomIdFromElement(
+          element
+        );
+
+
+      if (id) {
+        console.info(
+          '[Lectio Chairs Up] Room found on edit control:',
+          wanted,
+          id
+        );
+
+        return id;
+      }
+
+
+      const parent =
+        element.parentElement;
+
+
+      if (parent) {
+        id =
+          extractRoomIdFromElement(
+            parent
+          );
+
+
+        if (id) {
+          return id;
+        }
+      }
+    }
+
+
+    return null;
+  }
+
+
+  function findRoomIdNearRoomName(
+    html,
+    roomName
+  ) {
+    const wanted =
+      String(
+        roomName || ''
+      ).trim();
+
+
+    if (!wanted) {
+      return null;
+    }
+
+
+    const lowerHtml =
+      html.toLowerCase();
+
+
+    const lowerRoom =
+      wanted.toLowerCase();
+
+
+    let startIndex =
+      0;
+
+
+    for (
+      let attempt = 0;
+      attempt < 25;
+      attempt++
+    ) {
+      const index =
+        lowerHtml.indexOf(
+          lowerRoom,
+          startIndex
+        );
+
+
+      if (
+        index === -1
+      ) {
+        break;
+      }
+
+
+      const from =
+        Math.max(
+          0,
+          index - 700
+        );
+
+
+      const to =
+        Math.min(
+          html.length,
+          index +
+          lowerRoom.length +
+          700
+        );
+
+
+      const neighbourhood =
+        html.slice(
+          from,
+          to
+        );
+
+
+      const id =
+        extractRoomIdFromString(
+          neighbourhood,
+          true
+        );
+
+
+      if (id) {
+        return id;
+      }
+
+
+      startIndex =
+        index +
+        lowerRoom.length;
+    }
+
+
+    return null;
+  }
+
+
+  // =========================================================
+  // ROOM ID EXTRACTION
+  // =========================================================
+
+  function extractRoomIdFromElement(
+    element
+  ) {
+    const candidates = [];
+
+
+    if (
+      element.value !== undefined
+    ) {
+      candidates.push(
+        String(
+          element.value || ''
+        )
+      );
+    }
+
+
+    if (
+      element.attributes
+    ) {
+      for (
+        const attr of element.attributes
+      ) {
+        candidates.push(
+          String(
+            attr.value || ''
+          )
+        );
+      }
+    }
+
+
+    const nearbyInputs =
+      element.parentElement
+        ?.querySelectorAll?.(
+          'input[type="hidden"]'
+        ) || [];
+
+
+    for (
+      const input of nearbyInputs
+    ) {
+      candidates.push(
+        String(
+          input.value || ''
+        )
+      );
+
+
+      for (
+        const attr of input.attributes || []
+      ) {
+        candidates.push(
+          String(
+            attr.value || ''
+          )
+        );
+      }
+    }
+
+
+    for (
+      const candidate of candidates
+    ) {
+      const id =
+        extractRoomIdFromString(
+          candidate
+        );
+
+
+      if (id) {
+        return id;
+      }
+    }
+
+
+    return null;
+  }
+
+
+  function extractRoomIdFromString(
+    value,
+    allowLoose = false
+  ) {
+    const text =
+      String(
+        value || ''
+      );
+
+
+    let match =
+      text.match(
+        /\bRO(\d{5,})\b/i
+      );
+
+
+    if (match) {
+      return match[1];
+    }
+
+
+    match =
+      text.match(
+        /anyLectioId\s*=\s*(?:RO)?(\d{5,})/i
+      );
+
+
+    if (match) {
+      return match[1];
+    }
+
+
+    match =
+      text.match(
+        /type\s*=\s*lokale[\s\S]{0,180}?[?&](?:amp;)?id\s*=\s*(\d{5,})/i
+      );
+
+
+    if (match) {
+      return match[1];
+    }
+
+
+    match =
+      text.match(
+        /(?:lokale|lokaleid|room|roomid)\s*[=:]\s*(?:RO)?(\d{5,})/i
+      );
+
+
+    if (match) {
+      return match[1];
+    }
+
+
+    match =
+      text.match(
+        /value\s*=\s*["'](?:RO)(\d{5,})["']/i
+      );
+
+
+    if (match) {
+      return match[1];
+    }
+
+
+    if (allowLoose) {
+      match =
+        text.match(
+          /(?:value|data-value|data-id)\s*=\s*["'](\d{5,})["']/i
+        );
+
+
+      if (match) {
+        return match[1];
+      }
+    }
+
+
+    return null;
+  }
+
+
+  // =========================================================
+  // ROOM PAGE
+  // =========================================================
+
+  async function tryHarvestFullMap(
+    seedRoomId
+  ) {
+    try {
+      console.info(
+        '[Lectio Chairs Up] Opening seed room timetable:',
+        seedRoomId
+      );
+
+
+      const map =
+        await harvestFullRoomMap(
+          seedRoomId
+        );
+
+
+      if (
+        map.size
+      ) {
+        return map;
+      }
+    }
+
+    catch (error) {
+      console.warn(
+        '[Lectio Chairs Up] Could not harvest room map:',
+        error
+      );
+    }
+
+
+    return null;
+  }
+
+
+  async function harvestFullRoomMap(
+    seedRoomId
+  ) {
+    const url =
+      `/lectio/${SCHOOL}/SkemaNy.aspx` +
+      `?type=lokale` +
+      `&nosubnav=1` +
+      `&id=${encodeURIComponent(seedRoomId)}` +
+      `&showtype=0`;
+
+
+    const doc =
+      await fetchHtml(
+        url
+      );
+
+
+    const map =
+      new Map();
+
+
+    const table =
+      doc.querySelector(
+        '[id$="_linkTable"]'
+      );
+
+
+    if (table) {
+      for (
+        const link of table.querySelectorAll(
+          'a[href*="type=lokale"]'
+        )
+      ) {
+        addRoomLinkToMap(
+          link,
+          map
+        );
+      }
+    }
+
+
+    if (
+      map.size < 2
+    ) {
+      discoverRoomLinks(
+        doc,
+        map
+      );
+    }
+
+
+    console.info(
+      `[Lectio Chairs Up] Room timetable exposed ${map.size} room links.`
+    );
+
+
+    return map;
+  }
+
+
+  function discoverRoomLinks(
+    doc,
+    map
+  ) {
+    for (
+      const link of doc.querySelectorAll(
+        'a[href*="SkemaNy.aspx"][href*="type=lokale"]'
+      )
+    ) {
+      addRoomLinkToMap(
+        link,
+        map
+      );
+    }
+  }
+
+
+  function addRoomLinkToMap(
+    link,
+    map
+  ) {
+    const roomName =
+      normalizeRoom(
+        link.textContent
+      );
+
+
+    if (
+      !roomName ||
+      roomName.length > 80
+    ) {
+      return;
+    }
+
+
+    try {
+      const url =
+        new URL(
+          link.getAttribute(
+            'href'
+          ),
+          location.origin
+        );
+
+
+      if (
+        url.searchParams.get(
+          'type'
+        ) !== 'lokale'
+      ) {
+        return;
+      }
+
+
+      const id =
+        url.searchParams.get(
+          'id'
+        );
+
+
+      if (id) {
+        map.set(
+          roomName,
+          id
+        );
+      }
+    }
+
+    catch (_) {}
+  }
+
+
+  // =========================================================
+  // SCHEDULE FRONT PAGE FALLBACK
+  // =========================================================
+
+  async function tryScheduleFrontPage() {
+    const map =
+      new Map();
+
+
+    const url =
+      `/lectio/${SCHOOL}/SkemaForside/SkemaForside.aspx`;
+
+
+    try {
+      const doc =
+        await fetchHtml(
+          url
+        );
+
+
+      discoverRoomLinks(
+        doc,
+        map
+      );
+
+
+      for (
+        const option of doc.querySelectorAll(
+          'select option'
+        )
+      ) {
+        const text =
+          normalizeRoom(
+            option.textContent
+          );
+
+
+        if (!text) {
+          continue;
+        }
+
+
+        const id =
+          extractRoomIdFromElement(
+            option
+          );
+
+
+        if (id) {
+          map.set(
+            text,
+            id
+          );
+        }
+      }
+    }
+
+    catch (_) {}
+
+
+    return map;
+  }
+
+
+  // =========================================================
+  // ROOM MAP CACHE
+  // =========================================================
+
+  function loadCachedRoomMap() {
+    try {
+      const data =
+        JSON.parse(
+          localStorage.getItem(
+            ROOM_MAP_KEY
+          ) || 'null'
+        );
+
+
+      const fetchedAt =
+        Number(
+          localStorage.getItem(
+            ROOM_MAP_TIME_KEY
+          ) || 0
+        );
+
+
+      if (
+        !data ||
+        !Object.keys(
+          data
+        ).length
+      ) {
+        return null;
+      }
+
+
+      if (
+        Date.now() -
+        fetchedAt >=
+        ROOM_MAP_REFRESH_MS
+      ) {
+        return null;
+      }
+
+
+      return new Map(
+        Object.entries(
+          data
+        )
+      );
+    }
+
+    catch (_) {
+      return null;
+    }
+  }
+
+
+  function saveRoomMap(
+    map
+  ) {
+    try {
+      localStorage.setItem(
+        ROOM_MAP_KEY,
+
+        JSON.stringify(
+          Object.fromEntries(
+            map
+          )
+        )
+      );
+
+
+      localStorage.setItem(
+        ROOM_MAP_TIME_KEY,
+
+        String(
+          Date.now()
+        )
+      );
+    }
+
+    catch (error) {
+      console.warn(
+        '[Lectio Chairs Up] Could not save room map:',
+        error
+      );
+    }
+  }
+
+
+  // =========================================================
+  // LAST-BOOKING LOGIC
   // =========================================================
 
   function calculateLessonRoomStatuses(
@@ -516,22 +1532,28 @@
   ) {
     const statuses = [];
 
+
     for (
       const room of lesson.rooms
     ) {
       const roomId =
         roomMap.get(
-          normalizeRoom(room)
+          normalizeRoom(
+            room
+          )
         );
+
 
       if (!roomId) {
         statuses.push({
           room,
-          status: 'unknown'
+          status:
+            'unknown'
         });
 
         continue;
       }
+
 
       const {
         isoWeek,
@@ -541,6 +1563,7 @@
           lesson.dateObj
         );
 
+
       const cache =
         getRoomWeekCache(
           roomId,
@@ -548,55 +1571,102 @@
           isoYear
         );
 
+
       if (!cache) {
         statuses.push({
           room,
-          status: 'unknown'
+          status:
+            'unknown'
         });
 
         continue;
       }
+
 
       const bookings =
         cache.days?.[
           lesson.isoDate
         ] || [];
 
-      const laterBookingExists =
+
+      /*
+       * -----------------------------------------------------
+       * v1.0.3
+       *
+       * Ask:
+       *
+       * "After ignoring this activity itself, is there any
+       * other booking whose occupancy continues beyond the
+       * end of this activity?"
+       *
+       * This handles ordinary lessons, meetings, trips,
+       * odd-length events and overlapping bookings.
+       * -----------------------------------------------------
+       */
+
+      const laterOccupancyExists =
         bookings.some(
           booking => {
 
             /*
-             * Ignore the lesson itself.
+             * Strongest self-match:
+             * same Lectio activity ID.
              */
             if (
               lesson.absid &&
               booking.absid &&
-              lesson.absid === booking.absid
+              lesson.absid ===
+                booking.absid
             ) {
               return false;
             }
 
+
             /*
-             * Someone starts using the room after
-             * this lesson ends.
+             * Defensive self-match.
+             *
+             * Lectio occasionally represents special
+             * activities differently between teacher and
+             * room timetables.
+             *
+             * If the start/end pair is identical, treat it
+             * as the same occupancy rather than allowing an
+             * ID mismatch to disqualify the lesson.
+             */
+            const sameTime =
+              booking.startMinutes ===
+                lesson.startMinutes &&
+              booking.endMinutes ===
+                lesson.endMinutes;
+
+
+            if (sameTime) {
+              return false;
+            }
+
+
+            /*
+             * If another booking continues beyond us,
+             * this is not the final occupancy.
              */
             return (
-              booking.startMinutes >=
+              booking.endMinutes >
               lesson.endMinutes
             );
           }
         );
 
+
       statuses.push({
         room,
 
         status:
-          laterBookingExists
+          laterOccupancyExists
             ? 'later'
             : 'last'
       });
     }
+
 
     return statuses;
   }
@@ -619,6 +1689,7 @@
           roomMap
         );
 
+
       decorateTimetableLesson(
         lesson.el,
         statuses
@@ -628,13 +1699,10 @@
 
 
   function decorateTimetableLesson(
-    el,
+    element,
     statuses
   ) {
-    /*
-     * Clean previous pass.
-     */
-    el
+    element
       .querySelectorAll(
         `.${ICON_CLASS}`
       )
@@ -643,47 +1711,57 @@
           node.remove()
       );
 
-    el.classList.remove(
+
+    element.classList.remove(
       LAST_CLASS
     );
+
 
     const lastRooms =
       statuses
         .filter(
           item =>
-            item.status === 'last'
+            item.status ===
+            'last'
         )
         .map(
           item =>
             item.room
         );
+
 
     const unknownRooms =
       statuses
         .filter(
           item =>
-            item.status === 'unknown'
+            item.status ===
+            'unknown'
         )
         .map(
           item =>
             item.room
         );
 
+
     if (!lastRooms.length) {
       return;
     }
 
-    el.classList.add(
+
+    element.classList.add(
       LAST_CLASS
     );
+
 
     const icon =
       document.createElement(
         'div'
       );
 
+
     icon.className =
       ICON_CLASS;
+
 
     const tooltip =
       buildTooltip(
@@ -691,20 +1769,24 @@
         unknownRooms
       );
 
+
     icon.setAttribute(
       'title',
       tooltip
     );
+
 
     icon.setAttribute(
       'aria-label',
       tooltip
     );
 
+
     icon.innerHTML =
       sideChairSvg();
 
-    el.appendChild(
+
+    element.appendChild(
       icon
     );
   }
@@ -715,7 +1797,8 @@
     unknownRooms
   ) {
     let text =
-      `CHAIRS UP — Last booking in ${lastRooms.join(', ')}`;
+      `CHAIRS UP - Last booking in ${lastRooms.join(', ')}`;
+
 
     if (
       unknownRooms.length
@@ -724,12 +1807,13 @@
         `\nCould not verify: ${unknownRooms.join(', ')}`;
     }
 
+
     return text;
   }
 
 
   // =========================================================
-  // REFRESH POLICY
+  // REFRESH
   // =========================================================
 
   function buildRefreshPlan(
@@ -739,8 +1823,10 @@
     const now =
       new Date();
 
+
     const jobs =
       new Map();
+
 
     for (
       const lesson of lessons
@@ -751,28 +1837,36 @@
           now
         );
 
-      /*
-       * Ignore old activities and dates outside our
-       * small look-ahead window.
-       */
+
       if (
         daysAway < 0 ||
-        daysAway > LOOKAHEAD_DAYS
+        daysAway >
+          LOOKAHEAD_DAYS
       ) {
         continue;
       }
+
 
       for (
         const room of lesson.rooms
       ) {
         const roomId =
           roomMap.get(
-            normalizeRoom(room)
+            normalizeRoom(
+              room
+            )
           );
 
+
         if (!roomId) {
+          console.warn(
+            '[Lectio Chairs Up] Room unresolved:',
+            room
+          );
+
           continue;
         }
+
 
         const {
           isoWeek,
@@ -782,8 +1876,10 @@
             lesson.dateObj
           );
 
+
         const key =
           `${roomId}|${isoYear}|${isoWeek}`;
+
 
         const cache =
           getRoomWeekCache(
@@ -791,6 +1887,7 @@
             isoWeek,
             isoYear
           );
+
 
         const cacheAge =
           cache
@@ -800,30 +1897,28 @@
               )
             : Infinity;
 
+
         let shouldRefresh =
           false;
+
 
         let reason =
           '';
 
-        // -------------------------------------
-        // Future days: once daily
-        // -------------------------------------
 
         if (
           daysAway > 0 &&
-          cacheAge >= FUTURE_REFRESH_MS
+          cacheAge >=
+            FUTURE_REFRESH_MS
         ) {
           shouldRefresh =
             true;
+
 
           reason =
             'daily-future-refresh';
         }
 
-        // -------------------------------------
-        // Today
-        // -------------------------------------
 
         if (
           daysAway === 0
@@ -832,29 +1927,26 @@
             (
               lesson.dateObj.getTime() -
               now.getTime()
-            ) / 60000;
+            ) /
+            60000;
+
 
           const nearClass =
             minutesUntilClass <=
               SAME_DAY_CHECK_WINDOW_MINUTES &&
-            minutesUntilClass >= -5;
+            minutesUntilClass >=
+              -5;
 
-          /*
-           * No data at all:
-           * fetch one copy.
-           */
+
           if (!cache) {
             shouldRefresh =
               true;
+
 
             reason =
               'missing-today-cache';
           }
 
-          /*
-           * Data exists:
-           * only force a check as the lesson approaches.
-           */
           else if (
             nearClass &&
             cacheAge >=
@@ -863,21 +1955,22 @@
             shouldRefresh =
               true;
 
+
             reason =
               'near-class-check';
           }
         }
 
-        /*
-         * A room/week is fetched only once even if several
-         * lessons use it.
-         */
+
         if (
           shouldRefresh &&
-          !jobs.has(key)
+          !jobs.has(
+            key
+          )
         ) {
           jobs.set(
             key,
+
             {
               roomId,
               isoWeek,
@@ -889,6 +1982,7 @@
       }
     }
 
+
     return [
       ...jobs.values()
     ];
@@ -896,16 +1990,20 @@
 
 
   // =========================================================
-  // ROOM DATA FETCH
+  // FETCH ROOM SCHEDULES
   // =========================================================
 
   async function refreshRoomWeeks(
     jobs
   ) {
     console.info(
-      '[Lectio Chairs Up] Refreshing room data:',
-      jobs
+      '[Lectio Chairs Up] Refreshing:',
+      jobs.map(
+        job =>
+          `${job.roomId} (${job.reason})`
+      )
     );
+
 
     await Promise.all(
       jobs.map(
@@ -917,6 +2015,7 @@
                 job.isoWeek,
                 job.isoYear
               );
+
 
             saveRoomWeekCache(
               job.roomId,
@@ -952,10 +2051,15 @@
       `&week=${isoWeek}${isoYear}` +
       `&showtype=0`;
 
+
     const doc =
-      await fetchHtml(url);
+      await fetchHtml(
+        url
+      );
+
 
     const days = {};
+
 
     for (
       const cell of doc.querySelectorAll(
@@ -967,9 +2071,11 @@
           'data-date'
         );
 
+
       if (!isoDate) {
         continue;
       }
+
 
       const bookings =
         [
@@ -982,9 +2088,11 @@
           )
           .filter(Boolean);
 
+
       days[isoDate] =
         bookings;
     }
+
 
     return {
       fetchedAt:
@@ -996,149 +2104,54 @@
 
 
   function parseRoomBooking(
-    el
+    element
   ) {
     const tooltip =
-      el.getAttribute(
+      element.getAttribute(
         'data-tooltip'
       ) || '';
+
 
     const timed =
       tooltip.match(
         /(\d{1,2})\/(\d{1,2})-(\d{4})\s+(\d{1,2}):(\d{2})\s+til\s+(\d{1,2}):(\d{2})/i
       );
 
+
     if (!timed) {
       return null;
     }
 
+
     return {
       absid:
-        getAbsId(el),
+        getAbsId(
+          element
+        ),
 
       startMinutes:
-        Number(timed[4]) * 60 +
-        Number(timed[5]),
+        Number(
+          timed[4]
+        ) *
+        60 +
+        Number(
+          timed[5]
+        ),
 
       endMinutes:
-        Number(timed[6]) * 60 +
-        Number(timed[7])
+        Number(
+          timed[6]
+        ) *
+        60 +
+        Number(
+          timed[7]
+        )
     };
   }
 
 
   // =========================================================
-  // ROOM MAP
-  // =========================================================
-
-  async function getRoomMap() {
-    try {
-      const cached =
-        JSON.parse(
-          localStorage.getItem(
-            ROOM_MAP_KEY
-          ) || 'null'
-        );
-
-      const cachedAt =
-        Number(
-          localStorage.getItem(
-            ROOM_MAP_TIME_KEY
-          ) || 0
-        );
-
-      if (
-        cached &&
-        Date.now() - cachedAt <
-          ROOM_MAP_REFRESH_MS
-      ) {
-        return new Map(
-          Object.entries(
-            cached
-          )
-        );
-      }
-    }
-
-    catch (_) {
-      // Fall through and rebuild map.
-    }
-
-    const doc =
-      await fetchHtml(
-        ROOM_INDEX_URL
-      );
-
-    const map =
-      new Map();
-
-    for (
-      const link of doc.querySelectorAll(
-        'a[href*="SkemaNy.aspx?type=lokale"]'
-      )
-    ) {
-      const roomName =
-        normalizeRoom(
-          link.textContent
-        );
-
-      if (!roomName) {
-        continue;
-      }
-
-      const roomUrl =
-        new URL(
-          link.href,
-          location.origin
-        );
-
-      const roomId =
-        roomUrl.searchParams.get(
-          'id'
-        );
-
-      if (roomId) {
-        map.set(
-          roomName,
-          roomId
-        );
-      }
-    }
-
-    if (!map.size) {
-      throw new Error(
-        'Could not discover Lectio room IDs.'
-      );
-    }
-
-    try {
-      localStorage.setItem(
-        ROOM_MAP_KEY,
-        JSON.stringify(
-          Object.fromEntries(
-            map
-          )
-        )
-      );
-
-      localStorage.setItem(
-        ROOM_MAP_TIME_KEY,
-        String(
-          Date.now()
-        )
-      );
-    }
-
-    catch (_) {
-      // Caching failure isn't fatal.
-    }
-
-    return map;
-  }
-
-
-  // =========================================================
-  // ROOM CACHE
+  // ROOM-WEEK CACHE
   // =========================================================
 
   function roomWeekCacheKey(
@@ -1200,7 +2213,7 @@
 
     catch (error) {
       console.warn(
-        '[Lectio Chairs Up] Cache write failed:',
+        '[Lectio Chairs Up] Room cache write failed:',
         error
       );
     }
@@ -1208,7 +2221,365 @@
 
 
   // =========================================================
-  // CHAIR ICON
+  // GENERIC HELPERS
+  // =========================================================
+
+  function uniqueRoomNamesFromLessons(
+    lessons
+  ) {
+    return [
+      ...new Set(
+        lessons.flatMap(
+          lesson =>
+            lesson.rooms.map(
+              normalizeRoom
+            )
+        )
+      )
+    ];
+  }
+
+
+  function firstMapValue(
+    map
+  ) {
+    for (
+      const value of map.values()
+    ) {
+      if (value) {
+        return value;
+      }
+    }
+
+
+    return null;
+  }
+
+
+  function roomNamesMatch(
+    a,
+    b
+  ) {
+    return (
+      normalizeRoom(a)
+        .toLowerCase() ===
+      normalizeRoom(b)
+        .toLowerCase()
+    );
+  }
+
+
+  function roomTextContains(
+    text,
+    room
+  ) {
+    const haystack =
+      normalizeRoom(
+        text
+      ).toLowerCase();
+
+
+    const needle =
+      normalizeRoom(
+        room
+      ).toLowerCase();
+
+
+    if (
+      !haystack ||
+      !needle
+    ) {
+      return false;
+    }
+
+
+    if (
+      haystack ===
+      needle
+    ) {
+      return true;
+    }
+
+
+    const escaped =
+      escapeRegex(
+        needle
+      );
+
+
+    return new RegExp(
+      `(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`,
+      'i'
+    ).test(
+      haystack
+    );
+  }
+
+
+  function escapeRegex(
+    value
+  ) {
+    return String(
+      value
+    ).replace(
+      /[.*+?^${}()|[\]\\]/g,
+      '\\$&'
+    );
+  }
+
+
+  async function fetchHtml(
+    url
+  ) {
+    const response =
+      await fetch(
+        url,
+
+        {
+          method:
+            'GET',
+
+          credentials:
+            'include',
+
+          cache:
+            'no-store',
+
+          headers: {
+            Accept:
+              'text/html,application/xhtml+xml'
+          }
+        }
+      );
+
+
+    if (
+      !response.ok
+    ) {
+      throw new Error(
+        `HTTP ${response.status} loading ${url}`
+      );
+    }
+
+
+    const html =
+      await response.text();
+
+
+    return new DOMParser()
+      .parseFromString(
+        html,
+        'text/html'
+      );
+  }
+
+
+  function getAbsId(
+    element
+  ) {
+    const href =
+      element.getAttribute(
+        'href'
+      ) || '';
+
+
+    const hrefMatch =
+      href.match(
+        /[?&]absid=(\d+)/i
+      );
+
+
+    if (
+      hrefMatch
+    ) {
+      return hrefMatch[1];
+    }
+
+
+    const brik =
+      element.getAttribute(
+        'data-brikid'
+      ) || '';
+
+
+    const brikMatch =
+      brik.match(
+        /ABS(\d+)/i
+      );
+
+
+    if (
+      brikMatch
+    ) {
+      return brikMatch[1];
+    }
+
+
+    return (
+      new URL(
+        location.href
+      )
+        .searchParams
+        .get(
+          'absid'
+        )
+    );
+  }
+
+
+  function normalizeRoom(
+    value
+  ) {
+    return String(
+      value || ''
+    )
+      .replace(
+        /\u00a0/g,
+        ' '
+      )
+      .trim()
+      .replace(
+        /\s+/g,
+        ' '
+      );
+  }
+
+
+  function pad2(
+    value
+  ) {
+    return String(
+      value
+    )
+      .padStart(
+        2,
+        '0'
+      );
+  }
+
+
+  function startOfDay(
+    date
+  ) {
+    return new Date(
+      date.getFullYear(),
+      date.getMonth(),
+      date.getDate(),
+      0,
+      0,
+      0,
+      0
+    );
+  }
+
+
+  function differenceInCalendarDays(
+    a,
+    b
+  ) {
+    return Math.round(
+      (
+        startOfDay(
+          a
+        ).getTime() -
+        startOfDay(
+          b
+        ).getTime()
+      ) /
+      86400000
+    );
+  }
+
+
+  function getISOWeek(
+    date
+  ) {
+    const d =
+      new Date(
+        Date.UTC(
+          date.getFullYear(),
+          date.getMonth(),
+          date.getDate()
+        )
+      );
+
+
+    const dayNumber =
+      d.getUTCDay() || 7;
+
+
+    d.setUTCDate(
+      d.getUTCDate() +
+      4 -
+      dayNumber
+    );
+
+
+    const isoYear =
+      d.getUTCFullYear();
+
+
+    const yearStart =
+      new Date(
+        Date.UTC(
+          isoYear,
+          0,
+          1
+        )
+      );
+
+
+    const isoWeek =
+      Math.ceil(
+        (
+          (
+            d -
+            yearStart
+          ) /
+          86400000 +
+          1
+        ) /
+        7
+      );
+
+
+    return {
+      isoWeek,
+      isoYear
+    };
+  }
+
+
+  function escapeHtml(
+    value
+  ) {
+    return String(
+      value
+    ).replace(
+      /[&<>'"]/g,
+
+      character => ({
+        '&':
+          '&amp;',
+
+        '<':
+          '&lt;',
+
+        '>':
+          '&gt;',
+
+        "'":
+          '&#39;',
+
+        '"':
+          '&quot;'
+      }[character])
+    );
+  }
+
+
+  // =========================================================
+  // CHAIR
   // =========================================================
 
   function sideChairSvg() {
@@ -1218,35 +2589,20 @@
         aria-hidden="true"
         focusable="false"
       >
-
-        <!-- tall back -->
         <path d="M7 4v9"></path>
-
-        <!-- back top -->
         <path d="M7 4h3"></path>
-
-        <!-- upper seat -->
         <path d="M7 13h10"></path>
-
-        <!-- lower / thickness of seat -->
         <path d="M7 15.5h10"></path>
-
-        <!-- front of seat -->
         <path d="M17 13v2.5"></path>
-
-        <!-- rear leg -->
         <path d="M8.5 15.5 7 20"></path>
-
-        <!-- front leg -->
         <path d="M15.5 15.5 17 20"></path>
-
       </svg>
     `;
   }
 
 
   // =========================================================
-  // STYLE
+  // STYLES
   // =========================================================
 
   function injectStyles() {
@@ -1255,21 +2611,22 @@
         'style'
       );
 
-    style.textContent = `
 
-      /* =====================================================
-         TIMETABLE BADGE
-         ===================================================== */
+    style.textContent = `
 
       a.s2skemabrik.s2brik {
         overflow:
           visible !important;
       }
 
+
       .${LAST_CLASS} {
         z-index:
           25 !important;
       }
+
+
+      /* TIMETABLE BADGE */
 
       .${ICON_CLASS} {
         position:
@@ -1340,6 +2697,7 @@
           filter 180ms ease;
       }
 
+
       .${ICON_CLASS}:hover {
         transform:
           scale(1.20);
@@ -1353,6 +2711,7 @@
         filter:
           brightness(1.04);
       }
+
 
       .${ICON_CLASS} svg {
         width:
@@ -1381,18 +2740,12 @@
       }
 
 
-      /* =====================================================
-         LESSON PAGE NOTICE
-         ===================================================== */
+      /* ACTIVITY PAGE BANNER */
 
       .${LESSON_NOTICE_CLASS} {
         position:
           absolute;
 
-        /*
-         * There is unused space at the upper right of
-         * homeworkContentContainer.
-         */
         top:
           18px;
 
@@ -1456,9 +2809,7 @@
           box-shadow 180ms ease;
       }
 
-      /*
-       * A little bit of the same dock feel.
-       */
+
       .${LESSON_NOTICE_CLASS}:hover {
         transform:
           scale(1.06);
@@ -1503,12 +2854,12 @@
 
         border:
           2px solid
-            rgba(
-              255,
-              255,
-              255,
-              0.95
-            );
+          rgba(
+            255,
+            255,
+            255,
+            0.95
+          );
       }
 
 
@@ -1586,10 +2937,6 @@
       }
 
 
-      /* =====================================================
-         MOBILE
-         ===================================================== */
-
       @media (
         max-width: 700px
       ) {
@@ -1637,251 +2984,14 @@
             );
 
           margin:
-            10px 10px 12px
-            auto;
+            10px 10px 12px auto;
         }
       }
     `;
 
+
     document.head.appendChild(
       style
-    );
-  }
-
-
-  // =========================================================
-  // HELPERS
-  // =========================================================
-
-  async function fetchHtml(
-    url
-  ) {
-    const response =
-      await fetch(
-        url,
-        {
-          method:
-            'GET',
-
-          credentials:
-            'include',
-
-          cache:
-            'no-store',
-
-          headers: {
-            Accept:
-              'text/html,application/xhtml+xml'
-          }
-        }
-      );
-
-    if (!response.ok) {
-      throw new Error(
-        `HTTP ${response.status} loading ${url}`
-      );
-    }
-
-    const html =
-      await response.text();
-
-    return new DOMParser()
-      .parseFromString(
-        html,
-        'text/html'
-      );
-  }
-
-
-  function getAbsId(
-    el
-  ) {
-    /*
-     * Room timetable uses a URL with absid.
-     */
-    const href =
-      el.getAttribute(
-        'href'
-      ) || '';
-
-    const hrefMatch =
-      href.match(
-        /[?&]absid=(\d+)/i
-      );
-
-    if (hrefMatch) {
-      return hrefMatch[1];
-    }
-
-    /*
-     * Activity page gives us:
-     *
-     * data-brikid="ABS81909264901"
-     */
-    const brik =
-      el.getAttribute(
-        'data-brikid'
-      ) || '';
-
-    const brikMatch =
-      brik.match(
-        /ABS(\d+)/i
-      );
-
-    if (brikMatch) {
-      return brikMatch[1];
-    }
-
-    /*
-     * Final fallback: activity URL itself.
-     */
-    return (
-      new URL(
-        location.href
-      )
-        .searchParams
-        .get('absid')
-    );
-  }
-
-
-  function normalizeRoom(
-    value
-  ) {
-    return String(
-      value || ''
-    )
-      .replace(
-        /\u00a0/g,
-        ' '
-      )
-      .trim()
-      .replace(
-        /\s+/g,
-        ' '
-      );
-  }
-
-
-  function pad2(
-    value
-  ) {
-    return String(
-      value
-    )
-      .padStart(
-        2,
-        '0'
-      );
-  }
-
-
-  function startOfDay(
-    date
-  ) {
-    return new Date(
-      date.getFullYear(),
-      date.getMonth(),
-      date.getDate(),
-      0,
-      0,
-      0,
-      0
-    );
-  }
-
-
-  function differenceInCalendarDays(
-    a,
-    b
-  ) {
-    return Math.round(
-      (
-        startOfDay(a).getTime() -
-        startOfDay(b).getTime()
-      ) /
-      86400000
-    );
-  }
-
-
-  function getISOWeek(
-    date
-  ) {
-    const d =
-      new Date(
-        Date.UTC(
-          date.getFullYear(),
-          date.getMonth(),
-          date.getDate()
-        )
-      );
-
-    const dayNumber =
-      d.getUTCDay() || 7;
-
-    d.setUTCDate(
-      d.getUTCDate() +
-      4 -
-      dayNumber
-    );
-
-    const isoYear =
-      d.getUTCFullYear();
-
-    const yearStart =
-      new Date(
-        Date.UTC(
-          isoYear,
-          0,
-          1
-        )
-      );
-
-    const isoWeek =
-      Math.ceil(
-        (
-          (
-            d -
-            yearStart
-          ) /
-          86400000 +
-          1
-        ) /
-        7
-      );
-
-    return {
-      isoWeek,
-      isoYear
-    };
-  }
-
-
-  function escapeHtml(
-    value
-  ) {
-    return String(
-      value
-    ).replace(
-      /[&<>'"]/g,
-
-      character => ({
-        '&':
-          '&amp;',
-
-        '<':
-          '&lt;',
-
-        '>':
-          '&gt;',
-
-        "'":
-          '&#39;',
-
-        '"':
-          '&quot;'
-      }[character])
     );
   }
 
