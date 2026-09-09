@@ -10,7 +10,7 @@ The scripts are ordinary JavaScript files that run **in your own browser** while
 |---|---|---|---|
 | **[Chairs Up](scripts/Chairs%20Up.js)** | Marks lessons that are the **last booking of the day in their room**, so the teacher knows when chairs should be put up. | Teachers | Currently configured for school ID **223** |
 | **[English Mode](scripts/English%20Mode.js)** | Adds a **DA / EN** switch to Lectio and translates the interface into context-aware English. | Students and staff | All Lectio schools |
-| **[Unread Message Notifications](scripts/Unread%20Message%20Notifications.js)** | Shows unread Lectio messages beside **Beskeder / Messages** and plays a soft Lectio chime when the unread count increases. | Students and staff | Currently configured for school ID **223** |
+| **[Unread Message Notifications](scripts/Unread%20Message%20Notifications.js)** | Shows unread Lectio messages beside **Beskeder / Messages** and plays a soft Lectio chime when the unread count increases. | Students and staff | All Lectio schools |
 
 You can install **one, two, or all three**. They are independent scripts.
 
