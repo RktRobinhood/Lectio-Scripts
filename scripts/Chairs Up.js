@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Lectio - Chairs Up
 // @namespace    https://www.lectio.dk/
-// @version      1.0.3
-// @description  Shows when a lesson or activity is the final booking of the day in its room. Universal Lectio version.
+// @version      1.0.4
+// @description  Shows when a lesson is the final active booking of the day in its room. Universal Lectio version.
 // @match        https://www.lectio.dk/lectio/*/SkemaNy.aspx*
 // @match        https://www.lectio.dk/lectio/*/aktivitet/aktivitetforside2.aspx*
 // @grant        none
@@ -10,6 +10,7 @@
 
 (() => {
   'use strict';
+
 
   // =========================================================
   // SCHOOL
@@ -20,10 +21,11 @@
 
   if (!schoolMatch) return;
 
-  const SCHOOL = schoolMatch[1];
+  const SCHOOL =
+    schoolMatch[1];
 
   console.info(
-    `[Lectio Chairs Up] v1.0.3 started - school ${SCHOOL}`
+    `[Lectio Chairs Up] v1.0.4 started - school ${SCHOOL}`
   );
 
 
@@ -52,26 +54,34 @@
   // =========================================================
 
   /*
-   * Keep the v1.0.2 cache.
+   * IMPORTANT:
    *
-   * Room discovery is now working, so there is no reason
-   * to force Lectio to rediscover all 74 rooms again.
+   * Keep the room map discovered successfully by v1.0.2/1.0.3.
+   * That avoids rediscovering all 74 rooms.
    */
-  const CACHE_PREFIX =
+  const ROOM_MAP_PREFIX =
     `lectioChairsUp.v102.${SCHOOL}`;
 
   const ROOM_MAP_KEY =
-    `${CACHE_PREFIX}.roomMap`;
+    `${ROOM_MAP_PREFIX}.roomMap`;
 
   const ROOM_MAP_TIME_KEY =
-    `${CACHE_PREFIX}.roomMapTime`;
+    `${ROOM_MAP_PREFIX}.roomMapTime`;
 
+
+  /*
+   * NEW v1.0.4 room-week cache.
+   *
+   * We intentionally do NOT reuse the previous schedule cache,
+   * because it may contain cancelled bookings that were parsed
+   * before cancellation-awareness was added.
+   */
   const ROOM_WEEK_PREFIX =
-    `${CACHE_PREFIX}.roomWeek`;
+    `lectioChairsUp.v104.${SCHOOL}.roomWeek`;
 
 
   // =========================================================
-  // CSS
+  // CSS CLASSES
   // =========================================================
 
   const LAST_CLASS =
@@ -107,11 +117,15 @@
       new URL(location.href);
 
 
+    // ---------------------------------------------------------
+    // Normal timetable
+    // ---------------------------------------------------------
+
     if (
       url.pathname.endsWith('/SkemaNy.aspx')
     ) {
       /*
-       * Do not decorate room schedule pages.
+       * Never decorate a room timetable itself.
        */
       if (
         url.searchParams.get('type') === 'lokale'
@@ -120,9 +134,14 @@
       }
 
       await runTimetablePage();
+
       return;
     }
 
+
+    // ---------------------------------------------------------
+    // Individual lesson/activity page
+    // ---------------------------------------------------------
 
     if (
       url.pathname.endsWith(
@@ -135,7 +154,7 @@
 
 
   // =========================================================
-  // TIMETABLE
+  // TIMETABLE PAGE
   // =========================================================
 
   async function runTimetablePage() {
@@ -145,7 +164,7 @@
 
     if (!lessons.length) {
       console.info(
-        '[Lectio Chairs Up] No activities with rooms found.'
+        '[Lectio Chairs Up] No live activities with room information found.'
       );
 
       return;
@@ -170,7 +189,7 @@
 
 
     /*
-     * Paint instantly from cached room-week data.
+     * Paint immediately if we already have schedule cache.
      */
     paintTimetableFromCache(
       lessons,
@@ -178,9 +197,6 @@
     );
 
 
-    /*
-     * Refresh only data that needs it.
-     */
     const jobs =
       buildRefreshPlan(
         lessons,
@@ -203,7 +219,7 @@
 
 
     /*
-     * Recalculate after fresh room data arrives.
+     * Repaint after fresh room data arrives.
      */
     paintTimetableFromCache(
       lessons,
@@ -218,10 +234,96 @@
         'a.s2skemabrik.s2brik[data-tooltip]'
       )
     ]
+      /*
+       * Cancelled activities are ignored completely.
+       */
+      .filter(
+        element =>
+          !isCancelledActivity(
+            element
+          )
+      )
       .map(
         parseLectioActivity
       )
       .filter(Boolean);
+  }
+
+
+  // =========================================================
+  // CANCELLATION DETECTION
+  // =========================================================
+
+  function isCancelledActivity(
+    element
+  ) {
+    if (!element) {
+      return false;
+    }
+
+
+    /*
+     * Primary Lectio-native signal.
+     *
+     * Confirmed on cancelled room booking:
+     *
+     * class="... s2cancelled ..."
+     */
+    if (
+      element.classList?.contains(
+        's2cancelled'
+      )
+    ) {
+      return true;
+    }
+
+
+    /*
+     * Sometimes the class may be on a child.
+     */
+    if (
+      element.querySelector?.(
+        '.s2cancelled'
+      )
+    ) {
+      return true;
+    }
+
+
+    /*
+     * Confirmed secondary signal:
+     *
+     * data-tooltip="Aflyst! ..."
+     */
+    const tooltip =
+      element.getAttribute?.(
+        'data-tooltip'
+      ) || '';
+
+
+    if (
+      /^\s*Aflyst!/i.test(
+        tooltip
+      )
+    ) {
+      return true;
+    }
+
+
+    /*
+     * English fallback in case Lectio/localization ever
+     * exposes translated cancellation wording.
+     */
+    if (
+      /^\s*(Cancelled|Canceled)!?/i.test(
+        tooltip
+      )
+    ) {
+      return true;
+    }
+
+
+    return false;
   }
 
 
@@ -246,6 +348,24 @@
       console.warn(
         '[Lectio Chairs Up] Activity brick not found.'
       );
+
+      return;
+    }
+
+
+    /*
+     * A cancelled activity never gets a chair reminder.
+     */
+    if (
+      isCancelledActivity(
+        activityBrick
+      )
+    ) {
+      console.info(
+        '[Lectio Chairs Up] Activity is cancelled - ignored.'
+      );
+
+      removeActivityNotice();
 
       return;
     }
@@ -382,7 +502,7 @@
 
       <div class="lectio-chairs-up-lesson-copy">
         <strong>CHAIRS UP</strong>
-        <span>Last booking in room ${escapeHtml(roomText)}</span>
+        <span>Last active booking in room ${escapeHtml(roomText)}</span>
       </div>
     `;
 
@@ -412,6 +532,18 @@
   function parseLectioActivity(
     element
   ) {
+    /*
+     * Defensive cancellation check.
+     */
+    if (
+      isCancelledActivity(
+        element
+      )
+    ) {
+      return null;
+    }
+
+
     const tooltip =
       element.getAttribute(
         'data-tooltip'
@@ -515,10 +647,6 @@
   async function getRoomMap(
     lessons = []
   ) {
-    // -------------------------------------------------------
-    // Existing successful cache
-    // -------------------------------------------------------
-
     const cached =
       loadCachedRoomMap();
 
@@ -549,9 +677,9 @@
     );
 
 
-    // -------------------------------------------------------
-    // Current page
-    // -------------------------------------------------------
+    // ---------------------------------------------------------
+    // Current page may expose room links
+    // ---------------------------------------------------------
 
     const directlyFound =
       new Map();
@@ -593,9 +721,9 @@
     }
 
 
-    // -------------------------------------------------------
-    // Activity edit page bootstrap
-    // -------------------------------------------------------
+    // ---------------------------------------------------------
+    // Activity-edit bootstrap
+    // ---------------------------------------------------------
 
     const seedResult =
       await discoverSeedFromActivities(
@@ -637,9 +765,9 @@
     }
 
 
-    // -------------------------------------------------------
-    // Schedule-front-page fallback
-    // -------------------------------------------------------
+    // ---------------------------------------------------------
+    // Schedule front page fallback
+    // ---------------------------------------------------------
 
     const frontPageMap =
       await tryScheduleFrontPage();
@@ -816,6 +944,10 @@
       );
 
 
+    // ---------------------------------------------------------
+    // Options
+    // ---------------------------------------------------------
+
     for (
       const option of doc.querySelectorAll(
         'option'
@@ -854,6 +986,10 @@
       }
     }
 
+
+    // ---------------------------------------------------------
+    // Custom Lectio controls
+    // ---------------------------------------------------------
 
     const elements =
       doc.querySelectorAll(
@@ -911,12 +1047,6 @@
 
 
       if (id) {
-        console.info(
-          '[Lectio Chairs Up] Room found on edit control:',
-          wanted,
-          id
-        );
-
         return id;
       }
 
@@ -1201,7 +1331,7 @@
 
 
   // =========================================================
-  // ROOM PAGE
+  // ROOM PAGE / FULL ROOM MAP
   // =========================================================
 
   async function tryHarvestFullMap(
@@ -1367,7 +1497,9 @@
       }
     }
 
-    catch (_) {}
+    catch (_) {
+      // Ignore malformed links.
+    }
   }
 
 
@@ -1428,7 +1560,9 @@
       }
     }
 
-    catch (_) {}
+    catch (_) {
+      // Fallback only.
+    }
 
 
     return map;
@@ -1506,7 +1640,6 @@
 
       localStorage.setItem(
         ROOM_MAP_TIME_KEY,
-
         String(
           Date.now()
         )
@@ -1523,7 +1656,7 @@
 
 
   // =========================================================
-  // LAST-BOOKING LOGIC
+  // LAST ACTIVE BOOKING LOGIC
   // =========================================================
 
   function calculateLessonRoomStatuses(
@@ -1583,34 +1716,24 @@
       }
 
 
+      /*
+       * IMPORTANT:
+       *
+       * The room-week parser below already removes all
+       * cancelled bookings before anything gets cached.
+       */
       const bookings =
         cache.days?.[
           lesson.isoDate
         ] || [];
 
 
-      /*
-       * -----------------------------------------------------
-       * v1.0.3
-       *
-       * Ask:
-       *
-       * "After ignoring this activity itself, is there any
-       * other booking whose occupancy continues beyond the
-       * end of this activity?"
-       *
-       * This handles ordinary lessons, meetings, trips,
-       * odd-length events and overlapping bookings.
-       * -----------------------------------------------------
-       */
-
       const laterOccupancyExists =
         bookings.some(
           booking => {
 
             /*
-             * Strongest self-match:
-             * same Lectio activity ID.
+             * Same Lectio activity.
              */
             if (
               lesson.absid &&
@@ -1623,15 +1746,8 @@
 
 
             /*
-             * Defensive self-match.
-             *
-             * Lectio occasionally represents special
-             * activities differently between teacher and
-             * room timetables.
-             *
-             * If the start/end pair is identical, treat it
-             * as the same occupancy rather than allowing an
-             * ID mismatch to disqualify the lesson.
+             * Defensive self-match if Lectio exposes the same
+             * occupancy under slightly different activity IDs.
              */
             const sameTime =
               booking.startMinutes ===
@@ -1646,8 +1762,8 @@
 
 
             /*
-             * If another booking continues beyond us,
-             * this is not the final occupancy.
+             * If another LIVE booking continues beyond this
+             * lesson, this is not the final active occupancy.
              */
             return (
               booking.endMinutes >
@@ -1680,6 +1796,37 @@
     lessons,
     roomMap
   ) {
+    /*
+     * First remove any stale badge from a cancelled activity
+     * that may already exist in the DOM.
+     */
+    document
+      .querySelectorAll(
+        `.${ICON_CLASS}`
+      )
+      .forEach(
+        icon => {
+          const activity =
+            icon.closest(
+              'a.s2skemabrik'
+            );
+
+          if (
+            activity &&
+            isCancelledActivity(
+              activity
+            )
+          ) {
+            icon.remove();
+
+            activity.classList.remove(
+              LAST_CLASS
+            );
+          }
+        }
+      );
+
+
     for (
       const lesson of lessons
     ) {
@@ -1702,6 +1849,32 @@
     element,
     statuses
   ) {
+    /*
+     * Absolute safety:
+     * never decorate cancelled activities.
+     */
+    if (
+      isCancelledActivity(
+        element
+      )
+    ) {
+      element
+        .querySelectorAll(
+          `.${ICON_CLASS}`
+        )
+        .forEach(
+          node =>
+            node.remove()
+        );
+
+      element.classList.remove(
+        LAST_CLASS
+      );
+
+      return;
+    }
+
+
     element
       .querySelectorAll(
         `.${ICON_CLASS}`
@@ -1721,8 +1894,7 @@
       statuses
         .filter(
           item =>
-            item.status ===
-            'last'
+            item.status === 'last'
         )
         .map(
           item =>
@@ -1734,8 +1906,7 @@
       statuses
         .filter(
           item =>
-            item.status ===
-            'unknown'
+            item.status === 'unknown'
         )
         .map(
           item =>
@@ -1797,7 +1968,7 @@
     unknownRooms
   ) {
     let text =
-      `CHAIRS UP - Last booking in ${lastRooms.join(', ')}`;
+      `CHAIRS UP - Last active booking in ${lastRooms.join(', ')}`;
 
 
     if (
@@ -1813,7 +1984,7 @@
 
 
   // =========================================================
-  // REFRESH
+  // REFRESH POLICY
   // =========================================================
 
   function buildRefreshPlan(
@@ -1906,6 +2077,10 @@
           '';
 
 
+        // -----------------------------------------------------
+        // Future days
+        // -----------------------------------------------------
+
         if (
           daysAway > 0 &&
           cacheAge >=
@@ -1919,6 +2094,10 @@
             'daily-future-refresh';
         }
 
+
+        // -----------------------------------------------------
+        // Today
+        // -----------------------------------------------------
 
         if (
           daysAway === 0
@@ -2061,6 +2240,10 @@
     const days = {};
 
 
+    let cancelledCount =
+      0;
+
+
     for (
       const cell of doc.querySelectorAll(
         'td[data-date]'
@@ -2077,12 +2260,32 @@
       }
 
 
-      const bookings =
+      const bookingElements =
         [
           ...cell.querySelectorAll(
             'a.s2skemabrik.s2brik[data-tooltip]'
           )
-        ]
+        ];
+
+
+      /*
+       * Useful diagnostic during testing.
+       */
+      cancelledCount +=
+        bookingElements.filter(
+          element =>
+            isCancelledActivity(
+              element
+            )
+        ).length;
+
+
+      /*
+       * parseRoomBooking() returns null for cancelled
+       * activities, so they never enter the cache.
+       */
+      const bookings =
+        bookingElements
           .map(
             parseRoomBooking
           )
@@ -2091,6 +2294,15 @@
 
       days[isoDate] =
         bookings;
+    }
+
+
+    if (
+      cancelledCount > 0
+    ) {
+      console.info(
+        `[Lectio Chairs Up] Ignored ${cancelledCount} cancelled booking(s) in room ${roomId}, week ${isoWeek}.`
+      );
     }
 
 
@@ -2103,6 +2315,10 @@
   }
 
 
+  // =========================================================
+  // ROOM BOOKING PARSER
+  // =========================================================
+
   function parseRoomBooking(
     element
   ) {
@@ -2110,6 +2326,33 @@
       element.getAttribute(
         'data-tooltip'
       ) || '';
+
+
+    /*
+     * =======================================================
+     * v1.0.4 CANCELLATION FIX
+     * =======================================================
+     *
+     * Confirmed Lectio structure:
+     *
+     * class:
+     *   s2skemabrik s2bgbox s2cancelled s2brik ...
+     *
+     * tooltip:
+     *   Aflyst!
+     *   10/9-2026 13:55 til 15:05
+     *   ...
+     *
+     * Cancelled bookings are therefore treated as if the
+     * room is empty.
+     */
+    if (
+      isCancelledActivity(
+        element
+      )
+    ) {
+      return null;
+    }
 
 
     const timed =
@@ -2294,8 +2537,7 @@
 
 
     if (
-      haystack ===
-      needle
+      haystack === needle
     ) {
       return true;
     }
@@ -2579,7 +2821,7 @@
 
 
   // =========================================================
-  // CHAIR
+  // CHAIR SVG
   // =========================================================
 
   function sideChairSvg() {
@@ -2626,7 +2868,9 @@
       }
 
 
-      /* TIMETABLE BADGE */
+      /* =====================================================
+         TIMETABLE BADGE
+         ===================================================== */
 
       .${ICON_CLASS} {
         position:
@@ -2703,10 +2947,8 @@
           scale(1.20);
 
         box-shadow:
-          0 5px 10px
-            rgba(0,0,0,0.34),
-          0 0 0 1px
-            rgba(130,0,20,0.14);
+          0 5px 10px rgba(0,0,0,0.34),
+          0 0 0 1px rgba(130,0,20,0.14);
 
         filter:
           brightness(1.04);
@@ -2740,7 +2982,9 @@
       }
 
 
-      /* ACTIVITY PAGE BANNER */
+      /* =====================================================
+         ACTIVITY PAGE NOTICE
+         ===================================================== */
 
       .${LESSON_NOTICE_CLASS} {
         position:
@@ -2778,10 +3022,8 @@
           3px solid #ffffff;
 
         box-shadow:
-          0 4px 12px
-            rgba(0,0,0,0.24),
-          0 0 0 1px
-            rgba(130,0,20,0.16);
+          0 4px 12px rgba(0,0,0,0.24),
+          0 0 0 1px rgba(130,0,20,0.16);
 
         color:
           #ffffff;
@@ -2815,10 +3057,8 @@
           scale(1.06);
 
         box-shadow:
-          0 7px 17px
-            rgba(0,0,0,0.29),
-          0 0 0 1px
-            rgba(130,0,20,0.16);
+          0 7px 17px rgba(0,0,0,0.29),
+          0 0 0 1px rgba(130,0,20,0.16);
       }
 
 
@@ -2854,12 +3094,12 @@
 
         border:
           2px solid
-          rgba(
-            255,
-            255,
-            255,
-            0.95
-          );
+            rgba(
+              255,
+              255,
+              255,
+              0.95
+            );
       }
 
 
@@ -2936,6 +3176,10 @@
           600;
       }
 
+
+      /* =====================================================
+         MOBILE
+         ===================================================== */
 
       @media (
         max-width: 700px
