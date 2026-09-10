@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         Lectio - Unread Message Notifications
-// @namespace    https://www.lectio.dk/
-// @version      0.3.1
-// @description  Shows unread Lectio messages beside the main Beskeder / Messages navigation link and plays a soft chime when the unread count increases.
-// @match        https://www.lectio.dk/lectio/*/*
+// @namespace    https://www.lectio.dk/lectio/223/
+// @version      0.2.0
+// @description  Shows a Lectio-style unread-message badge beside Beskeder / Messages, with sender previews on hover.
+// @match        https://www.lectio.dk/lectio/223/*
 // @grant        none
 // @run-at       document-idle
 // ==/UserScript==
@@ -11,585 +11,475 @@
 (() => {
   'use strict';
 
-  /*
-   * Universal Lectio message notifier.
-   *
-   * - Detects the active school automatically.
-   * - Adds ONE badge only: to the highest visible inbox link in the page header.
-   * - Checks once per page load and every 10 minutes while the page stays visible.
-   * - Plays a locally generated chime only when the unread count increases.
-   * - Uses no MutationObserver.
-   */
+  const SCHOOL = '223';
+  const INBOX_URL = `/lectio/${SCHOOL}/beskeder2.aspx`;
 
-  const SCHOOL_ID = getSchoolId();
-  if (!SCHOOL_ID) return;
-
-  const CHECK_INTERVAL = 10 * 60 * 1000;
-  const INITIAL_CHECK_DELAY = 1200;
+  const CACHE_KEY = 'lectioUnreadMessages.cache.v1';
+  const POLL_MS = 10 * 60 * 1000;
+  const CACHE_RENDER_MAX_AGE = 10 * 60 * 1000;
+  const RETURN_REFRESH_AGE = 10 * 60 * 1000;
   const MAX_PREVIEW_ITEMS = 6;
 
-  const CACHE_KEY = `lectioUnreadMessages.v3.${SCHOOL_ID}`;
-  const HOST_CLASS = 'lectio-msg-host';
-  const BADGE_CLASS = 'lectio-msg-notification';
-  const TOOLTIP_CLASS = 'lectio-msg-tooltip';
+  const HOST_CLASS = 'lectio-unread-host';
+  const BADGE_CLASS = 'lectio-unread-badge';
+  const TOOLTIP_CLASS = 'lectio-unread-tooltip';
+  const MESSAGE_LINK_SELECTOR =
+    `a[href*="/lectio/${SCHOOL}/beskeder2.aspx"], a[href$="/beskeder2.aspx"]`;
 
-  let messages = [];
-  let checkedAt = 0;
-  let checking = false;
+  let state = loadCache();
+  let inFlight = false;
+  let observerQueued = false;
 
-  let audioContext = null;
-  let audioReady = false;
+  init();
 
-  start();
-
-  function start() {
-    cleanupOldCaches();
+  function init() {
     injectStyles();
-    loadCachedState();
 
-    attachBadge();
-    renderAll(false);
+    // Render a recent cached result immediately so navigation does not have to
+    // wait for the first background request.
+    if (state && Date.now() - state.checkedAt > CACHE_RENDER_MAX_AGE) {
+      state = null;
+    }
 
-    // Bounded retries instead of observing the entire DOM.
-    window.setTimeout(() => {
-      attachBadge();
+    attachBadges();
+
+    if (state) {
       renderAll(false);
-    }, 500);
+    }
 
-    window.setTimeout(() => {
-      attachBadge();
-      renderAll(false);
-    }, 2500);
+    // Translation/theme scripts can replace Lectio navigation nodes after this
+    // script has run. Watch only for changes that could affect message links.
+    //
+    // Critically, ignore mutations inside our own badge/tooltip UI so rendering
+    // the badge cannot trigger an observer -> render -> observer feedback loop.
+    const observer = new MutationObserver((mutations) => {
+      const relevant = mutations.some(mutationTouchesMessageNavigation);
 
-    installAudioUnlock();
-
-    // One check after every Lectio page load.
-    window.setTimeout(checkMessages, INITIAL_CHECK_DELAY);
-
-    // If the user remains on a page, check only once every 10 minutes.
-    window.setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        checkMessages();
+      if (!relevant || observerQueued) {
+        return;
       }
-    }, CHECK_INTERVAL);
 
-    // Returning to a tab only causes a request if the last check is stale.
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState !== 'visible') return;
+      observerQueued = true;
 
-      attachBadge();
-      renderAll(false);
-
-      if (Date.now() - checkedAt >= CHECK_INTERVAL) {
-        checkMessages();
-      }
+      queueMicrotask(() => {
+        observerQueued = false;
+        attachBadges();
+      });
     });
 
-    // Share state between open tabs for the same school.
+    if (document.body) {
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+      });
+    }
+
+    // If another Lectio tab refreshes the shared cache, update this tab too.
     window.addEventListener('storage', (event) => {
-      if (event.key !== CACHE_KEY || !event.newValue) return;
+      if (event.key !== CACHE_KEY || !event.newValue) {
+        return;
+      }
 
       try {
         const incoming = JSON.parse(event.newValue);
-        if (!isValidState(incoming)) return;
 
-        messages = incoming.messages;
-        checkedAt = incoming.checkedAt;
+        if (!isValidState(incoming)) {
+          return;
+        }
 
-        attachBadge();
-        renderAll(false);
+        const oldCount = state?.messages?.length ?? 0;
+
+        state = incoming;
+
+        attachBadges();
+        renderAll(incoming.messages.length > oldCount);
       } catch (_) {
         // Ignore malformed cache data.
       }
     });
-  }
 
-  // ============================================================
-  // SCHOOL / URL HELPERS
-  // ============================================================
-
-  function getSchoolId() {
-    const match = location.pathname.match(/^\/lectio\/(\d+)\//);
-    return match ? match[1] : null;
-  }
-
-  function getInboxCandidates() {
-    const expectedPath =
-      `/lectio/${SCHOOL_ID}/beskeder2.aspx`.toLowerCase();
-
-    return Array.from(
-      document.querySelectorAll('a[href]')
-    )
-      .map((link) => {
-        try {
-          return {
-            link,
-            url: new URL(
-              link.getAttribute('href'),
-              location.href
-            )
-          };
-        } catch (_) {
-          return null;
-        }
-      })
-      .filter((item) =>
-        item &&
-        item.url.origin === location.origin &&
-        item.url.pathname.toLowerCase() === expectedPath
-      );
-  }
-
-  function isVisibleLink(link) {
-    const style =
-      window.getComputedStyle(link);
-
-    const rect =
-      link.getBoundingClientRect();
-
-    return (
-      style.display !== 'none' &&
-      style.visibility !== 'hidden' &&
-      rect.width > 0 &&
-      rect.height > 0
-    );
-  }
-
-  function getNavigationMessageLink() {
-    const candidates =
-      getInboxCandidates();
-
-    if (!candidates.length) {
-      return null;
-    }
-
-    /*
-     * Individual message subjects normally have query parameters.
-     *
-     * The top navigation link and the dashboard Messages heading
-     * both point to the plain inbox.
-     *
-     * We therefore:
-     *
-     * 1. Prefer links without query parameters.
-     * 2. Choose the highest visible one on the page.
-     *
-     * The persistent Lectio navigation is above the dashboard card.
-     */
-
-    const plainInboxLinks =
-      candidates.filter(
-        (item) =>
-          !item.url.search &&
-          !item.url.hash
-      );
-
-    const pool =
-      plainInboxLinks.length
-        ? plainInboxLinks
-        : candidates;
-
-    const visible =
-      pool.filter(
-        (item) =>
-          isVisibleLink(item.link)
-      );
-
-    const ranked =
-      visible.length
-        ? visible
-        : pool;
-
-    ranked.sort(
-      (a, b) => {
-        const aRect =
-          a.link.getBoundingClientRect();
-
-        const bRect =
-          b.link.getBoundingClientRect();
-
-        if (
-          aRect.top !==
-          bRect.top
-        ) {
-          return (
-            aRect.top -
-            bRect.top
-          );
-        }
-
-        return (
-          aRect.left -
-          bRect.left
-        );
-      }
-    );
-
-    return (
-      ranked[0]?.link ||
-      null
-    );
-  }
-
-  function getInboxUrl() {
-    const navigationLink =
-      getNavigationMessageLink();
-
-    if (navigationLink) {
-      try {
-        const url =
-          new URL(
-            navigationLink.getAttribute('href'),
-            location.href
-          );
-
-        url.search = '';
-        url.hash = '';
-
-        return url.href;
-      } catch (_) {
-        // Fall through.
-      }
-    }
-
-    return (
-      `${location.origin}` +
-      `/lectio/${SCHOOL_ID}/beskeder2.aspx`
-    );
-  }
-
-  // ============================================================
-  // CHECK LECTIO
-  // ============================================================
-
-  async function checkMessages() {
-    if (checking) return;
-
-    checking = true;
-
-    try {
-      const response =
-        await fetch(
-          getInboxUrl(),
-          {
-            method: 'GET',
-
-            credentials:
-              'include',
-
-            cache:
-              'no-store',
-
-            headers: {
-              Accept:
-                'text/html,application/xhtml+xml'
-            }
-          }
-        );
-
-      if (!response.ok) {
-        throw new Error(
-          `Lectio returned HTTP ${response.status}`
-        );
-      }
-
-      const finalUrl =
-        new URL(
-          response.url,
-          location.origin
-        );
-
-      if (
-        !/\/beskeder2\.aspx$/i.test(
-          finalUrl.pathname
-        )
-      ) {
-        throw new Error(
-          'Lectio did not return the message inbox.'
-        );
-      }
-
-      const html =
-        await response.text();
-
-      const inboxDocument =
-        new DOMParser()
-          .parseFromString(
-            html,
-            'text/html'
-          );
-
-      const parsed =
-        parseUnreadMessages(
-          inboxDocument
-        );
-
-      /*
-       * Preserve the previous known-good count if Lectio's
-       * markup ever changes.
-       */
-
-      if (parsed === null) {
-        console.warn(
-          '[Lectio Messages] Inbox layout was not recognised.'
-        );
-
+    // Returning to Lectio after it has been sitting for at least ten minutes
+    // warrants a new check.
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState !== 'visible') {
         return;
       }
 
-      const previous =
-        readCachedState();
+      const age = Date.now() - (state?.checkedAt || 0);
 
-      const hasBaseline =
-        previous !== null;
-
-      const previousCount =
-        previous
-          ? previous.messages.length
-          : 0;
-
-      const increased =
-        hasBaseline &&
-        parsed.length >
-          previousCount;
-
-      messages = parsed;
-      checkedAt = Date.now();
-
-      saveCachedState();
-
-      attachBadge();
-      renderAll(increased);
-
-      if (increased) {
-        playLectioChime();
+      if (age >= RETURN_REFRESH_AGE) {
+        refreshUnreadMessages();
       }
-    } catch (error) {
-      console.warn(
-        '[Lectio Messages] Could not check unread messages:',
-        error
-      );
-    } finally {
-      checking = false;
-    }
+    });
+
+    // Let Lectio finish its own page setup before the initial request.
+    window.setTimeout(() => {
+      refreshUnreadMessages();
+    }, 600);
+
+    // Modest periodic polling while the tab is actually visible.
+    window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        refreshUnreadMessages();
+      }
+    }, POLL_MS);
   }
 
-  // ============================================================
-  // PARSE MESSAGE LIST
-  // ============================================================
-
-  function parseUnreadMessages(doc) {
-    const rows =
-      Array.from(
-        doc.querySelectorAll('tr')
-      )
-        .filter(
-          (row) =>
-            row.querySelector(
-              '.message-list-thread-container'
-            )
-        );
-
-    const messageInterfaceExists =
-      Boolean(
-        doc.querySelector(
-          [
-            '.message-folder-header',
-            '.message-thread-container',
-            '.message-list-thread-container',
-            '[id*="threadGV"]'
-          ].join(',')
-        )
-      );
-
-    if (
-      rows.length === 0 &&
-      !messageInterfaceExists
-    ) {
-      return null;
-    }
-
-    const unreadRows =
-      rows.filter(
-        (row) =>
-          row.classList.contains(
-            'unread'
-          )
-      );
-
-    return unreadRows.map(
-      (row) => {
-        const container =
-          row.querySelector(
-            '.message-list-thread-container'
-          ) ||
-          row;
-
-        const sender =
-          clean(
-            container.querySelector(
-              '.message-list-thread-from'
-            )?.textContent ||
-
-            row.querySelector(
-              '[class*="thread-from"], [class*="sender"]'
-            )?.textContent
-          );
-
-        const subject =
-          clean(
-            container.querySelector(
-              '.message-list-thread-subject'
-            )?.textContent ||
-
-            row.querySelector(
-              '[class*="thread-subject"], [class*="subject"]'
-            )?.textContent
-          );
-
-        const date =
-          clean(
-            container.querySelector(
-              '.message-list-thread-datetime'
-            )?.textContent ||
-
-            row.querySelector(
-              '[class*="datetime"], [class*="date"]'
-            )?.textContent
-          );
-
-        return {
-          sender,
-          subject,
-          date
-        };
-      }
-    );
-  }
-
-  // ============================================================
-  // BADGE
-  // ============================================================
-
-  function attachBadge() {
-    const target =
-      getNavigationMessageLink();
-
-    /*
-     * Remove any stray badges left by the old v0.3.0 behaviour.
-     */
-
-    document
-      .querySelectorAll(
-        `.${BADGE_CLASS}`
-      )
-      .forEach(
-        (badge) => {
-          if (
-            !target ||
-            badge.parentElement !== target
-          ) {
-            badge.remove();
-          }
-        }
-      );
-
-    document
-      .querySelectorAll(
-        `.${HOST_CLASS}`
-      )
-      .forEach(
-        (host) => {
-          if (host !== target) {
-            host.classList.remove(
-              HOST_CLASS
-            );
-          }
-        }
-      );
-
-    if (!target) return;
-
-    target.classList.add(
-      HOST_CLASS
-    );
-
-    if (
-      target.querySelector(
-        `:scope > .${BADGE_CLASS}`
-      )
-    ) {
+  async function refreshUnreadMessages() {
+    if (inFlight) {
       return;
     }
 
-    const badge =
-      document.createElement(
-        'span'
+    inFlight = true;
+
+    try {
+      const doc = await fetchHtml(INBOX_URL);
+      const parsed = parseUnreadMessages(doc);
+
+      // If Lectio changes its message markup, keep the previous known-good
+      // result rather than falsely displaying "0 unread".
+      if (!parsed) {
+        console.warn(
+          '[Lectio Message Notifications] Could not recognise the current message-list markup.'
+        );
+        return;
+      }
+
+      const oldCount = state?.messages?.length ?? 0;
+
+      const next = {
+        checkedAt: Date.now(),
+        messages: parsed,
+      };
+
+      state = next;
+
+      saveCache(next);
+      attachBadges();
+      renderAll(next.messages.length > oldCount);
+    } catch (err) {
+      console.warn(
+        '[Lectio Message Notifications] Refresh failed:',
+        err
       );
+    } finally {
+      inFlight = false;
+    }
+  }
 
-    badge.className =
-      BADGE_CLASS;
+  async function fetchHtml(url) {
+    const res = await fetch(url, {
+      method: 'GET',
+      credentials: 'include',
+      cache: 'no-store',
+      headers: {
+        Accept: 'text/html,application/xhtml+xml',
+      },
+    });
 
-    badge.setAttribute(
-      'aria-hidden',
-      'true'
-    );
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status} for ${url}`);
+    }
 
-    const count =
-      document.createElement(
-        'span'
+    const finalUrl = new URL(res.url, location.origin);
+
+    if (!/\/beskeder2\.aspx$/i.test(finalUrl.pathname)) {
+      throw new Error(
+        'Lectio did not return the inbox page; the login session may have expired.'
       );
+    }
 
-    count.className =
-      'lectio-msg-count';
+    const html = await res.text();
 
-    badge.appendChild(
-      count
-    );
-
-    const tooltip =
-      document.createElement(
-        'span'
-      );
-
-    tooltip.className =
-      TOOLTIP_CLASS;
-
-    badge.appendChild(
-      tooltip
-    );
-
-    target.appendChild(
-      badge
+    return new DOMParser().parseFromString(
+      html,
+      'text/html'
     );
   }
 
-  // ============================================================
-  // RENDER
-  // ============================================================
+  function parseUnreadMessages(doc) {
+    // Current Lectio message rows use .message-list-thread-container, and
+    // unread rows are explicitly marked <tr class="unread">.
+    const currentRows = [...doc.querySelectorAll('tr')].filter(
+      (row) =>
+        row.querySelector(
+          '.message-list-thread-container'
+        )
+    );
 
-  function renderAll(animate) {
-    const badge =
-      document.querySelector(
-        `.${BADGE_CLASS}`
+    // A valid empty inbox can have no rows, so also recognise the surrounding
+    // message UI before deciding parsing failed.
+    const hasMessageUi = Boolean(
+      doc.querySelector(
+        '.message-folder-header, ' +
+          '.message-thread-container, ' +
+          '[id*="threadGV"], ' +
+          '[class*="message-list-thread"]'
+      )
+    );
+
+    if (!currentRows.length && !hasMessageUi) {
+      return null;
+    }
+
+    const unreadRows = currentRows.filter(
+      (row) => row.classList.contains('unread')
+    );
+
+    return unreadRows.map((row, index) => {
+      const container =
+        row.querySelector(
+          '.message-list-thread-container'
+        ) || row;
+
+      const sender = cleanText(
+        container.querySelector(
+          '.message-list-thread-from'
+        )?.textContent ||
+          row.querySelector(
+            '[class*="thread-from"], [class*="sender"]'
+          )?.textContent ||
+          ''
       );
 
-    if (badge) {
-      renderBadge(
+      const subject = cleanText(
+        container.querySelector(
+          '.message-list-thread-subject'
+        )?.textContent ||
+          row.querySelector(
+            '[class*="thread-subject"], [class*="subject"]'
+          )?.textContent ||
+          ''
+      );
+
+      const datetime = cleanText(
+        container.querySelector(
+          '.message-list-thread-datetime'
+        )?.textContent ||
+          row.querySelector(
+            '[class*="datetime"], [class*="date"]'
+          )?.textContent ||
+          ''
+      );
+
+      const subjectLink =
+        container.querySelector(
+          '.message-list-thread-subject a[href]'
+        ) ||
+        container.querySelector('a[href]');
+
+      return {
+        sender,
+        subject,
+        datetime,
+        href: subjectLink
+          ? new URL(
+              subjectLink.getAttribute('href'),
+              location.origin
+            ).href
+          : INBOX_URL,
+        key: buildMessageKey(
+          row,
+          sender,
+          subject,
+          datetime,
+          index
+        ),
+      };
+    });
+  }
+
+  function buildMessageKey(
+    row,
+    sender,
+    subject,
+    datetime,
+    index
+  ) {
+    const id =
+      row.getAttribute('data-id') ||
+      row.id ||
+      row.querySelector('[id]')?.id ||
+      '';
+
+    return [
+      id,
+      sender,
+      subject,
+      datetime,
+      index,
+    ].join('|');
+  }
+
+  function cleanText(value) {
+    return String(value || '')
+      .replace(/\u00a0/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function attachBadges() {
+    const links = getMessageLinks();
+
+    for (const link of links) {
+      link.classList.add(HOST_CLASS);
+
+      /*
+       * IMPORTANT:
+       *
+       * Existing badges are deliberately left alone here.
+       *
+       * State updates are handled by renderAll().
+       *
+       * This makes attachBadges() idempotent and prevents
+       * MutationObserver activity from repeatedly rebuilding
+       * the tooltip.
+       */
+      if (
+        link.querySelector(
+          `:scope > .${BADGE_CLASS}`
+        )
+      ) {
+        continue;
+      }
+
+      const badge =
+        document.createElement('span');
+
+      badge.className = BADGE_CLASS;
+      badge.setAttribute(
+        'aria-hidden',
+        'true'
+      );
+
+      const count =
+        document.createElement('span');
+
+      count.className =
+        'lectio-unread-count';
+
+      badge.appendChild(count);
+
+      const tooltip =
+        document.createElement('span');
+
+      tooltip.className =
+        TOOLTIP_CLASS;
+
+      badge.appendChild(tooltip);
+
+      link.appendChild(badge);
+
+      updateBadge(
+        badge,
+        false
+      );
+    }
+  }
+
+  function mutationTouchesMessageNavigation(
+    mutation
+  ) {
+    /*
+     * Never react to DOM modifications generated inside
+     * our own badge.
+     *
+     * This is the main protection against a self-sustaining
+     * MutationObserver loop.
+     */
+    if (
+      mutation.target instanceof Element &&
+      mutation.target.closest(
+        `.${BADGE_CLASS}`
+      )
+    ) {
+      return false;
+    }
+
+    /*
+     * A message link itself, or something inside one,
+     * was rewritten.
+     */
+    if (
+      mutation.target instanceof Element &&
+      (
+        mutation.target.matches(
+          MESSAGE_LINK_SELECTOR
+        ) ||
+        mutation.target.closest(
+          MESSAGE_LINK_SELECTOR
+        )
+      )
+    ) {
+      return true;
+    }
+
+    /*
+     * A new subtree containing a message link was added.
+     *
+     * This catches Lectio or another userscript rebuilding
+     * the navigation bar.
+     */
+    for (
+      const node
+      of mutation.addedNodes
+    ) {
+      if (
+        !(node instanceof Element)
+      ) {
+        continue;
+      }
+
+      if (
+        node.matches(
+          MESSAGE_LINK_SELECTOR
+        ) ||
+        node.querySelector(
+          MESSAGE_LINK_SELECTOR
+        )
+      ) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  function getMessageLinks() {
+    return [
+      ...document.querySelectorAll(
+        MESSAGE_LINK_SELECTOR
+      ),
+    ].filter(
+      (link) =>
+        !link.closest(
+          `.${TOOLTIP_CLASS}`
+        )
+    );
+  }
+
+  function renderAll(animate) {
+    for (
+      const badge
+      of document.querySelectorAll(
+        `.${BADGE_CLASS}`
+      )
+    ) {
+      updateBadge(
         badge,
         animate
       );
     }
   }
 
-  function renderBadge(
+  function updateBadge(
     badge,
     animate
   ) {
     const count =
-      messages.length;
+      state?.messages?.length ?? 0;
 
-    if (count === 0) {
+    if (!count) {
       badge.hidden = true;
 
       badge.classList.remove(
@@ -611,23 +501,23 @@
       'false'
     );
 
-    const countElement =
+    const countEl =
       badge.querySelector(
-        '.lectio-msg-count'
+        '.lectio-unread-count'
       );
 
-    if (countElement) {
-      countElement.textContent =
+    if (countEl) {
+      countEl.textContent =
         count > 99
           ? '99+'
           : String(count);
     }
 
-    const language =
+    const lang =
       detectUiLanguage();
 
     const labels =
-      language === 'en'
+      lang === 'en'
         ? {
             header:
               `${count} unread ${
@@ -643,11 +533,10 @@
               'No subject',
 
             more:
-              (number) =>
-                `+${number} more`,
+              (n) => `+${n} more`,
 
             checked:
-              'Checked'
+              'Checked',
           }
         : {
             header:
@@ -664,11 +553,10 @@
               'Intet emne',
 
             more:
-              (number) =>
-                `+${number} mere`,
+              (n) => `+${n} mere`,
 
             checked:
-              'Tjekket'
+              'Tjekket',
           };
 
     badge.setAttribute(
@@ -693,6 +581,10 @@
         'is-new'
       );
 
+      /*
+       * Restart the animation if another
+       * unread-count increase occurred.
+       */
       void badge.offsetWidth;
 
       badge.classList.add(
@@ -701,10 +593,6 @@
     }
   }
 
-  // ============================================================
-  // TOOLTIP
-  // ============================================================
-
   function renderTooltip(
     tooltip,
     labels
@@ -712,12 +600,10 @@
     tooltip.replaceChildren();
 
     const header =
-      document.createElement(
-        'span'
-      );
+      document.createElement('span');
 
     header.className =
-      'lectio-msg-tooltip-header';
+      'lectio-unread-tooltip-header';
 
     header.textContent =
       labels.header;
@@ -726,400 +612,160 @@
       header
     );
 
+    const list =
+      document.createElement('span');
+
+    list.className =
+      'lectio-unread-tooltip-list';
+
     for (
-      const message of
-      messages.slice(
+      const message
+      of state.messages.slice(
         0,
         MAX_PREVIEW_ITEMS
       )
     ) {
-      const row =
-        document.createElement(
-          'span'
-        );
+      const item =
+        document.createElement('span');
 
-      row.className =
-        'lectio-msg-tooltip-row';
+      item.className =
+        'lectio-unread-tooltip-item';
 
       const sender =
-        document.createElement(
-          'span'
-        );
+        document.createElement('span');
 
       sender.className =
-        'lectio-msg-tooltip-sender';
+        'lectio-unread-tooltip-sender';
 
       sender.textContent =
         message.sender ||
         labels.unknown;
 
       const subject =
-        document.createElement(
-          'span'
-        );
+        document.createElement('span');
 
       subject.className =
-        'lectio-msg-tooltip-subject';
+        'lectio-unread-tooltip-subject';
 
       subject.textContent =
         message.subject ||
         labels.noSubject;
 
-      row.append(
+      item.append(
         sender,
         subject
       );
 
-      tooltip.appendChild(
-        row
+      list.appendChild(
+        item
       );
     }
 
     if (
-      messages.length >
+      state.messages.length >
       MAX_PREVIEW_ITEMS
     ) {
       const more =
-        document.createElement(
-          'span'
-        );
+        document.createElement('span');
 
       more.className =
-        'lectio-msg-tooltip-more';
+        'lectio-unread-tooltip-more';
 
       more.textContent =
         labels.more(
-          messages.length -
+          state.messages.length -
           MAX_PREVIEW_ITEMS
         );
 
-      tooltip.appendChild(
+      list.appendChild(
         more
       );
     }
 
-    if (checkedAt) {
-      const checked =
-        document.createElement(
-          'span'
-        );
+    tooltip.appendChild(
+      list
+    );
 
-      checked.className =
-        'lectio-msg-tooltip-checked';
+    const footer =
+      document.createElement('span');
 
-      checked.textContent =
-        `${labels.checked} ${
-          formatTime(
-            checkedAt
-          )
-        }`;
+    footer.className =
+      'lectio-unread-tooltip-footer';
 
-      tooltip.appendChild(
-        checked
-      );
-    }
+    footer.textContent =
+      `${labels.checked} ${
+        formatTime(
+          state.checkedAt
+        )
+      }`;
+
+    tooltip.appendChild(
+      footer
+    );
   }
 
-  // ============================================================
-  // DANISH / ENGLISH UI DETECTION
-  // ============================================================
-
   function detectUiLanguage() {
-    const link =
-      getNavigationMessageLink();
+    const links =
+      getMessageLinks();
 
-    if (!link) {
-      return 'da';
-    }
-
-    const clone =
-      link.cloneNode(
-        true
-      );
-
-    clone
-      .querySelectorAll(
-        `.${BADGE_CLASS}, .ls-fonticon`
-      )
-      .forEach(
-        (node) =>
-          node.remove()
-      );
-
-    const text =
-      clean(
-        clone.textContent
-      );
-
-    if (
-      /\bmessages?\b/i.test(
-        text
-      )
+    for (
+      const link
+      of links
     ) {
-      return 'en';
-    }
+      const clone =
+        link.cloneNode(true);
 
-    if (
-      /\bbeskeder?\b/i.test(
-        text
-      )
-    ) {
-      return 'da';
+      clone
+        .querySelectorAll(
+          `.${BADGE_CLASS}, .ls-fonticon`
+        )
+        .forEach(
+          (node) =>
+            node.remove()
+        );
+
+      const text =
+        cleanText(
+          clone.textContent
+        );
+
+      if (
+        /\bmessages?\b/i.test(
+          text
+        )
+      ) {
+        return 'en';
+      }
+
+      if (
+        /\bbeskeder?\b/i.test(
+          text
+        )
+      ) {
+        return 'da';
+      }
     }
 
     return 'da';
   }
 
-  // ============================================================
-  // AUDIO
-  // ============================================================
-
-  function installAudioUnlock() {
-    const eventNames = [
-      'pointerdown',
-      'keydown',
-      'touchstart'
-    ];
-
-    const unlock = () => {
-      unlockAudio();
-
-      for (
-        const eventName of
-        eventNames
-      ) {
-        document.removeEventListener(
-          eventName,
-          unlock,
-          true
-        );
-      }
-    };
-
-    for (
-      const eventName of
-      eventNames
-    ) {
-      document.addEventListener(
-        eventName,
-        unlock,
-        {
-          capture: true,
-          passive: true
-        }
-      );
-    }
-  }
-
-  async function unlockAudio() {
+  function formatTime(timestamp) {
     try {
-      if (!audioContext) {
-        const AudioContextClass =
-          window.AudioContext ||
-          window.webkitAudioContext;
-
-        if (!AudioContextClass) {
-          return;
+      return new Date(
+        timestamp
+      ).toLocaleTimeString(
+        [],
+        {
+          hour: '2-digit',
+          minute: '2-digit',
         }
-
-        audioContext =
-          new AudioContextClass();
-      }
-
-      if (
-        audioContext.state ===
-        'suspended'
-      ) {
-        await audioContext.resume();
-      }
-
-      audioReady =
-        audioContext.state ===
-        'running';
+      );
     } catch (_) {
-      audioReady = false;
+      return '';
     }
   }
 
-  function playLectioChime() {
-    if (
-      !audioContext ||
-      !audioReady ||
-      audioContext.state !==
-        'running'
-    ) {
-      return;
-    }
-
-    const context =
-      audioContext;
-
-    const start =
-      context.currentTime +
-      0.02;
-
-    const master =
-      context.createGain();
-
-    master.gain.setValueAtTime(
-      0.9,
-      start
-    );
-
-    master.connect(
-      context.destination
-    );
-
-    const notes = [
-      {
-        frequency: 659.25,
-        offset: 0.00,
-        duration: 0.30,
-        gain: 0.040
-      },
-      {
-        frequency: 783.99,
-        offset: 0.10,
-        duration: 0.36,
-        gain: 0.034
-      },
-      {
-        frequency: 1046.50,
-        offset: 0.22,
-        duration: 0.46,
-        gain: 0.027
-      }
-    ];
-
-    for (
-      const note of
-      notes
-    ) {
-      playTone(
-        context,
-        master,
-        start + note.offset,
-        note
-      );
-    }
-  }
-
-  function playTone(
-    context,
-    destination,
-    startTime,
-    note
-  ) {
-    const oscillator =
-      context.createOscillator();
-
-    const gain =
-      context.createGain();
-
-    oscillator.type =
-      'sine';
-
-    oscillator.frequency
-      .setValueAtTime(
-        note.frequency,
-        startTime
-      );
-
-    gain.gain
-      .setValueAtTime(
-        0.0001,
-        startTime
-      );
-
-    gain.gain
-      .exponentialRampToValueAtTime(
-        note.gain,
-        startTime + 0.012
-      );
-
-    gain.gain
-      .exponentialRampToValueAtTime(
-        0.0001,
-        startTime +
-        note.duration
-      );
-
-    oscillator.connect(
-      gain
-    );
-
-    gain.connect(
-      destination
-    );
-
-    oscillator.start(
-      startTime
-    );
-
-    oscillator.stop(
-      startTime +
-      note.duration +
-      0.03
-    );
-
-    const overtone =
-      context.createOscillator();
-
-    const overtoneGain =
-      context.createGain();
-
-    overtone.type =
-      'sine';
-
-    overtone.frequency
-      .setValueAtTime(
-        note.frequency * 2,
-        startTime
-      );
-
-    overtoneGain.gain
-      .setValueAtTime(
-        0.0001,
-        startTime
-      );
-
-    overtoneGain.gain
-      .exponentialRampToValueAtTime(
-        note.gain * 0.14,
-        startTime + 0.008
-      );
-
-    overtoneGain.gain
-      .exponentialRampToValueAtTime(
-        0.0001,
-        startTime +
-        note.duration * 0.72
-      );
-
-    overtone.connect(
-      overtoneGain
-    );
-
-    overtoneGain.connect(
-      destination
-    );
-
-    overtone.start(
-      startTime
-    );
-
-    overtone.stop(
-      startTime +
-      note.duration +
-      0.03
-    );
-  }
-
-  // ============================================================
-  // CACHE
-  // ============================================================
-
-  function readCachedState() {
+  function loadCache() {
     try {
       const parsed =
         JSON.parse(
@@ -1139,114 +785,33 @@
     }
   }
 
-  function loadCachedState() {
-    const cached =
-      readCachedState();
-
-    if (!cached) return;
-
-    messages =
-      cached.messages;
-
-    checkedAt =
-      cached.checkedAt;
-  }
-
-  function saveCachedState() {
+  function saveCache(value) {
     try {
       localStorage.setItem(
         CACHE_KEY,
-        JSON.stringify({
-          schoolId:
-            SCHOOL_ID,
-
-          messages,
-
-          checkedAt
-        })
+        JSON.stringify(value)
       );
     } catch (_) {
-      // Ignore storage errors.
+      // Cache failure should never break Lectio.
     }
   }
 
   function isValidState(value) {
     return Boolean(
       value &&
-      Array.isArray(
-        value.messages
-      ) &&
-      Number.isFinite(
-        value.checkedAt
-      )
+        Number.isFinite(
+          value.checkedAt
+        ) &&
+        Array.isArray(
+          value.messages
+        )
     );
   }
 
-  function cleanupOldCaches() {
-    try {
-      localStorage.removeItem(
-        'lectioUnreadMessages.cache.v1'
-      );
-
-      localStorage.removeItem(
-        'lectioUnreadMessages.safe.v1'
-      );
-
-      localStorage.removeItem(
-        'lectioUnreadMessages.v2'
-      );
-    } catch (_) {
-      // Not important.
-    }
-  }
-
-  // ============================================================
-  // HELPERS
-  // ============================================================
-
-  function clean(value) {
-    return String(
-      value || ''
-    )
-      .replace(
-        /\u00a0/g,
-        ' '
-      )
-      .replace(
-        /\s+/g,
-        ' '
-      )
-      .trim();
-  }
-
-  function formatTime(timestamp) {
-    try {
-      return new Date(
-        timestamp
-      )
-        .toLocaleTimeString(
-          [],
-          {
-            hour: '2-digit',
-            minute: '2-digit'
-          }
-        );
-    } catch (_) {
-      return '';
-    }
-  }
-
-  // ============================================================
-  // STYLES
-  // ============================================================
-
   function injectStyles() {
-    const styleId =
-      'lectio-msg-notification-style-v3';
-
     if (
       document.getElementById(
-        styleId
+        'lectio-unread-message-styles'
       )
     ) {
       return;
@@ -1258,7 +823,7 @@
       );
 
     style.id =
-      styleId;
+      'lectio-unread-message-styles';
 
     style.textContent = `
       .${HOST_CLASS} {
@@ -1268,14 +833,13 @@
 
       .${BADGE_CLASS} {
         position: absolute;
-        top: -7px;
-        right: -8px;
-        z-index: 5000;
+        top: -0.48rem;
+        right: -0.42rem;
+        z-index: 10020;
 
-        min-width: 20px;
-        height: 18px;
-        padding: 0 5px;
-
+        min-width: 1.35rem;
+        height: 1.2rem;
+        padding: 0 0.36rem;
         box-sizing: border-box;
 
         display: inline-flex;
@@ -1283,29 +847,44 @@
         justify-content: center;
 
         background: #cae6ff;
-        color: #102c3c;
+        color: #001e2f;
 
-        border: 1px solid #aab9c5;
-        border-radius: 6px 6px 6px 2px;
+        border:
+          1px solid #c1c7ce;
+
+        border-radius:
+          0.38rem
+          0.38rem
+          0.38rem
+          0.12rem;
 
         box-shadow:
-          0 1px 3px
-          rgba(0, 0, 0, 0.20);
+          rgba(0,0,0,0.16)
+            0 1px 3px,
+          rgba(0,0,0,0.08)
+            0 2px 5px;
 
-        font-family: Arial, sans-serif;
-        font-size: 11px;
+        font-family:
+          Roboto,
+          Arial,
+          sans-serif;
+
+        font-size: 0.72rem;
         font-weight: 700;
-        line-height: 18px;
+        line-height: 1;
+        letter-spacing: 0;
+        text-align: center;
         text-decoration: none;
 
-        cursor: default;
+        cursor: pointer;
 
         transform-origin:
-          50% 60%;
+          50% 70%;
       }
 
       .${BADGE_CLASS}[hidden] {
-        display: none !important;
+        display:
+          none !important;
       }
 
       .${BADGE_CLASS}::after {
@@ -1313,124 +892,193 @@
 
         position: absolute;
 
-        left: 2px;
-        bottom: -4px;
+        left: 0.12rem;
+        bottom: -0.22rem;
+
+        width: 0;
+        height: 0;
 
         border-top:
-          5px solid #cae6ff;
+          0.28rem solid #cae6ff;
 
         border-right:
-          5px solid transparent;
+          0.28rem solid transparent;
+
+        pointer-events: none;
+      }
+
+      .${BADGE_CLASS}:hover,
+      .${BADGE_CLASS}:focus-within {
+        background: #cae6ff;
+        color: #001e2f;
+
+        opacity: 0.96;
+
+        box-shadow:
+          rgba(0,0,0,0.18)
+            0 2px 4px,
+          rgba(0,0,0,0.10)
+            0 4px 8px;
       }
 
       .${BADGE_CLASS}.is-new {
         animation:
-          lectio-message-arrived
+          lectio-unread-pop
           520ms
-          cubic-bezier(.2, .9, .3, 1.2);
+          cubic-bezier(
+            .2,
+            .9,
+            .3,
+            1.25
+          );
       }
 
-      @keyframes lectio-message-arrived {
+      @keyframes lectio-unread-pop {
         0% {
           transform:
-            scale(0.82);
+            scale(0.72)
+            translateY(2px);
         }
 
-        52% {
+        55% {
           transform:
-            scale(1.18);
+            scale(1.16)
+            translateY(-1px);
         }
 
         100% {
           transform:
-            scale(1);
+            scale(1)
+            translateY(0);
         }
       }
 
       .${TOOLTIP_CLASS} {
         position: absolute;
 
-        top: 25px;
-        right: -10px;
+        top:
+          calc(
+            100% + 0.62rem
+          );
 
-        z-index: 6000;
+        right: -0.65rem;
+
+        z-index: 10030;
+
+        width:
+          min(
+            19rem,
+            calc(
+              100vw - 2rem
+            )
+          );
+
+        padding:
+          0.7rem
+          0.78rem;
+
+        box-sizing:
+          border-box;
 
         display: none;
 
-        width: 300px;
-        padding: 10px;
+        flex-direction:
+          column;
 
-        box-sizing: border-box;
+        gap: 0.48rem;
 
-        background: #f2f5f8;
-        color: #172b36;
+        background:
+          oklch(
+            0.9667
+            0.012
+            259.82
+            /
+            1
+          );
+
+        color: #001e2f;
 
         border:
-          1px solid #bcc7cf;
+          1px solid #c1c7ce;
 
         border-radius:
-          5px;
+          0.5rem;
 
         box-shadow:
-          0 4px 12px
-          rgba(0, 0, 0, 0.18);
+          rgba(0,0,0,0.18)
+            0 4px 8px -2px,
+          rgba(0,0,0,0.12)
+            0 8px 16px 1px;
 
         font-family:
+          Roboto,
           Arial,
           sans-serif;
 
-        font-size:
-          12px;
+        font-size: 0.82rem;
+        font-weight: 400;
+        line-height: 1.28;
+        letter-spacing: normal;
+        text-align: left;
+        white-space: normal;
 
-        font-weight:
-          400;
-
-        line-height:
-          1.35;
-
-        text-align:
-          left;
-
-        white-space:
-          normal;
-
-        pointer-events:
-          none;
+        pointer-events: none;
       }
 
       .${BADGE_CLASS}:hover
-      > .${TOOLTIP_CLASS},
+        > .${TOOLTIP_CLASS},
+
+      .${BADGE_CLASS}:focus
+        > .${TOOLTIP_CLASS},
 
       .${BADGE_CLASS}:focus-within
-      > .${TOOLTIP_CLASS} {
-        display: block;
+        > .${TOOLTIP_CLASS} {
+
+        display: flex;
       }
 
-      .lectio-msg-tooltip-header {
+      .lectio-unread-tooltip-header {
         display: block;
 
-        padding-bottom: 6px;
-        margin-bottom: 6px;
+        padding-bottom:
+          0.38rem;
 
         border-bottom:
-          1px solid #d2dbe1;
+          1px solid #d3dae0;
 
         font-weight: 700;
+        font-size: 0.88rem;
       }
 
-      .lectio-msg-tooltip-row {
+      .lectio-unread-tooltip-list {
+        display: flex;
+
+        flex-direction:
+          column;
+
+        gap: 0.42rem;
+      }
+
+      .lectio-unread-tooltip-item {
         display: grid;
 
         grid-template-columns:
-          100px 1fr;
+          minmax(
+            6.4rem,
+            0.8fr
+          )
+          minmax(
+            8rem,
+            1.2fr
+          );
 
-        gap: 8px;
+        gap: 0.5rem;
 
-        margin: 4px 0;
+        align-items:
+          baseline;
       }
 
-      .lectio-msg-tooltip-sender,
-      .lectio-msg-tooltip-subject {
+      .lectio-unread-tooltip-sender {
         overflow: hidden;
 
         text-overflow:
@@ -1438,47 +1086,84 @@
 
         white-space:
           nowrap;
+
+        font-weight: 600;
       }
 
-      .lectio-msg-tooltip-sender {
-        font-weight: 700;
+      .lectio-unread-tooltip-subject {
+        overflow: hidden;
+
+        text-overflow:
+          ellipsis;
+
+        white-space:
+          nowrap;
+
+        color: #394a57;
+
+        font-weight: 400;
       }
 
-      .lectio-msg-tooltip-subject {
-        color: #425664;
-      }
-
-      .lectio-msg-tooltip-more {
+      .lectio-unread-tooltip-more {
         display: block;
 
-        margin-top: 6px;
+        padding-top:
+          0.1rem;
 
-        color: #425664;
+        color: #394a57;
 
-        font-weight: 700;
+        font-weight: 600;
       }
 
-      .lectio-msg-tooltip-checked {
+      .lectio-unread-tooltip-footer {
         display: block;
 
-        margin-top: 7px;
-        padding-top: 6px;
+        padding-top:
+          0.36rem;
 
         border-top:
-          1px solid #d2dbe1;
+          1px solid #d3dae0;
 
-        color: #687983;
+        color: #5e6870;
 
-        font-size: 10px;
+        font-size: 0.72rem;
+        font-weight: 400;
       }
 
-      @media (hover: none) {
-        .${TOOLTIP_CLASS} {
-          display: none !important;
+      @media (
+        max-width: 700px
+      ) {
+        .${BADGE_CLASS} {
+          top: -0.34rem;
+          right: -0.24rem;
+
+          min-width:
+            1.28rem;
+
+          height:
+            1.16rem;
+
+          padding:
+            0 0.32rem;
+
+          font-size:
+            0.7rem;
         }
       }
 
-      @media (prefers-reduced-motion: reduce) {
+      @media (
+        hover: none
+      ) {
+        .${TOOLTIP_CLASS} {
+          display:
+            none !important;
+        }
+      }
+
+      @media (
+        prefers-reduced-motion:
+          reduce
+      ) {
         .${BADGE_CLASS}.is-new {
           animation: none;
         }
@@ -1489,5 +1174,4 @@
       style
     );
   }
-
 })();
