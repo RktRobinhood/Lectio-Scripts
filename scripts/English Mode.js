@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio English Mode
 // @namespace    lectio-english-mode
-// @version      1.5.1
+// @version      1.5.2
 // @description  Context-aware English layer for Lectio with instant core UI translation, persistent cache and Google fallback.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-start
@@ -26,11 +26,13 @@
         maxUiChars: 320,
         maxContentChars: 1600,
         maxCacheEntries: 3500,
+        maxPendingKeys: 250,
+        maxListenersPerKey: 40,
         googleConcurrency: 4,
         googleGapMs: 30,
         mutationBatchMs: 80,
-        navRepairMs: 650,
-        uiRepairMs: 2200,
+        navRepairMs: 5000,
+        uiRepairMs: 15000,
         bootHideMaxMs: 800
     };
 
@@ -47,15 +49,6 @@
      * ============================================================
      * BOOT COVER
      * ============================================================
-     *
-     * In EN mode we very briefly hide Lectio while all translations
-     * that are already known locally are applied.
-     *
-     * This removes most of the visual:
-     *
-     * Danish -> wait -> English
-     *
-     * behaviour.
      */
 
     let bootTimer = null;
@@ -66,14 +59,10 @@
     ) {
         document.documentElement
             .classList
-            .add(
-                'lectio-en-booting'
-            );
+            .add('lectio-en-booting');
 
         const style =
-            document.createElement(
-                'style'
-            );
+            document.createElement('style');
 
         style.textContent =
             'html.lectio-en-booting body{' +
@@ -81,9 +70,7 @@
             '}';
 
         document.documentElement
-            .appendChild(
-                style
-            );
+            .appendChild(style);
 
         bootTimer =
             setTimeout(
@@ -95,17 +82,10 @@
     function revealPage() {
         document.documentElement
             ?.classList
-            .remove(
-                'lectio-en-booting'
-            );
+            .remove('lectio-en-booting');
 
-        if (
-            bootTimer !== null
-        ) {
-            clearTimeout(
-                bootTimer
-            );
-
+        if (bootTimer !== null) {
+            clearTimeout(bootTimer);
             bootTimer = null;
         }
     }
@@ -114,297 +94,123 @@
      * ============================================================
      * FIXED NAVIGATION
      * ============================================================
-     *
-     * These two navigation rows are application chrome.
-     *
-     * They NEVER go through Google.
      */
 
     const GLOBAL_NAV =
         Object.freeze({
-            'Forside':
-                'Home',
-
-            'Skema':
-                'Schedule',
-
-            'Hovedmenu':
-                'Main Menu',
-
-            'Tidsregistrering':
-                'Time Tracking',
-
-            'Log ud':
-                'Log out',
-
-            'Log ind':
-                'Log in',
-
-            'Kontakt':
-                'Contact',
-
-            'Hjælp':
-                'Help',
-
-            'Søg':
-                'Search'
+            'Forside': 'Home',
+            'Skema': 'Schedule',
+            'Hovedmenu': 'Main Menu',
+            'Tidsregistrering': 'Time Tracking',
+            'Log ud': 'Log out',
+            'Log ind': 'Log in',
+            'Kontakt': 'Contact',
+            'Hjælp': 'Help',
+            'Søg': 'Search'
         });
 
     const PERSONAL_NAV =
         Object.freeze({
-            'Forside':
-                'Overview',
-
-            'Skema':
-                'Schedule',
-
-            'Studieplan':
-                'Course Plan',
-
-            'Årsopgørelse':
-                'Annual Summary',
-
-            'Fravær':
-                'Attendance',
-
-            'Opgaver':
-                'Assignments',
-
-            'Lektier':
-                'Homework',
-
-            'Karakterer':
-                'Grades',
-
-            'Spørgeskema':
-                'Surveys',
-
-            'Spørgeskemaer':
-                'Surveys',
-
-            'Dokumenter':
-                'Documents',
-
-            'Beskeder':
-                'Messages',
-
-            'Profil':
-                'Profile',
-
-            'Indstillinger':
-                'Settings'
+            'Forside': 'Overview',
+            'Skema': 'Schedule',
+            'Studieplan': 'Course Plan',
+            'Årsopgørelse': 'Annual Summary',
+            'Fravær': 'Attendance',
+            'Opgaver': 'Assignments',
+            'Lektier': 'Homework',
+            'Karakterer': 'Grades',
+            'Spørgeskema': 'Surveys',
+            'Spørgeskemaer': 'Surveys',
+            'Dokumenter': 'Documents',
+            'Beskeder': 'Messages',
+            'Profil': 'Profile',
+            'Indstillinger': 'Settings'
         });
 
     const GLOBAL_EN =
-        new Set(
-            Object.values(
-                GLOBAL_NAV
-            )
-        );
+        new Set(Object.values(GLOBAL_NAV));
 
     const PERSONAL_EN =
-        new Set(
-            Object.values(
-                PERSONAL_NAV
-            )
-        );
+        new Set(Object.values(PERSONAL_NAV));
 
     /*
      * ============================================================
-     * SMALL CURATED LECTIO LIBRARY
+     * CURATED LECTIO LIBRARY
      * ============================================================
-     *
-     * This is not intended to contain every Danish phrase.
-     *
-     * It contains:
-     *
-     * - terminology where school context matters
-     * - stable Lectio UI
-     * - terms that Google tends to mistranslate
-     *
-     * Everything else can fall through to Google and then gets
-     * cached locally.
      */
 
     const CORE =
         Object.freeze({
+            'Forside': 'Overview',
+            'Skema': 'Schedule',
+            'Studieplan': 'Course Plan',
+            'Årsopgørelse': 'Annual Summary',
+            'Fravær': 'Attendance',
 
-            /*
-             * Main concepts
-             */
+            'Opgave': 'Assignment',
+            'Opgaver': 'Assignments',
 
-            'Forside':
-                'Overview',
+            'Lektie': 'Homework',
+            'Lektier': 'Homework',
 
-            'Skema':
-                'Schedule',
+            'Karakter': 'Grade',
+            'Karakterer': 'Grades',
 
-            'Studieplan':
-                'Course Plan',
+            'Besked': 'Message',
+            'Beskeder': 'Messages',
 
-            'Årsopgørelse':
-                'Annual Summary',
+            'Spørgeskema': 'Survey',
+            'Spørgeskemaer': 'Surveys',
 
-            'Fravær':
-                'Attendance',
+            'Dokumenter': 'Documents',
+            'Profil': 'Profile',
 
-            'Opgave':
-                'Assignment',
+            'Lærer': 'Teacher',
+            'Læreren': 'Teacher',
+            'Lærere': 'Teachers',
 
-            'Opgaver':
-                'Assignments',
+            'Elev': 'Student',
+            'Eleven': 'Student',
+            'Elever': 'Students',
 
-            'Lektie':
-                'Homework',
+            'Hold': 'Class',
+            'Holdet': 'Class',
+            'Mine hold': 'My Classes',
+            'Alle hold': 'All Classes',
 
-            'Lektier':
-                'Homework',
+            'Klasse': 'Class',
+            'Klasser': 'Classes',
 
-            'Karakter':
-                'Grade',
+            'Gruppe': 'Group',
+            'Grupper': 'Groups',
 
-            'Karakterer':
-                'Grades',
+            'Lokale': 'Room',
+            'Lokaler': 'Rooms',
 
-            'Besked':
-                'Message',
+            'Fag': 'Subject',
 
-            'Beskeder':
-                'Messages',
+            'Modul': 'Period',
+            'Moduler': 'Periods',
 
-            'Spørgeskema':
-                'Survey',
+            'Lektion': 'Lesson',
+            'Lektioner': 'Lessons',
 
-            'Spørgeskemaer':
-                'Surveys',
+            'Aktivitet': 'Activity',
+            'Aktiviteter': 'Activities',
 
-            'Dokumenter':
-                'Documents',
+            '1 uge': '1 week',
+            '4 uger': '4 weeks',
+            '16 uger': '16 weeks',
 
-            'Profil':
-                'Profile',
-
-            /*
-             * People / teaching
-             */
-
-            'Lærer':
-                'Teacher',
-
-            'Læreren':
-                'Teacher',
-
-            'Lærere':
-                'Teachers',
-
-            'Elev':
-                'Student',
-
-            'Eleven':
-                'Student',
-
-            'Elever':
-                'Students',
-
-            /*
-             * IMPORTANT:
-             *
-             * Hold is a class/course group,
-             * not a "team".
-             */
-
-            'Hold':
-                'Class',
-
-            'Holdet':
-                'Class',
-
-            'Mine hold':
-                'My Classes',
-
-            'Alle hold':
-                'All Classes',
-
-            'Klasse':
-                'Class',
-
-            'Klasser':
-                'Classes',
-
-            'Gruppe':
-                'Group',
-
-            'Grupper':
-                'Groups',
-
-            'Lokale':
-                'Room',
-
-            'Lokaler':
-                'Rooms',
-
-            'Fag':
-                'Subject',
-
-            /*
-             * Schedule
-             */
-
-            /*
-             * IMPORTANT:
-             *
-             * Modul is a timetable period,
-             * not a curriculum "module".
-             */
-
-            'Modul':
-                'Period',
-
-            'Moduler':
-                'Periods',
-
-            'Lektion':
-                'Lesson',
-
-            'Lektioner':
-                'Lessons',
-
-            'Aktivitet':
-                'Activity',
-
-            'Aktiviteter':
-                'Activities',
-
-            '1 uge':
-                '1 week',
-
-            '4 uger':
-                '4 weeks',
-
-            '16 uger':
-                '16 weeks',
-
-            'Månedskalender':
-                'Month Calendar',
-
-            'Anden aktivitet':
-                'Other Activity',
-
-            'Privat aftale':
-                'Private Appointment',
-
-            'Fællessamling':
-                'Assembly',
+            'Månedskalender': 'Month Calendar',
+            'Anden aktivitet': 'Other Activity',
+            'Privat aftale': 'Private Appointment',
+            'Fællessamling': 'Assembly',
 
             'Vis ledige hold i skemaet.':
                 'Show available classes in the schedule.',
 
-            /*
-             * Overview
-             */
-
-            'Registreringer':
-                'Attendance Entries',
+            'Registreringer': 'Attendance Entries',
 
             'Manglende registrering':
                 'Missing Attendance Entry',
@@ -427,21 +233,13 @@
             'Få Lectio på din mobil':
                 'Get Lectio on your phone',
 
-            /*
-             * Course plan
-             */
-
-            'Kalender':
-                'Calendar',
-
-            'Liste':
-                'List',
+            'Kalender': 'Calendar',
+            'Liste': 'List',
 
             'Undervisningsbeskrivelse':
                 'Course Description',
 
-            'Forløb':
-                'Unit',
+            'Forløb': 'Unit',
 
             'Forløb og opgaver':
                 'Units and Assignments',
@@ -454,10 +252,6 @@
 
             'Elevtid':
                 'Student Workload',
-
-            /*
-             * Attendance
-             */
 
             'Fraværsangivelse':
                 'Attendance Entry',
@@ -482,10 +276,6 @@
 
             'Vælg hold':
                 'Select Class',
-
-            /*
-             * Assignments
-             */
 
             'Opgaveliste':
                 'Assignment List',
@@ -526,10 +316,6 @@
             'Eksamen':
                 'Exam',
 
-            /*
-             * Grades
-             */
-
             'Karaktergivning':
                 'Grading',
 
@@ -553,10 +339,6 @@
 
             'Eksamenskarakter':
                 'Exam Grade',
-
-            /*
-             * Messages
-             */
 
             'Alle ulæste':
                 'All Unread',
@@ -597,10 +379,6 @@
             'Modtagere':
                 'Recipients',
 
-            /*
-             * Activity editor
-             */
-
             'Aktivitetsforside':
                 'Activity Overview',
 
@@ -615,10 +393,6 @@
 
             'Rediger aktivitet':
                 'Edit Activity',
-
-            /*
-             * Screenshot edge case
-             */
 
             'Rediger':
                 'Edit',
@@ -674,16 +448,8 @@
             'Præsentation (opret)':
                 'Presentation (create)',
 
-            /*
-             * Screenshot edge case
-             */
-
             'Præsentation (ingen)':
                 'Presentation (none)',
-
-            /*
-             * Handles Lectio splitting the phrase into nested spans.
-             */
 
             '(ingen)':
                 '(none)',
@@ -696,10 +462,6 @@
 
             'Skriv nyt indhold her...':
                 'Write new content here...',
-
-            /*
-             * General controls
-             */
 
             'Opret':
                 'Create',
@@ -770,80 +532,37 @@
 
     const WEEKDAYS =
         Object.freeze({
-            Mandag:
-                'Monday',
-
-            Tirsdag:
-                'Tuesday',
-
-            Onsdag:
-                'Wednesday',
-
-            Torsdag:
-                'Thursday',
-
-            Fredag:
-                'Friday',
-
-            Lørdag:
-                'Saturday',
-
-            Søndag:
-                'Sunday'
+            Mandag: 'Monday',
+            Tirsdag: 'Tuesday',
+            Onsdag: 'Wednesday',
+            Torsdag: 'Thursday',
+            Fredag: 'Friday',
+            Lørdag: 'Saturday',
+            Søndag: 'Sunday'
         });
 
     const SHORT_DAYS =
         Object.freeze({
-            ma:
-                'Mon',
-
-            man:
-                'Mon',
-
-            ti:
-                'Tue',
-
-            tir:
-                'Tue',
-
-            on:
-                'Wed',
-
-            ons:
-                'Wed',
-
-            to:
-                'Thu',
-
-            tor:
-                'Thu',
-
-            fr:
-                'Fri',
-
-            fre:
-                'Fri',
-
-            lø:
-                'Sat',
-
-            lør:
-                'Sat',
-
-            sø:
-                'Sun',
-
-            søn:
-                'Sun'
+            ma: 'Mon',
+            man: 'Mon',
+            ti: 'Tue',
+            tir: 'Tue',
+            on: 'Wed',
+            ons: 'Wed',
+            to: 'Thu',
+            tor: 'Thu',
+            fr: 'Fri',
+            fre: 'Fri',
+            lø: 'Sat',
+            lør: 'Sat',
+            sø: 'Sun',
+            søn: 'Sun'
         });
 
     /*
      * ============================================================
      * LOCAL LEARNED LIBRARY
      * ============================================================
-     *
-     * New v5 cache means bad experimental translations from earlier
-     * builds cannot contaminate this version.
      */
 
     let cache =
@@ -854,41 +573,28 @@
 
     if (
         !cache ||
-        typeof cache !==
-            'object' ||
-        Array.isArray(
-            cache
-        )
+        typeof cache !== 'object' ||
+        Array.isArray(cache)
     ) {
         cache = {};
     }
 
     function cacheGet(source) {
-        const entry =
-            cache[
-                source
-            ];
+        const entry = cache[source];
 
         if (!entry) {
             return null;
         }
 
-        if (
-            typeof entry ===
-            'string'
-        ) {
+        if (typeof entry === 'string') {
             return {
-                raw:
-                    entry,
-
-                lang:
-                    null
+                raw: entry,
+                lang: null
             };
         }
 
         return (
-            typeof entry.raw ===
-            'string'
+            typeof entry.raw === 'string'
                 ? entry
                 : null
         );
@@ -899,23 +605,14 @@
         raw,
         lang
     ) {
-        cache[
-            source
-        ] = {
+        cache[source] = {
             raw,
-
-            lang:
-                lang ||
-                null,
-
-            ts:
-                Date.now()
+            lang: lang || null,
+            ts: Date.now()
         };
 
         const entries =
-            Object.entries(
-                cache
-            );
+            Object.entries(cache);
 
         if (
             entries.length >
@@ -923,14 +620,8 @@
         ) {
             entries.sort(
                 (a, b) =>
-                    (
-                        b[1]?.ts ||
-                        0
-                    ) -
-                    (
-                        a[1]?.ts ||
-                        0
-                    )
+                    (b[1]?.ts || 0) -
+                    (a[1]?.ts || 0)
             );
 
             cache =
@@ -952,10 +643,6 @@
      * ============================================================
      * DOM STATE
      * ============================================================
-     *
-     * We no longer try to restore Danish inside a mutated live DOM.
-     *
-     * Switching languages saves the mode and reloads the page.
      */
 
     const textState =
@@ -966,9 +653,6 @@
 
     const inputState =
         new WeakMap();
-
-    const translatedSubmitInputs =
-        new Set();
 
     const pending =
         new Map();
@@ -984,11 +668,8 @@
     const mutationRoots =
         new Set();
 
-    let mutationTimer =
-        null;
-
-    let observer =
-        null;
+    let mutationTimer = null;
+    let observer = null;
 
     /*
      * ============================================================
@@ -998,8 +679,7 @@
 
     function normalize(text) {
         return String(
-            text ??
-            ''
+            text ?? ''
         )
             .replace(
                 /\u00a0/g,
@@ -1019,17 +699,13 @@
         return (
             (
                 String(original)
-                    .match(
-                        /^\s*/
-                    )?.[0] ||
+                    .match(/^\s*/)?.[0] ||
                 ''
             ) +
             translated +
             (
                 String(original)
-                    .match(
-                        /\s*$/
-                    )?.[0] ||
+                    .match(/\s*$/)?.[0] ||
                 ''
             )
         );
@@ -1040,8 +716,7 @@
             Number(n);
 
         const mod100 =
-            value %
-            100;
+            value % 100;
 
         if (
             mod100 >= 11 &&
@@ -1065,9 +740,7 @@
 
     function exactCore(text) {
         const source =
-            normalize(
-                text
-            );
+            normalize(text);
 
         if (
             Object.prototype
@@ -1077,22 +750,15 @@
                     source
                 )
         ) {
-            return CORE[
-                source
-            ];
+            return CORE[source];
         }
 
         if (
-            source.endsWith(
-                ':'
-            )
+            source.endsWith(':')
         ) {
             const bare =
                 source
-                    .slice(
-                        0,
-                        -1
-                    )
+                    .slice(0, -1)
                     .trim();
 
             if (
@@ -1104,9 +770,7 @@
                     )
             ) {
                 return (
-                    CORE[
-                        bare
-                    ] +
+                    CORE[bare] +
                     ':'
                 );
             }
@@ -1120,7 +784,9 @@
             ?.closest
             ?.(
                 '#lectio-english-switch,' +
-                '#lectio-english-toast'
+                '#lectio-english-toast,' +
+                '.lectio-unread-badge,' +
+                '.lectio-unread-tooltip'
             );
     }
 
@@ -1149,9 +815,7 @@
     function ignored(element) {
         return (
             !element ||
-            isOurUi(
-                element
-            ) ||
+            isOurUi(element) ||
             !!element.closest(
                 'script,' +
                 'style,' +
@@ -1166,10 +830,6 @@
      * ============================================================
      * FIXED NAVIGATION
      * ============================================================
-     *
-     * This is now the EXCLUSIVE owner of those links.
-     *
-     * The generic translator is forbidden from touching them.
      */
 
     function navLabel(anchor) {
@@ -1182,10 +842,8 @@
         const globalMarkers = [
             'Hovedmenu',
             'Main Menu',
-
             'Tidsregistrering',
             'Time Tracking',
-
             'Log ud',
             'Log out'
         ];
@@ -1193,41 +851,30 @@
         const personalMarkers = [
             'Studieplan',
             'Course Plan',
-
             'Årsopgørelse',
             'Annual Summary',
-
             'Karakterer',
             'Grades',
-
             'Beskeder',
             'Messages'
         ];
 
-        let globalScore =
-            0;
+        let globalScore = 0;
+        let personalScore = 0;
 
-        let personalScore =
-            0;
-
-        for (
-            const label
-            of labels
-        ) {
+        for (const label of labels) {
             if (
-                globalMarkers
-                    .includes(
-                        label
-                    )
+                globalMarkers.includes(
+                    label
+                )
             ) {
                 globalScore++;
             }
 
             if (
-                personalMarkers
-                    .includes(
-                        label
-                    )
+                personalMarkers.includes(
+                    label
+                )
             ) {
                 personalScore++;
             }
@@ -1235,16 +882,14 @@
 
         if (
             globalScore >= 1 &&
-            globalScore >
-                personalScore
+            globalScore > personalScore
         ) {
             return 'global';
         }
 
         if (
             personalScore >= 1 &&
-            personalScore >
-                globalScore
+            personalScore > globalScore
         ) {
             return 'personal';
         }
@@ -1257,14 +902,12 @@
         type
     ) {
         const map =
-            type ===
-            'global'
+            type === 'global'
                 ? GLOBAL_NAV
                 : PERSONAL_NAV;
 
         const english =
-            type ===
-            'global'
+            type === 'global'
                 ? GLOBAL_EN
                 : PERSONAL_EN;
 
@@ -1276,15 +919,11 @@
                     label
                 )
         ) {
-            return map[
-                label
-            ];
+            return map[label];
         }
 
         if (
-            english.has(
-                label
-            )
+            english.has(label)
         ) {
             return label;
         }
@@ -1296,9 +935,6 @@
         anchor,
         translated
     ) {
-        /*
-         * Generic translation will skip this anchor from now on.
-         */
         anchor.dataset
             .lectioEnFixedNav =
             '1';
@@ -1306,12 +942,10 @@
         const nodes = [];
 
         const walker =
-            document
-                .createTreeWalker(
-                    anchor,
-                    NodeFilter
-                        .SHOW_TEXT
-                );
+            document.createTreeWalker(
+                anchor,
+                NodeFilter.SHOW_TEXT
+            );
 
         let node;
 
@@ -1326,43 +960,26 @@
                     node.nodeValue
                 )
             ) {
-                nodes.push(
-                    node
-                );
+                nodes.push(node);
             }
         }
 
-        if (
-            !nodes.length
-        ) {
+        if (!nodes.length) {
             return;
         }
 
-        /*
-         * Navigation owns these nodes.
-         *
-         * They are NOT registered with the generic text-state system.
-         */
         nodes[0].nodeValue =
             preserveWhitespace(
-                nodes[0]
-                    .nodeValue,
+                nodes[0].nodeValue,
                 translated
             );
 
-        /*
-         * Lectio occasionally splits a label across nested spans.
-         * Collapse the visible text into one node while leaving
-         * elements/icons themselves untouched.
-         */
         for (
             let i = 1;
             i < nodes.length;
             i++
         ) {
-            nodes[i]
-                .nodeValue =
-                '';
+            nodes[i].nodeValue = '';
         }
     }
 
@@ -1376,17 +993,12 @@
 
         const anchors =
             Array.from(
-                document
-                    .querySelectorAll(
-                        'a'
-                    )
+                document.querySelectorAll('a')
             )
                 .filter(
                     anchor => {
                         if (
-                            isOurUi(
-                                anchor
-                            )
+                            isOurUi(anchor)
                         ) {
                             return false;
                         }
@@ -1404,17 +1016,9 @@
                     }
                 );
 
-        /*
-         * Detect rows visually rather than depending on fragile
-         * Lectio CSS class names.
-         */
-
         const rows = [];
 
-        for (
-            const anchor
-            of anchors
-        ) {
+        for (const anchor of anchors) {
             const rect =
                 anchor
                     .getBoundingClientRect();
@@ -1422,16 +1026,14 @@
             const y =
                 Math.round(
                     rect.top +
-                    rect.height /
-                        2
+                    rect.height / 2
                 );
 
             let row =
                 rows.find(
                     item =>
                         Math.abs(
-                            item.y -
-                            y
+                            item.y - y
                         ) <= 5
                 );
 
@@ -1441,25 +1043,16 @@
                     anchors: []
                 };
 
-                rows.push(
-                    row
-                );
+                rows.push(row);
             }
 
             row.anchors
-                .push(
-                    anchor
-                );
+                .push(anchor);
         }
 
-        for (
-            const row
-            of rows
-        ) {
+        for (const row of rows) {
             if (
-                row.anchors
-                    .length <
-                4
+                row.anchors.length < 4
             ) {
                 continue;
             }
@@ -1467,9 +1060,7 @@
             const type =
                 detectNavType(
                     row.anchors
-                        .map(
-                            navLabel
-                        )
+                        .map(navLabel)
                 );
 
             if (!type) {
@@ -1482,15 +1073,11 @@
             ) {
                 const translated =
                     navTranslation(
-                        navLabel(
-                            anchor
-                        ),
+                        navLabel(anchor),
                         type
                     );
 
-                if (
-                    translated
-                ) {
+                if (translated) {
                     setNavLabel(
                         anchor,
                         translated
@@ -1541,55 +1128,37 @@
             'vi',
             'vis',
             'vælg',
-
             'år',
             'uge',
             'uger',
             'måned',
-
             'hold',
-
             'elev',
             'elever',
-
             'lærer',
             'lærere',
-
             'fravær',
-
             'opgave',
             'opgaver',
-
             'lektie',
             'lektier',
-
             'besked',
             'beskeder',
-
             'skema',
-
             'karakter',
             'karakterer',
-
             'aktivitet',
             'aktiviteter',
-
             'indhold',
-
             'opret',
             'rediger',
-
             'manglende',
             'aktuelle',
-
             'offentlig',
-
             'gem',
             'søg',
-
             'afleveret',
             'aflevering',
-
             'ingen'
         ]);
 
@@ -1631,9 +1200,7 @@
 
     function hasDanish(text) {
         const source =
-            normalize(
-                text
-            );
+            normalize(text);
 
         if (!source) {
             return false;
@@ -1641,25 +1208,19 @@
 
         if (
             /[æøåÆØÅ]/
-                .test(
-                    source
-                )
+                .test(source)
         ) {
             return true;
         }
 
         const lower =
-            source
-                .toLowerCase();
+            source.toLowerCase();
 
         if (
             DANISH_STEMS
                 .some(
                     stem =>
-                        lower
-                            .includes(
-                                stem
-                            )
+                        lower.includes(stem)
                 )
         ) {
             return true;
@@ -1668,21 +1229,13 @@
         const words =
             lower.match(
                 /\p{L}+/gu
-            ) ||
-            [];
+            ) || [];
 
-        let hits =
-            0;
+        let hits = 0;
 
-        for (
-            const word
-            of words
-        ) {
+        for (const word of words) {
             if (
-                DANISH_WORDS
-                    .has(
-                        word
-                    )
+                DANISH_WORDS.has(word)
             ) {
                 hits++;
             }
@@ -1691,135 +1244,98 @@
         return (
             hits >=
             (
-                words.length <=
-                4
+                words.length <= 4
                     ? 1
                     : 2
             )
         );
     }
 
-    function looksLikeName(
-        text
-    ) {
+    function looksLikeName(text) {
         const source =
-            normalize(
-                text
-            );
+            normalize(text);
 
         if (
             !source ||
-            hasDanish(
-                source
-            )
+            hasDanish(source)
         ) {
             return false;
         }
 
         const pieces =
-            source.split(
-                /\s+/
-            );
+            source.split(/\s+/);
 
         return (
-            pieces.length >=
-                1 &&
-            pieces.length <=
-                4 &&
+            pieces.length >= 1 &&
+            pieces.length <= 4 &&
             pieces.every(
                 piece =>
                     /^[A-ZÆØÅ][\p{L}'’.-]+$/u
-                        .test(
-                            piece
-                        ) ||
+                        .test(piece) ||
                     /^[A-ZÆØÅ]{1,4}$/
-                        .test(
-                            piece
-                        )
+                        .test(piece)
             )
         );
     }
 
-    function looksLikeIdentifier(
-        text
-    ) {
+    function looksLikeIdentifier(text) {
         const source =
-            normalize(
-                text
-            );
+            normalize(text);
 
         if (!source) {
             return true;
         }
 
         if (
-            exactCore(
-                source
-            ) !== null
+            exactCore(source) !== null
         ) {
             return false;
         }
 
         if (
             /^[\d\s:.,/()+\-]+$/
-                .test(
-                    source
-                )
+                .test(source)
         ) {
             return true;
         }
 
         if (
             /^(https?:\/\/|www\.)/i
-                .test(
-                    source
-                )
+                .test(source)
         ) {
             return true;
         }
 
         if (
             /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-                .test(
-                    source
-                )
+                .test(source)
         ) {
             return true;
         }
 
         if (
             /\.(pdf|docx?|xlsx?|pptx?|txt|zip|jpg|jpeg|png|gif|webp|mp3|mp4)$/i
-                .test(
-                    source
-                )
+                .test(source)
         ) {
             return true;
         }
 
         if (
             /^[A-ZÆØÅ]{1,4}$/
-                .test(
-                    source
-                )
+                .test(source)
         ) {
             return true;
         }
 
         if (
-            !source.includes(
-                ' '
-            ) &&
+            !source.includes(' ') &&
             /^[A-Za-zÆØÅæøå]{0,4}\d+[A-Za-zÆØÅæøå]{0,4}$/
-                .test(
-                    source
-                )
+                .test(source)
         ) {
             return true;
         }
 
-        return looksLikeName(
-            source
-        );
+        return looksLikeName(source);
     }
 
     function isUiLike(
@@ -1850,12 +1366,8 @@
             '[role="columnheader"]';
 
         if (
-            element.matches(
-                selector
-            ) ||
-            element.closest(
-                selector
-            )
+            element.matches(selector) ||
+            element.closest(selector)
         ) {
             return true;
         }
@@ -1864,31 +1376,22 @@
             (
                 `${element.id || ''} ` +
                 `${String(
-                    element.className ||
-                    ''
+                    element.className || ''
                 )}`
             )
                 .toLowerCase();
 
         if (
             /(menu|nav|tab|toolbar|header|caption|title|button|pager|filter|selector)/
-                .test(
-                    marker
-                )
+                .test(marker)
         ) {
             return true;
         }
 
         return (
-            normalize(
-                text
-            ).length <= 90 &&
-            !!element.closest(
-                'form'
-            ) &&
-            !element.closest(
-                'td'
-            )
+            normalize(text).length <= 90 &&
+            !!element.closest('form') &&
+            !element.closest('td')
         );
     }
 
@@ -1897,15 +1400,11 @@
         element
     ) {
         const source =
-            normalize(
-                text
-            );
+            normalize(text);
 
         if (
             !source ||
-            looksLikeIdentifier(
-                source
-            )
+            looksLikeIdentifier(source)
         ) {
             return false;
         }
@@ -1923,13 +1422,10 @@
         }
 
         return (
-            CFG
-                .translateReadOnlyContent &&
+            CFG.translateReadOnlyContent &&
             source.length <=
                 CFG.maxContentChars &&
-            hasDanish(
-                source
-            )
+            hasDanish(source)
         );
     }
 
@@ -1939,49 +1435,27 @@
      * ============================================================
      */
 
-    function translateStructured(
-        text
-    ) {
+    function translateStructured(text) {
         const original =
-            normalize(
-                text
-            );
+            normalize(text);
 
         const exact =
-            exactCore(
-                original
-            );
+            exactCore(original);
 
-        if (
-            exact !== null
-        ) {
+        if (exact !== null) {
             return {
-                text:
-                    exact,
-
-                complete:
-                    true
+                text: exact,
+                complete: true
             };
         }
 
-        let result =
-            original;
-
-        /*
-         * Page title:
-         *
-         * Læreren MP - Matthew Pilley - Skema
-         */
+        let result = original;
 
         if (
-            result.includes(
-                ' - '
-            )
+            result.includes(' - ')
         ) {
             const pieces =
-                result.split(
-                    ' - '
-                );
+                result.split(' - ');
 
             result =
                 pieces.map(
@@ -1990,15 +1464,11 @@
                         index
                     ) => {
                         const value =
-                            normalize(
-                                piece
-                            );
+                            normalize(piece);
 
                         if (
                             /^Læreren\b/i
-                                .test(
-                                    value
-                                )
+                                .test(value)
                         ) {
                             return value
                                 .replace(
@@ -2009,9 +1479,7 @@
 
                         if (
                             /^Eleven\b/i
-                                .test(
-                                    value
-                                )
+                                .test(value)
                         ) {
                             return value
                                 .replace(
@@ -2022,49 +1490,32 @@
 
                         if (
                             index ===
-                                pieces.length -
-                                1 &&
-                            value ===
-                                'Forside'
+                                pieces.length - 1 &&
+                            value === 'Forside'
                         ) {
                             return 'Overview';
                         }
 
                         return (
-                            exactCore(
-                                value
-                            ) ??
+                            exactCore(value) ??
                             piece
                         );
                     }
                 )
-                    .join(
-                        ' - '
-                    );
+                    .join(' - ');
         }
-
-        /*
-         * Periods
-         */
 
         result =
             result.replace(
                 /\b(\d{1,2})\.\s*modul\b/gi,
-
                 (
                     _,
                     number
                 ) =>
                     `${
-                        ordinal(
-                            number
-                        )
+                        ordinal(number)
                     } period`
             );
-
-        /*
-         * Weeks
-         */
 
         result =
             result.replace(
@@ -2072,18 +1523,12 @@
                 'Week $1'
             );
 
-        /*
-         * Days
-         */
-
         for (
             const [
                 danish,
                 english
             ]
-            of Object.entries(
-                WEEKDAYS
-            )
+            of Object.entries(WEEKDAYS)
         ) {
             result =
                 result.replace(
@@ -2095,14 +1540,9 @@
                 );
         }
 
-        /*
-         * on 8/9 -> Wed 8/9
-         */
-
         result =
             result.replace(
                 /^([A-Za-zÆØÅæøå]{2,3})(?=\s+\d{1,2}\/\d{1,2})/i,
-
                 match =>
                     SHORT_DAYS[
                         match.toLowerCase()
@@ -2110,22 +1550,15 @@
                     match
             );
 
-        /*
-         * Generated dashboard strings
-         */
-
         result =
             result.replace(
                 /^(\d+)\s+manglende registreringer?$/i,
-
                 (
                     _,
                     number
                 ) =>
                     `${number} missing attendance ${
-                        Number(
-                            number
-                        ) === 1
+                        Number(number) === 1
                             ? 'entry'
                             : 'entries'
                     }`
@@ -2161,22 +1594,15 @@
                 'All $1 teachers'
             );
 
-        /*
-         * Grade strings
-         */
-
         result =
             result.replace(
                 /\b(\d+)\.\s*standpunkt\b/gi,
-
                 (
                     _,
                     number
                 ) =>
                     `${
-                        ordinal(
-                            number
-                        )
+                        ordinal(number)
                     } current grade`
             );
 
@@ -2204,14 +1630,11 @@
                 );
 
         return {
-            text:
-                result,
+            text: result,
 
             complete:
                 result !== original &&
-                !hasDanish(
-                    result
-                )
+                !hasDanish(result)
         };
     }
 
@@ -2226,9 +1649,7 @@
         'https://translate.google.com/translate_a/single'
     ];
 
-    function gmRequest(
-        details
-    ) {
+    function gmRequest(details) {
         return new Promise(
             (
                 resolve,
@@ -2237,36 +1658,27 @@
                 GM_xmlhttpRequest({
                     ...details,
 
-                    onload:
-                        resolve,
+                    onload: resolve,
 
-                    onerror:
-                        reject,
+                    onerror: reject,
 
                     ontimeout:
                         () =>
                             reject(
-                                new Error(
-                                    'timeout'
-                                )
+                                new Error('timeout')
                             ),
 
                     onabort:
                         () =>
                             reject(
-                                new Error(
-                                    'aborted'
-                                )
+                                new Error('aborted')
                             )
                 })
         );
     }
 
-    async function requestGoogle(
-        source
-    ) {
-        let lastError =
-            null;
+    async function requestGoogle(source) {
+        let lastError = null;
 
         for (
             const endpoint
@@ -2281,9 +1693,7 @@
                 '&oe=UTF-8';
 
             const encoded =
-                encodeURIComponent(
-                    source
-                );
+                encodeURIComponent(source);
 
             const url =
                 `${endpoint}?` +
@@ -2292,22 +1702,16 @@
 
             try {
                 const response =
-                    url.length <
-                    1800
+                    url.length < 1800
 
                         ? await gmRequest({
-                            method:
-                                'GET',
-
+                            method: 'GET',
                             url,
-
-                            timeout:
-                                8000
+                            timeout: 8000
                         })
 
                         : await gmRequest({
-                            method:
-                                'POST',
+                            method: 'POST',
 
                             url:
                                 `${endpoint}?${params}`,
@@ -2315,8 +1719,7 @@
                             data:
                                 `q=${encoded}`,
 
-                            timeout:
-                                10000,
+                            timeout: 10000,
 
                             headers: {
                                 'Content-Type':
@@ -2325,33 +1728,26 @@
                         });
 
                 if (
-                    response.status <
-                        200 ||
-                    response.status >=
-                        300
+                    response.status < 200 ||
+                    response.status >= 300
                 ) {
                     throw new Error(
-                        `HTTP ${
-                            response.status
-                        }`
+                        `HTTP ${response.status}`
                     );
                 }
 
                 const data =
                     JSON.parse(
-                        response
-                            .responseText
+                        response.responseText
                     );
 
                 const raw =
                     (
-                        data?.[0] ||
-                        []
+                        data?.[0] || []
                     )
                         .map(
                             item =>
-                                item?.[0] ||
-                                ''
+                                item?.[0] || ''
                         )
                         .join('')
                         .trim();
@@ -2374,8 +1770,7 @@
                 };
 
             } catch (error) {
-                lastError =
-                    error;
+                lastError = error;
             }
         }
 
@@ -2387,10 +1782,6 @@
         );
     }
 
-    /*
-     * Context cleanup after generic translation.
-     */
-
     function postCorrect(
         source,
         translated,
@@ -2400,8 +1791,7 @@
             translated;
 
         const lower =
-            source
-                .toLowerCase();
+            source.toLowerCase();
 
         const ui =
             isUiLike(
@@ -2410,9 +1800,7 @@
             );
 
         if (
-            lower.includes(
-                'modul'
-            )
+            lower.includes('modul')
         ) {
             result =
                 result
@@ -2428,9 +1816,7 @@
 
         if (
             ui &&
-            lower.includes(
-                'opgave'
-            )
+            lower.includes('opgave')
         ) {
             result =
                 result
@@ -2446,9 +1832,7 @@
 
         if (
             ui &&
-            lower.includes(
-                'hold'
-            )
+            lower.includes('hold')
         ) {
             result =
                 result
@@ -2464,9 +1848,7 @@
 
         if (
             ui &&
-            lower.includes(
-                'karakter'
-            )
+            lower.includes('karakter')
         ) {
             result =
                 result
@@ -2482,9 +1864,7 @@
 
         if (
             ui &&
-            lower.includes(
-                'besked'
-            )
+            lower.includes('besked')
         ) {
             result =
                 result
@@ -2513,30 +1893,22 @@
         callback
     ) {
         const key =
-            normalize(
-                source
-            );
+            normalize(source);
 
         const exact =
-            exactCore(
-                key
-            );
+            exactCore(key);
 
-        if (
-            exact !== null
-        ) {
+        if (exact !== null) {
             callback(
                 exact,
                 'da'
             );
 
-            return;
+            return true;
         }
 
         const learned =
-            cacheGet(
-                key
-            );
+            cacheGet(key);
 
         if (learned) {
             callback(
@@ -2549,24 +1921,58 @@
                 learned.lang
             );
 
-            return;
+            return true;
         }
 
         if (
-            pending.has(
-                key
-            )
+            pending.has(key)
         ) {
-            pending
-                .get(
-                    key
-                )
-                .push({
-                    element,
-                    callback
-                });
+            let listeners =
+                pending.get(key);
 
-            return;
+            /*
+             * A pending translation holds temporary references
+             * to DOM nodes. Remove nodes which Lectio has already
+             * detached and impose a hard limit per translation.
+             */
+            listeners =
+                listeners.filter(
+                    listener =>
+                        listener.element
+                            ?.isConnected !== false
+                );
+
+            pending.set(
+                key,
+                listeners
+            );
+
+            if (
+                listeners.length >=
+                CFG.maxListenersPerKey
+            ) {
+                return false;
+            }
+
+            listeners.push({
+                element,
+                callback
+            });
+
+            return true;
+        }
+
+        /*
+         * Global backpressure.
+         *
+         * This stops a DOM mutation storm from producing an
+         * unlimited Google translation queue.
+         */
+        if (
+            pending.size >=
+            CFG.maxPendingKeys
+        ) {
+            return false;
         }
 
         pending.set(
@@ -2577,17 +1983,16 @@
             }]
         );
 
-        googleQueue.push(
-            key
-        );
+        googleQueue.push(key);
 
         scheduleGoogle();
+
+        return true;
     }
 
     function scheduleGoogle() {
         if (
-            googleTimer !==
-            null
+            googleTimer !== null
         ) {
             return;
         }
@@ -2595,9 +2000,7 @@
         googleTimer =
             setTimeout(
                 () => {
-                    googleTimer =
-                        null;
-
+                    googleTimer = null;
                     runGoogleQueue();
                 },
                 CFG.googleGapMs
@@ -2615,29 +2018,17 @@
 
             activeGoogle++;
 
-            requestGoogle(
-                source
-            )
+            requestGoogle(source)
                 .then(
                     result => {
                         const listeners =
-                            pending.get(
-                                source
-                            ) ||
+                            pending.get(source) ||
                             [];
 
-                        pending.delete(
-                            source
-                        );
-
-                        /*
-                         * If Google says it was already English,
-                         * retain the original source.
-                         */
+                        pending.delete(source);
 
                         const raw =
-                            result.lang ===
-                                'en'
+                            result.lang === 'en'
                                 ? source
                                 : result.raw;
 
@@ -2651,24 +2042,55 @@
                             const listener
                             of listeners
                         ) {
-                            listener
-                                .callback(
-                                    postCorrect(
-                                        source,
-                                        raw,
-                                        listener.element
-                                    ),
+                            /*
+                             * Do not process stale detached nodes.
+                             */
+                            if (
+                                listener.element
+                                    ?.isConnected === false
+                            ) {
+                                continue;
+                            }
 
-                                    result.lang
-                                );
+                            listener.callback(
+                                postCorrect(
+                                    source,
+                                    raw,
+                                    listener.element
+                                ),
+                                result.lang
+                            );
                         }
                     }
                 )
                 .catch(
                     error => {
-                        pending.delete(
-                            source
-                        );
+                        const listeners =
+                            pending.get(source) ||
+                            [];
+
+                        /*
+                         * Always release the pending entry,
+                         * including failed requests.
+                         */
+                        pending.delete(source);
+
+                        for (
+                            const listener
+                            of listeners
+                        ) {
+                            if (
+                                listener.element
+                                    ?.isConnected === false
+                            ) {
+                                continue;
+                            }
+
+                            listener.callback(
+                                null,
+                                null
+                            );
+                        }
 
                         console.warn(
                             LOG,
@@ -2694,8 +2116,7 @@
                         activeGoogle =
                             Math.max(
                                 0,
-                                activeGoogle -
-                                1
+                                activeGoogle - 1
                             );
 
                         scheduleGoogle();
@@ -2710,31 +2131,19 @@
      * ============================================================
      */
 
-    function textStateFor(
-        node
-    ) {
+    function textStateFor(node) {
         const current =
-            node.nodeValue ??
-            '';
+            node.nodeValue ?? '';
 
         let state =
-            textState.get(
-                node
-            );
+            textState.get(node);
 
         if (!state) {
             state = {
-                source:
-                    current,
-
-                rendered:
-                    null,
-
-                final:
-                    null,
-
-                pending:
-                    null
+                source: current,
+                rendered: null,
+                final: null,
+                pending: null
             };
 
             textState.set(
@@ -2743,26 +2152,13 @@
             );
 
         } else if (
-            current !==
-                state.source &&
-            current !==
-                state.rendered
+            current !== state.source &&
+            current !== state.rendered
         ) {
-            /*
-             * Lectio changed the actual source text.
-             */
-
-            state.source =
-                current;
-
-            state.rendered =
-                null;
-
-            state.final =
-                null;
-
-            state.pending =
-                null;
+            state.source = current;
+            state.rendered = null;
+            state.final = null;
+            state.pending = null;
         }
 
         return state;
@@ -2786,17 +2182,13 @@
             desired;
 
         if (
-            node.nodeValue !==
-            desired
+            node.nodeValue !== desired
         ) {
-            node.nodeValue =
-                desired;
+            node.nodeValue = desired;
         }
     }
 
-    function processText(
-        node
-    ) {
+    function processText(node) {
         if (
             mode !== MODE_EN ||
             node.nodeType !==
@@ -2810,41 +2202,28 @@
 
         if (
             !element ||
-            ignored(
-                element
-            ) ||
-            isEditable(
-                element
-            ) ||
-            isFixedNav(
-                element
-            )
+            ignored(element) ||
+            isEditable(element) ||
+            isFixedNav(element)
         ) {
             return;
         }
 
         const state =
-            textStateFor(
-                node
-            );
+            textStateFor(node);
 
         const source =
-            normalize(
-                state.source
-            );
+            normalize(state.source);
 
         if (
             !source ||
-            looksLikeIdentifier(
-                source
-            )
+            looksLikeIdentifier(source)
         ) {
             return;
         }
 
         if (
-            state.final !==
-            null
+            state.final !== null
         ) {
             renderText(
                 node,
@@ -2855,18 +2234,11 @@
             return;
         }
 
-        /*
-         * Local curated/structured translation first.
-         */
-
         const local =
-            translateStructured(
-                source
-            );
+            translateStructured(source);
 
         if (
-            local.text !==
-                source &&
+            local.text !== source &&
             local.complete
         ) {
             renderText(
@@ -2878,20 +2250,13 @@
             return;
         }
 
-        /*
-         * Cached Google translations are also immediate.
-         */
-
         const learned =
-            cacheGet(
-                source
-            );
+            cacheGet(source);
 
         if (learned) {
             renderText(
                 node,
                 state,
-
                 postCorrect(
                     source,
                     learned.raw,
@@ -2902,13 +2267,8 @@
             return;
         }
 
-        /*
-         * Show a safe partial structural improvement immediately.
-         */
-
         if (
-            local.text !==
-            source
+            local.text !== source
         ) {
             renderText(
                 node,
@@ -2916,11 +2276,7 @@
                 local.text
             );
 
-            /*
-             * Do not lock it as final; Google may finish the rest.
-             */
-            state.final =
-                null;
+            state.final = null;
         }
 
         if (
@@ -2928,58 +2284,58 @@
                 source,
                 element
             ) ||
-            state.pending ===
-                source
+            state.pending === source
         ) {
             return;
         }
 
-        state.pending =
-            source;
+        state.pending = source;
 
-        queueTranslation(
-            source,
-            element,
+        const queued =
+            queueTranslation(
+                source,
+                element,
 
-            translated => {
-                if (
-                    mode !==
-                        MODE_EN ||
-                    !node.isConnected ||
-                    !translated
-                ) {
-                    return;
-                }
+                translated => {
+                    const latest =
+                        textState.get(node);
 
-                const latest =
-                    textState.get(
-                        node
+                    if (
+                        latest &&
+                        normalize(
+                            latest.source
+                        ) === source
+                    ) {
+                        latest.pending = null;
+                    }
+
+                    if (
+                        mode !== MODE_EN ||
+                        !node.isConnected ||
+                        !translated ||
+                        !latest ||
+                        normalize(
+                            latest.source
+                        ) !== source
+                    ) {
+                        return;
+                    }
+
+                    renderText(
+                        node,
+                        latest,
+                        exactCore(source) ??
+                            translated
                     );
-
-                if (
-                    !latest ||
-                    normalize(
-                        latest.source
-                    ) !==
-                        source
-                ) {
-                    return;
                 }
+            );
 
-                latest.pending =
-                    null;
-
-                renderText(
-                    node,
-                    latest,
-
-                    exactCore(
-                        source
-                    ) ??
-                    translated
-                );
-            }
-        );
+        if (
+            !queued &&
+            state.pending === source
+        ) {
+            state.pending = null;
+        }
     }
 
     /*
@@ -2993,13 +2349,10 @@
         name
     ) {
         let map =
-            attrState.get(
-                element
-            );
+            attrState.get(element);
 
         if (!map) {
-            map =
-                new Map();
+            map = new Map();
 
             attrState.set(
                 element,
@@ -3008,28 +2361,17 @@
         }
 
         const current =
-            element.getAttribute(
-                name
-            );
+            element.getAttribute(name);
 
         let state =
-            map.get(
-                name
-            );
+            map.get(name);
 
         if (!state) {
             state = {
-                source:
-                    current,
-
-                rendered:
-                    null,
-
-                final:
-                    null,
-
-                pending:
-                    null
+                source: current,
+                rendered: null,
+                final: null,
+                pending: null
             };
 
             map.set(
@@ -3038,22 +2380,13 @@
             );
 
         } else if (
-            current !==
-                state.source &&
-            current !==
-                state.rendered
+            current !== state.source &&
+            current !== state.rendered
         ) {
-            state.source =
-                current;
-
-            state.rendered =
-                null;
-
-            state.final =
-                null;
-
-            state.pending =
-                null;
+            state.source = current;
+            state.rendered = null;
+            state.final = null;
+            state.pending = null;
         }
 
         return state;
@@ -3065,12 +2398,8 @@
     ) {
         if (
             mode !== MODE_EN ||
-            !element.hasAttribute(
-                name
-            ) ||
-            isFixedNav(
-                element
-            )
+            !element.hasAttribute(name) ||
+            isFixedNav(element)
         ) {
             return;
         }
@@ -3082,27 +2411,20 @@
             );
 
         const source =
-            normalize(
-                state.source
-            );
+            normalize(state.source);
 
         if (
             !source ||
-            looksLikeIdentifier(
-                source
-            )
+            looksLikeIdentifier(source)
         ) {
             return;
         }
 
         if (
-            state.final !==
-            null
+            state.final !== null
         ) {
             if (
-                element.getAttribute(
-                    name
-                ) !==
+                element.getAttribute(name) !==
                 state.final
             ) {
                 element.setAttribute(
@@ -3115,13 +2437,10 @@
         }
 
         const local =
-            translateStructured(
-                source
-            );
+            translateStructured(source);
 
         if (
-            local.text !==
-                source &&
+            local.text !== source &&
             local.complete
         ) {
             state.final =
@@ -3139,9 +2458,7 @@
         }
 
         const learned =
-            cacheGet(
-                source
-            );
+            cacheGet(source);
 
         if (learned) {
             state.final =
@@ -3167,61 +2484,64 @@
                 source,
                 element
             ) ||
-            state.pending ===
-                source
+            state.pending === source
         ) {
             return;
         }
 
-        state.pending =
-            source;
+        state.pending = source;
 
-        queueTranslation(
-            source,
-            element,
+        const queued =
+            queueTranslation(
+                source,
+                element,
 
-            translated => {
-                if (
-                    mode !== MODE_EN ||
-                    !element.isConnected ||
-                    !translated
-                ) {
-                    return;
-                }
+                translated => {
+                    const latest =
+                        attributeState(
+                            element,
+                            name
+                        );
 
-                const latest =
-                    attributeState(
-                        element,
-                        name
+                    if (
+                        normalize(
+                            latest.source
+                        ) === source
+                    ) {
+                        latest.pending = null;
+                    }
+
+                    if (
+                        mode !== MODE_EN ||
+                        !element.isConnected ||
+                        !translated ||
+                        normalize(
+                            latest.source
+                        ) !== source
+                    ) {
+                        return;
+                    }
+
+                    latest.final =
+                        exactCore(source) ??
+                        translated;
+
+                    latest.rendered =
+                        latest.final;
+
+                    element.setAttribute(
+                        name,
+                        latest.final
                     );
-
-                if (
-                    normalize(
-                        latest.source
-                    ) !==
-                    source
-                ) {
-                    return;
                 }
+            );
 
-                latest.pending =
-                    null;
-
-                latest.final =
-                    exactCore(
-                        source
-                    ) ??
-                    translated;
-
-                latest.rendered =
-                    latest.final;
-
-                element.setAttribute(
-                    name,
-                    latest.final
-                );
-            }
-        );
+        if (
+            !queued &&
+            state.pending === source
+        ) {
+            state.pending = null;
+        }
     }
 
     /*
@@ -3230,9 +2550,7 @@
      * ============================================================
      */
 
-    function processInput(
-        element
-    ) {
+    function processInput(element) {
         if (
             !(
                 element instanceof
@@ -3242,34 +2560,23 @@
                 'button',
                 'submit',
                 'reset'
-            ].includes(
-                element.type
-            )
+            ].includes(element.type)
         ) {
             return;
         }
 
         let state =
-            inputState.get(
-                element
-            );
+            inputState.get(element);
 
         const current =
             element.value;
 
         if (!state) {
             state = {
-                source:
-                    current,
-
-                rendered:
-                    null,
-
-                final:
-                    null,
-
-                pending:
-                    null
+                source: current,
+                rendered: null,
+                final: null,
+                pending: null
             };
 
             inputState.set(
@@ -3278,53 +2585,35 @@
             );
 
         } else if (
-            current !==
-                state.source &&
-            current !==
-                state.rendered
+            current !== state.source &&
+            current !== state.rendered
         ) {
-            state.source =
-                current;
-
-            state.rendered =
-                null;
-
-            state.final =
-                null;
-
-            state.pending =
-                null;
+            state.source = current;
+            state.rendered = null;
+            state.final = null;
+            state.pending = null;
         }
 
         const source =
-            normalize(
-                state.source
-            );
+            normalize(state.source);
 
         if (
             !source ||
-            looksLikeIdentifier(
-                source
-            )
+            looksLikeIdentifier(source)
         ) {
             return;
         }
 
         const local =
-            translateStructured(
-                source
-            );
+            translateStructured(source);
 
         const learned =
-            cacheGet(
-                source
-            );
+            cacheGet(source);
 
         const immediate =
             (
                 local.complete &&
-                local.text !==
-                    source
+                local.text !== source
             )
                 ? local.text
 
@@ -3337,22 +2626,11 @@
                     : null;
 
         if (
-            immediate !==
-            null
+            immediate !== null
         ) {
-            state.final =
-                immediate;
-
-            state.rendered =
-                immediate;
-
-            element.value =
-                immediate;
-
-            translatedSubmitInputs
-                .add(
-                    element
-                );
+            state.final = immediate;
+            state.rendered = immediate;
+            element.value = immediate;
 
             return;
         }
@@ -3362,81 +2640,72 @@
                 source,
                 element
             ) ||
-            state.pending ===
-                source
+            state.pending === source
         ) {
             return;
         }
 
-        state.pending =
-            source;
+        state.pending = source;
 
-        queueTranslation(
-            source,
-            element,
+        const queued =
+            queueTranslation(
+                source,
+                element,
 
-            translated => {
-                if (
-                    mode !== MODE_EN ||
-                    !element.isConnected ||
-                    !translated
-                ) {
-                    return;
+                translated => {
+                    const latest =
+                        inputState.get(element);
+
+                    if (
+                        latest &&
+                        normalize(
+                            latest.source
+                        ) === source
+                    ) {
+                        latest.pending = null;
+                    }
+
+                    if (
+                        mode !== MODE_EN ||
+                        !element.isConnected ||
+                        !translated ||
+                        !latest ||
+                        normalize(
+                            latest.source
+                        ) !== source
+                    ) {
+                        return;
+                    }
+
+                    latest.final =
+                        exactCore(source) ??
+                        translated;
+
+                    latest.rendered =
+                        latest.final;
+
+                    element.value =
+                        latest.final;
                 }
+            );
 
-                const latest =
-                    inputState.get(
-                        element
-                    );
-
-                if (
-                    !latest ||
-                    normalize(
-                        latest.source
-                    ) !==
-                    source
-                ) {
-                    return;
-                }
-
-                latest.pending =
-                    null;
-
-                latest.final =
-                    exactCore(
-                        source
-                    ) ??
-                    translated;
-
-                latest.rendered =
-                    latest.final;
-
-                element.value =
-                    latest.final;
-
-                translatedSubmitInputs
-                    .add(
-                        element
-                    );
-            }
-        );
+        if (
+            !queued &&
+            state.pending === source
+        ) {
+            state.pending = null;
+        }
     }
 
-    function processElement(
-        element
-    ) {
+    function processElement(element) {
         if (
             mode !== MODE_EN ||
             !(
                 element instanceof
                 Element
             ) ||
-            ignored(
-                element
-            ) ||
-            isFixedNav(
-                element
-            )
+            ignored(element) ||
+            isFixedNav(element)
         ) {
             return;
         }
@@ -3456,9 +2725,7 @@
             );
         }
 
-        processInput(
-            element
-        );
+        processInput(element);
     }
 
     /*
@@ -3483,10 +2750,7 @@
             root.nodeType ===
             Node.TEXT_NODE
         ) {
-            processText(
-                root
-            );
-
+            processText(root);
             return;
         }
 
@@ -3495,19 +2759,13 @@
                 root instanceof
                 Element
             ) ||
-            ignored(
-                root
-            ) ||
-            isFixedNav(
-                root
-            )
+            ignored(root) ||
+            isFixedNav(root)
         ) {
             return;
         }
 
-        processElement(
-            root
-        );
+        processElement(root);
 
         const walker =
             document.createTreeWalker(
@@ -3523,12 +2781,8 @@
                             Node.ELEMENT_NODE
                         ) {
                             return (
-                                ignored(
-                                    node
-                                ) ||
-                                isFixedNav(
-                                    node
-                                )
+                                ignored(node) ||
+                                isFixedNav(node)
                             )
                                 ? NodeFilter
                                     .FILTER_REJECT
@@ -3545,15 +2799,9 @@
 
                             return (
                                 !parent ||
-                                ignored(
-                                    parent
-                                ) ||
-                                isEditable(
-                                    parent
-                                ) ||
-                                isFixedNav(
-                                    parent
-                                )
+                                ignored(parent) ||
+                                isEditable(parent) ||
+                                isFixedNav(parent)
                             )
                                 ? NodeFilter
                                     .FILTER_REJECT
@@ -3568,12 +2816,10 @@
             );
 
         let node;
-        let count =
-            0;
+        let count = 0;
 
         while (
-            count <
-                limit &&
+            count < limit &&
             (
                 node =
                     walker.nextNode()
@@ -3583,14 +2829,10 @@
                 node.nodeType ===
                 Node.TEXT_NODE
             ) {
-                processText(
-                    node
-                );
+                processText(node);
 
             } else {
-                processElement(
-                    node
-                );
+                processElement(node);
             }
 
             count++;
@@ -3633,17 +2875,11 @@
         for (
             const element
             of document
-                .querySelectorAll(
-                    selector
-                )
+                .querySelectorAll(selector)
         ) {
             if (
-                !isOurUi(
-                    element
-                ) &&
-                !isFixedNav(
-                    element
-                )
+                !isOurUi(element) &&
+                !isFixedNav(element)
             ) {
                 processSubtree(
                     element,
@@ -3657,50 +2893,34 @@
      * ============================================================
      * DYNAMIC LECTIO CONTENT
      * ============================================================
-     *
-     * childList only.
-     *
-     * NO characterData observer.
      */
 
-    function queueMutation(
-        node
-    ) {
+    function queueMutation(node) {
         if (
             mode !== MODE_EN ||
             !node ||
             ![
                 Node.ELEMENT_NODE,
                 Node.TEXT_NODE
-            ].includes(
-                node.nodeType
-            )
+            ].includes(node.nodeType)
         ) {
             return;
         }
 
         if (
-            node instanceof
-                Element &&
+            node instanceof Element &&
             (
-                isOurUi(
-                    node
-                ) ||
-                isFixedNav(
-                    node
-                )
+                isOurUi(node) ||
+                isFixedNav(node)
             )
         ) {
             return;
         }
 
-        mutationRoots.add(
-            node
-        );
+        mutationRoots.add(node);
 
         if (
-            mutationTimer !==
-            null
+            mutationTimer !== null
         ) {
             return;
         }
@@ -3708,8 +2928,7 @@
         mutationTimer =
             setTimeout(
                 () => {
-                    mutationTimer =
-                        null;
+                    mutationTimer = null;
 
                     const roots =
                         Array.from(
@@ -3717,20 +2936,17 @@
                         )
                             .filter(
                                 item =>
-                                    item
-                                        .isConnected
+                                    item.isConnected
                             );
 
-                    mutationRoots
-                        .clear();
+                    mutationRoots.clear();
 
                     const minimal =
                         roots.filter(
                             root =>
                                 !roots.some(
                                     other =>
-                                        other !==
-                                            root &&
+                                        other !== root &&
                                         other instanceof
                                             Element &&
                                         other.contains
@@ -3769,8 +2985,7 @@
             new MutationObserver(
                 mutations => {
                     if (
-                        mode !==
-                        MODE_EN
+                        mode !== MODE_EN
                     ) {
                         return;
                     }
@@ -3798,11 +3013,8 @@
         observer.observe(
             document.body,
             {
-                subtree:
-                    true,
-
-                childList:
-                    true
+                subtree: true,
+                childList: true
             }
         );
     }
@@ -3811,16 +3023,6 @@
      * ============================================================
      * DA / EN SWITCH
      * ============================================================
-     *
-     * IMPORTANT CHANGE:
-     *
-     * We reload when the language changes.
-     *
-     * Lectio itself is the authoritative Danish source, so a reload
-     * gives us a completely clean DOM.
-     *
-     * This is far safer than trying to reconstruct Danish after
-     * hundreds of live translations.
      */
 
     function installStyles() {
@@ -3905,9 +3107,7 @@
         `;
 
         document.head
-            .appendChild(
-                style
-            );
+            .appendChild(style);
     }
 
     function installSwitch() {
@@ -3920,9 +3120,7 @@
         }
 
         const box =
-            document.createElement(
-                'div'
-            );
+            document.createElement('div');
 
         box.id =
             'lectio-english-switch';
@@ -3943,39 +3141,28 @@
 
                 if (
                     !button ||
-                    button.dataset.lang ===
-                        mode ||
+                    button.dataset.lang === mode ||
                     ![
                         MODE_DA,
                         MODE_EN
                     ].includes(
-                        button.dataset
-                            .lang
+                        button.dataset.lang
                     )
                 ) {
                     return;
                 }
 
-                /*
-                 * Save preference first.
-                 */
                 GM_setValue(
                     STORAGE_MODE,
-                    button.dataset
-                        .lang
+                    button.dataset.lang
                 );
 
-                /*
-                 * Then get a clean Lectio DOM from the server.
-                 */
                 location.reload();
             }
         );
 
         document.body
-            .appendChild(
-                box
-            );
+            .appendChild(box);
 
         for (
             const button
@@ -3992,9 +3179,7 @@
         }
     }
 
-    function showToast(
-        text
-    ) {
+    function showToast(text) {
         document
             .getElementById(
                 'lectio-english-toast'
@@ -4002,9 +3187,7 @@
             ?.remove();
 
         const toast =
-            document.createElement(
-                'div'
-            );
+            document.createElement('div');
 
         toast.id =
             'lectio-english-toast';
@@ -4013,9 +3196,7 @@
             text;
 
         document.body
-            .appendChild(
-                toast
-            );
+            .appendChild(toast);
 
         setTimeout(
             () =>
@@ -4029,9 +3210,14 @@
      * ASP.NET FORM SAFETY
      * ============================================================
      *
-     * Some old ASP.NET controls submit their visible value.
+     * Important memory fix:
      *
-     * Put the original Danish button value back at submission time.
+     * Earlier versions retained translated input controls inside
+     * a normal Set. Removed controls therefore remained strongly
+     * referenced indefinitely.
+     *
+     * We now use inputState (a WeakMap) and query only the actual
+     * form being submitted.
      */
 
     function installFormSafety() {
@@ -4039,28 +3225,32 @@
             'submit',
 
             event => {
+                const form =
+                    event.target;
+
+                if (
+                    !(
+                        form instanceof
+                        HTMLFormElement
+                    )
+                ) {
+                    return;
+                }
+
                 for (
                     const input
-                    of translatedSubmitInputs
+                    of form.querySelectorAll(
+                        'input[type="button"],' +
+                        'input[type="submit"],' +
+                        'input[type="reset"]'
+                    )
                 ) {
-                    if (
-                        !input
-                            .isConnected ||
-                        input.form !==
-                            event.target
-                    ) {
-                        continue;
-                    }
-
                     const state =
-                        inputState.get(
-                            input
-                        );
+                        inputState.get(input);
 
                     if (state) {
                         input.value =
-                            state.source ??
-                            '';
+                            state.source ?? '';
                     }
                 }
             },
@@ -4078,7 +3268,7 @@
     function init() {
         console.log(
             LOG,
-            'v1.5.1 started'
+            'v1.5.2 started'
         );
 
         installStyles();
@@ -4089,21 +3279,12 @@
             mode === MODE_EN
         ) {
             /*
-             * CRITICAL:
-             *
-             * Navigation gets exclusive ownership BEFORE the generic
-             * translator sees the page.
+             * Navigation gets exclusive ownership first.
              */
             repairNavigation();
 
             /*
-             * Synchronous pass:
-             *
-             * - curated translations
-             * - structural translations
-             * - learned cache
-             *
-             * The page is still hidden here.
+             * Immediate cached/local pass while the page is hidden.
              */
             processSubtree(
                 document.body,
@@ -4112,18 +3293,15 @@
 
             repairNavigation();
 
-            /*
-             * Known UI is now English.
-             */
             revealPage();
 
             /*
-             * Dynamic changes from Lectio.
+             * Primary dynamic mechanism.
              */
             installObserver();
 
             /*
-             * Lectio performs some late post-load work.
+             * A few targeted late repairs for Lectio's post-load UI.
              */
             setTimeout(
                 repairNavigation,
@@ -4141,18 +3319,35 @@
             );
 
             /*
-             * Navigation repair is tiny.
+             * Fallback navigation scan.
+             *
+             * Reduced substantially from the old ~650 ms loop.
              */
             setInterval(
-                repairNavigation,
+                () => {
+                    if (
+                        !document.hidden
+                    ) {
+                        repairNavigation();
+                    }
+                },
                 CFG.navRepairMs
             );
 
             /*
-             * Slightly broader control repair.
+             * Broader fallback repair.
+             *
+             * MutationObserver remains the main path, so there is
+             * no reason to rescan the UI every couple of seconds.
              */
             setInterval(
-                uiRepair,
+                () => {
+                    if (
+                        !document.hidden
+                    ) {
+                        uiRepair();
+                    }
+                },
                 CFG.uiRepairMs
             );
 
