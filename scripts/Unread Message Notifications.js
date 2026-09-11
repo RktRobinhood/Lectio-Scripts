@@ -1,1177 +1,1868 @@
 // ==UserScript==
 // @name         Lectio - Unread Message Notifications
 // @namespace    https://www.lectio.dk/lectio/223/
-// @version      0.2.0
-// @description  Shows a Lectio-style unread-message badge beside Beskeder / Messages, with sender previews on hover.
+// @version      0.2.3
+// @description  Shows one unread-message badge using Lectio's own unread count. Includes direct and group-addressed messages.
 // @match        https://www.lectio.dk/lectio/223/*
 // @grant        none
 // @run-at       document-idle
 // ==/UserScript==
 
 (() => {
-  'use strict';
+    'use strict';
 
-  const SCHOOL = '223';
-  const INBOX_URL = `/lectio/${SCHOOL}/beskeder2.aspx`;
+    // ============================================================
+    // CONFIG
+    // ============================================================
 
-  const CACHE_KEY = 'lectioUnreadMessages.cache.v1';
-  const POLL_MS = 10 * 60 * 1000;
-  const CACHE_RENDER_MAX_AGE = 10 * 60 * 1000;
-  const RETURN_REFRESH_AGE = 10 * 60 * 1000;
-  const MAX_PREVIEW_ITEMS = 6;
+    const SCHOOL = '223';
 
-  const HOST_CLASS = 'lectio-unread-host';
-  const BADGE_CLASS = 'lectio-unread-badge';
-  const TOOLTIP_CLASS = 'lectio-unread-tooltip';
-  const MESSAGE_LINK_SELECTOR =
-    `a[href*="/lectio/${SCHOOL}/beskeder2.aspx"], a[href$="/beskeder2.aspx"]`;
+    const HOME_URL =
+        `/lectio/${SCHOOL}/forside.aspx`;
 
-  let state = loadCache();
-  let inFlight = false;
-  let observerQueued = false;
+    const INBOX_URL =
+        `/lectio/${SCHOOL}/beskeder2.aspx`;
 
-  init();
+    /*
+     * New cache version deliberately avoids the bad "100 unread"
+     * state produced by v0.2.2.
+     */
+    const CACHE_KEY =
+        'lectioUnreadMessages.cache.v3';
 
-  function init() {
-    injectStyles();
+    const POLL_MS =
+        10 * 60 * 1000;
 
-    // Render a recent cached result immediately so navigation does not have to
-    // wait for the first background request.
-    if (state && Date.now() - state.checkedAt > CACHE_RENDER_MAX_AGE) {
-      state = null;
-    }
+    const RETURN_REFRESH_AGE =
+        10 * 60 * 1000;
 
-    attachBadges();
+    const CACHE_MAX_AGE =
+        10 * 60 * 1000;
 
-    if (state) {
-      renderAll(false);
-    }
+    const MAX_PREVIEW_ITEMS = 6;
 
-    // Translation/theme scripts can replace Lectio navigation nodes after this
-    // script has run. Watch only for changes that could affect message links.
-    //
-    // Critically, ignore mutations inside our own badge/tooltip UI so rendering
-    // the badge cannot trigger an observer -> render -> observer feedback loop.
-    const observer = new MutationObserver((mutations) => {
-      const relevant = mutations.some(mutationTouchesMessageNavigation);
+    const HOST_CLASS =
+        'lectio-unread-host';
 
-      if (!relevant || observerQueued) {
-        return;
-      }
+    const BADGE_CLASS =
+        'lectio-unread-badge';
 
-      observerQueued = true;
+    const TOOLTIP_CLASS =
+        'lectio-unread-tooltip';
 
-      queueMicrotask(() => {
-        observerQueued = false;
-        attachBadges();
-      });
-    });
+    const MESSAGE_LINK_SELECTOR =
+        `a[href*="/lectio/${SCHOOL}/beskeder2.aspx"]`;
 
-    if (document.body) {
-      observer.observe(document.body, {
-        childList: true,
-        subtree: true,
-      });
-    }
+    let state =
+        loadCache();
 
-    // If another Lectio tab refreshes the shared cache, update this tab too.
-    window.addEventListener('storage', (event) => {
-      if (event.key !== CACHE_KEY || !event.newValue) {
-        return;
-      }
+    let inFlight = false;
 
-      try {
-        const incoming = JSON.parse(event.newValue);
+    let observerQueued = false;
 
-        if (!isValidState(incoming)) {
-          return;
+    init();
+
+    // ============================================================
+    // INITIALISATION
+    // ============================================================
+
+    function init() {
+        injectStyles();
+
+        /*
+         * Discard stale cached state.
+         */
+        if (
+            state &&
+            Date.now() - state.checkedAt >
+                CACHE_MAX_AGE
+        ) {
+            state = null;
         }
 
-        const oldCount = state?.messages?.length ?? 0;
+        syncBadge(false);
 
-        state = incoming;
+        installNavigationObserver();
 
-        attachBadges();
-        renderAll(incoming.messages.length > oldCount);
-      } catch (_) {
-        // Ignore malformed cache data.
-      }
-    });
-
-    // Returning to Lectio after it has been sitting for at least ten minutes
-    // warrants a new check.
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState !== 'visible') {
-        return;
-      }
-
-      const age = Date.now() - (state?.checkedAt || 0);
-
-      if (age >= RETURN_REFRESH_AGE) {
-        refreshUnreadMessages();
-      }
-    });
-
-    // Let Lectio finish its own page setup before the initial request.
-    window.setTimeout(() => {
-      refreshUnreadMessages();
-    }, 600);
-
-    // Modest periodic polling while the tab is actually visible.
-    window.setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        refreshUnreadMessages();
-      }
-    }, POLL_MS);
-  }
-
-  async function refreshUnreadMessages() {
-    if (inFlight) {
-      return;
-    }
-
-    inFlight = true;
-
-    try {
-      const doc = await fetchHtml(INBOX_URL);
-      const parsed = parseUnreadMessages(doc);
-
-      // If Lectio changes its message markup, keep the previous known-good
-      // result rather than falsely displaying "0 unread".
-      if (!parsed) {
-        console.warn(
-          '[Lectio Message Notifications] Could not recognise the current message-list markup.'
+        window.addEventListener(
+            'storage',
+            handleStorageUpdate
         );
-        return;
-      }
 
-      const oldCount = state?.messages?.length ?? 0;
+        document.addEventListener(
+            'visibilitychange',
+            handleVisibilityChange
+        );
 
-      const next = {
-        checkedAt: Date.now(),
-        messages: parsed,
-      };
+        /*
+         * Give Lectio a moment to finish building the page.
+         */
+        window.setTimeout(
+            refreshUnreadMessages,
+            700
+        );
 
-      state = next;
-
-      saveCache(next);
-      attachBadges();
-      renderAll(next.messages.length > oldCount);
-    } catch (err) {
-      console.warn(
-        '[Lectio Message Notifications] Refresh failed:',
-        err
-      );
-    } finally {
-      inFlight = false;
-    }
-  }
-
-  async function fetchHtml(url) {
-    const res = await fetch(url, {
-      method: 'GET',
-      credentials: 'include',
-      cache: 'no-store',
-      headers: {
-        Accept: 'text/html,application/xhtml+xml',
-      },
-    });
-
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status} for ${url}`);
+        /*
+         * Normal background refresh.
+         */
+        window.setInterval(
+            () => {
+                if (
+                    document.visibilityState ===
+                    'visible'
+                ) {
+                    refreshUnreadMessages();
+                }
+            },
+            POLL_MS
+        );
     }
 
-    const finalUrl = new URL(res.url, location.origin);
+    // ============================================================
+    // AUTHORITATIVE UNREAD COUNT
+    // ============================================================
 
-    if (!/\/beskeder2\.aspx$/i.test(finalUrl.pathname)) {
-      throw new Error(
-        'Lectio did not return the inbox page; the login session may have expired.'
-      );
-    }
-
-    const html = await res.text();
-
-    return new DOMParser().parseFromString(
-      html,
-      'text/html'
-    );
-  }
-
-  function parseUnreadMessages(doc) {
-    // Current Lectio message rows use .message-list-thread-container, and
-    // unread rows are explicitly marked <tr class="unread">.
-    const currentRows = [...doc.querySelectorAll('tr')].filter(
-      (row) =>
-        row.querySelector(
-          '.message-list-thread-container'
-        )
-    );
-
-    // A valid empty inbox can have no rows, so also recognise the surrounding
-    // message UI before deciding parsing failed.
-    const hasMessageUi = Boolean(
-      doc.querySelector(
-        '.message-folder-header, ' +
-          '.message-thread-container, ' +
-          '[id*="threadGV"], ' +
-          '[class*="message-list-thread"]'
-      )
-    );
-
-    if (!currentRows.length && !hasMessageUi) {
-      return null;
-    }
-
-    const unreadRows = currentRows.filter(
-      (row) => row.classList.contains('unread')
-    );
-
-    return unreadRows.map((row, index) => {
-      const container =
-        row.querySelector(
-          '.message-list-thread-container'
-        ) || row;
-
-      const sender = cleanText(
-        container.querySelector(
-          '.message-list-thread-from'
-        )?.textContent ||
-          row.querySelector(
-            '[class*="thread-from"], [class*="sender"]'
-          )?.textContent ||
-          ''
-      );
-
-      const subject = cleanText(
-        container.querySelector(
-          '.message-list-thread-subject'
-        )?.textContent ||
-          row.querySelector(
-            '[class*="thread-subject"], [class*="subject"]'
-          )?.textContent ||
-          ''
-      );
-
-      const datetime = cleanText(
-        container.querySelector(
-          '.message-list-thread-datetime'
-        )?.textContent ||
-          row.querySelector(
-            '[class*="datetime"], [class*="date"]'
-          )?.textContent ||
-          ''
-      );
-
-      const subjectLink =
-        container.querySelector(
-          '.message-list-thread-subject a[href]'
-        ) ||
-        container.querySelector('a[href]');
-
-      return {
-        sender,
-        subject,
-        datetime,
-        href: subjectLink
-          ? new URL(
-              subjectLink.getAttribute('href'),
-              location.origin
-            ).href
-          : INBOX_URL,
-        key: buildMessageKey(
-          row,
-          sender,
-          subject,
-          datetime,
-          index
-        ),
-      };
-    });
-  }
-
-  function buildMessageKey(
-    row,
-    sender,
-    subject,
-    datetime,
-    index
-  ) {
-    const id =
-      row.getAttribute('data-id') ||
-      row.id ||
-      row.querySelector('[id]')?.id ||
-      '';
-
-    return [
-      id,
-      sender,
-      subject,
-      datetime,
-      index,
-    ].join('|');
-  }
-
-  function cleanText(value) {
-    return String(value || '')
-      .replace(/\u00a0/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-  }
-
-  function attachBadges() {
-    const links = getMessageLinks();
-
-    for (const link of links) {
-      link.classList.add(HOST_CLASS);
-
-      /*
-       * IMPORTANT:
-       *
-       * Existing badges are deliberately left alone here.
-       *
-       * State updates are handled by renderAll().
-       *
-       * This makes attachBadges() idempotent and prevents
-       * MutationObserver activity from repeatedly rebuilding
-       * the tooltip.
-       */
-      if (
-        link.querySelector(
-          `:scope > .${BADGE_CLASS}`
-        )
-      ) {
-        continue;
-      }
-
-      const badge =
-        document.createElement('span');
-
-      badge.className = BADGE_CLASS;
-      badge.setAttribute(
-        'aria-hidden',
-        'true'
-      );
-
-      const count =
-        document.createElement('span');
-
-      count.className =
-        'lectio-unread-count';
-
-      badge.appendChild(count);
-
-      const tooltip =
-        document.createElement('span');
-
-      tooltip.className =
-        TOOLTIP_CLASS;
-
-      badge.appendChild(tooltip);
-
-      link.appendChild(badge);
-
-      updateBadge(
-        badge,
-        false
-      );
-    }
-  }
-
-  function mutationTouchesMessageNavigation(
-    mutation
-  ) {
     /*
-     * Never react to DOM modifications generated inside
-     * our own badge.
+     * This is the important change.
      *
-     * This is the main protection against a self-sustaining
-     * MutationObserver loop.
-     */
-    if (
-      mutation.target instanceof Element &&
-      mutation.target.closest(
-        `.${BADGE_CLASS}`
-      )
-    ) {
-      return false;
-    }
-
-    /*
-     * A message link itself, or something inside one,
-     * was rewritten.
-     */
-    if (
-      mutation.target instanceof Element &&
-      (
-        mutation.target.matches(
-          MESSAGE_LINK_SELECTOR
-        ) ||
-        mutation.target.closest(
-          MESSAGE_LINK_SELECTOR
-        )
-      )
-    ) {
-      return true;
-    }
-
-    /*
-     * A new subtree containing a message link was added.
+     * We no longer decide whether a message "belongs" to the user.
      *
-     * This catches Lectio or another userscript rebuilding
-     * the navigation bar.
+     * Lectio already knows that.
+     *
+     * If Lectio's front page says:
+     *
+     *     2 ulæste
+     *
+     * then the userscript shows 2.
+     *
+     * It makes no difference whether those messages were sent:
+     *
+     * - directly to the user
+     * - to a class
+     * - to an activity
+     * - to a group
+     * - to several groups
+     *
+     * The recipient field is never inspected.
      */
-    for (
-      const node
-      of mutation.addedNodes
-    ) {
-      if (
-        !(node instanceof Element)
-      ) {
-        continue;
-      }
+    function parseHomepageUnreadCount(doc) {
+        if (!doc?.body) {
+            return null;
+        }
 
-      if (
-        node.matches(
-          MESSAGE_LINK_SELECTOR
-        ) ||
-        node.querySelector(
-          MESSAGE_LINK_SELECTOR
-        )
-      ) {
-        return true;
-      }
+        /*
+         * First find things literally called "Beskeder" / "Messages".
+         *
+         * There may be several:
+         * - top navigation
+         * - front-page message card
+         *
+         * We walk upward from each looking for Lectio's unread text.
+         */
+        const headers = [
+            ...doc.querySelectorAll(
+                'a, span, div, td, th, ' +
+                'h1, h2, h3, h4, strong'
+            )
+        ].filter(element => {
+            const text =
+                cleanText(
+                    element.textContent
+                );
+
+            return /^(Beskeder|Messages)$/i
+                .test(text);
+        });
+
+        for (
+            const header
+            of headers
+        ) {
+            let container =
+                header;
+
+            for (
+                let depth = 0;
+                depth < 7;
+                depth++
+            ) {
+                container =
+                    container.parentElement;
+
+                if (!container) {
+                    break;
+                }
+
+                const text =
+                    cleanText(
+                        container.textContent
+                    );
+
+                /*
+                 * Stop once we've climbed into a huge page wrapper.
+                 */
+                if (
+                    text.length >
+                    2500
+                ) {
+                    break;
+                }
+
+                const count =
+                    extractUnreadNumber(
+                        text
+                    );
+
+                if (
+                    count !== null
+                ) {
+                    return count;
+                }
+            }
+        }
+
+        /*
+         * Second pass:
+         *
+         * Look for short standalone elements such as:
+         *
+         *     2 ulæste
+         *     2 unread
+         *
+         * This matches the front-page counter shown in your
+         * screenshot without scanning arbitrary long page text.
+         */
+        const candidates = [
+            ...doc.querySelectorAll(
+                'span, div, td, th, a, strong'
+            )
+        ];
+
+        const values = [];
+
+        for (
+            const element
+            of candidates
+        ) {
+            const text =
+                cleanText(
+                    element.textContent
+                );
+
+            if (
+                !text ||
+                text.length > 80
+            ) {
+                continue;
+            }
+
+            const count =
+                extractStandaloneUnreadNumber(
+                    text
+                );
+
+            if (
+                count !== null
+            ) {
+                values.push(count);
+            }
+        }
+
+        if (
+            values.length
+        ) {
+            return Math.max(
+                ...values
+            );
+        }
+
+        return null;
     }
 
-    return false;
-  }
+    function extractUnreadNumber(text) {
+        const source =
+            cleanText(text);
 
-  function getMessageLinks() {
-    return [
-      ...document.querySelectorAll(
-        MESSAGE_LINK_SELECTOR
-      ),
-    ].filter(
-      (link) =>
-        !link.closest(
-          `.${TOOLTIP_CLASS}`
-        )
-    );
-  }
+        const patterns = [
+            /(?:^|\s)(\d{1,3})\s+ulæst(?:e)?(?:\s+besked(?:er)?)?(?=\s|$)/i,
 
-  function renderAll(animate) {
-    for (
-      const badge
-      of document.querySelectorAll(
-        `.${BADGE_CLASS}`
-      )
+            /(?:^|\s)(\d{1,3})\s+unread(?:\s+messages?)?(?=\s|$)/i
+        ];
+
+        for (
+            const pattern
+            of patterns
+        ) {
+            const match =
+                source.match(pattern);
+
+            if (!match) {
+                continue;
+            }
+
+            const value =
+                Number(match[1]);
+
+            if (
+                Number.isInteger(value) &&
+                value >= 0 &&
+                value <= 999
+            ) {
+                return value;
+            }
+        }
+
+        return null;
+    }
+
+    function extractStandaloneUnreadNumber(
+        text
     ) {
-      updateBadge(
+        const source =
+            cleanText(text);
+
+        let match =
+            source.match(
+                /^(\d{1,3})\s+ulæst(?:e)?(?:\s+besked(?:er)?)?$/i
+            );
+
+        if (!match) {
+            match =
+                source.match(
+                    /^(\d{1,3})\s+unread(?:\s+messages?)?$/i
+                );
+        }
+
+        if (!match) {
+            return null;
+        }
+
+        const value =
+            Number(match[1]);
+
+        return (
+            Number.isInteger(value) &&
+            value >= 0 &&
+            value <= 999
+        )
+            ? value
+            : null;
+    }
+
+    // ============================================================
+    // REFRESH
+    // ============================================================
+
+    async function refreshUnreadMessages() {
+        if (inFlight) {
+            return;
+        }
+
+        inFlight = true;
+
+        try {
+            const previousCount =
+                getUnreadCount();
+
+            let unreadCount = null;
+
+            /*
+             * If we're already on Forside, try the live DOM first.
+             */
+            if (
+                /\/forside\.aspx$/i
+                    .test(
+                        location.pathname
+                    )
+            ) {
+                unreadCount =
+                    parseHomepageUnreadCount(
+                        document
+                    );
+            }
+
+            /*
+             * Otherwise fetch Forside in the background.
+             *
+             * Forside is the authoritative source for the count.
+             */
+            if (
+                unreadCount === null
+            ) {
+                const homeDoc =
+                    await fetchDocument(
+                        HOME_URL,
+                        /\/forside\.aspx$/i
+                    );
+
+                unreadCount =
+                    parseHomepageUnreadCount(
+                        homeDoc
+                    );
+            }
+
+            /*
+             * Do NOT turn a parsing failure into zero unread.
+             *
+             * Keep the previous known-good state instead.
+             */
+            if (
+                unreadCount === null
+            ) {
+                console.warn(
+                    '[Lectio Message Notifications] ' +
+                    'Could not locate Lectio\'s unread count on Forside.'
+                );
+
+                return;
+            }
+
+            let messages = [];
+
+            /*
+             * Inbox parsing is now ONLY for previews.
+             *
+             * It does not determine the badge number.
+             */
+            if (
+                unreadCount > 0
+            ) {
+                try {
+                    const inboxDoc =
+                        await fetchDocument(
+                            INBOX_URL,
+                            /\/beskeder2\.aspx$/i
+                        );
+
+                    messages =
+                        parseStrictUnreadPreviews(
+                            inboxDoc
+                        );
+
+                    /*
+                     * Never allow preview parsing to contradict Lectio's
+                     * authoritative unread count.
+                     */
+                    if (
+                        messages.length >
+                        unreadCount
+                    ) {
+                        messages =
+                            messages.slice(
+                                0,
+                                unreadCount
+                            );
+                    }
+
+                } catch (error) {
+                    console.warn(
+                        '[Lectio Message Notifications] ' +
+                        'Preview parsing failed:',
+                        error
+                    );
+
+                    messages = [];
+                }
+            }
+
+            state = {
+                checkedAt:
+                    Date.now(),
+
+                unreadCount,
+
+                messages
+            };
+
+            saveCache(state);
+
+            syncBadge(
+                unreadCount >
+                previousCount
+            );
+
+            /*
+             * Useful test output.
+             */
+            console.debug(
+                '[Lectio Message Notifications]',
+                {
+                    authoritativeUnreadCount:
+                        unreadCount,
+
+                    parsedUnreadPreviews:
+                        messages.length
+                }
+            );
+
+        } catch (error) {
+            console.warn(
+                '[Lectio Message Notifications] Refresh failed:',
+                error
+            );
+
+        } finally {
+            inFlight = false;
+        }
+    }
+
+    // ============================================================
+    // FETCH
+    // ============================================================
+
+    async function fetchDocument(
+        url,
+        expectedPath
+    ) {
+        const response =
+            await fetch(
+                url,
+                {
+                    method:
+                        'GET',
+
+                    credentials:
+                        'include',
+
+                    cache:
+                        'no-store',
+
+                    headers: {
+                        Accept:
+                            'text/html,application/xhtml+xml'
+                    }
+                }
+            );
+
+        if (
+            !response.ok
+        ) {
+            throw new Error(
+                `HTTP ${response.status} for ${url}`
+            );
+        }
+
+        const finalUrl =
+            new URL(
+                response.url,
+                location.origin
+            );
+
+        if (
+            !expectedPath.test(
+                finalUrl.pathname
+            )
+        ) {
+            throw new Error(
+                'Lectio returned an unexpected page. ' +
+                'The login session may have expired.'
+            );
+        }
+
+        const html =
+            await response.text();
+
+        return new DOMParser()
+            .parseFromString(
+                html,
+                'text/html'
+            );
+    }
+
+    // ============================================================
+    // STRICT INBOX PREVIEW PARSER
+    // ============================================================
+
+    /*
+     * v0.2.2 made the mistake of searching for ANY descendant
+     * whose class contained "unread".
+     *
+     * Lectio apparently has unread-related controls/classes inside
+     * many or all message rows, which resulted in:
+     *
+     *     parsedUnreadThreads: 100
+     *
+     * This parser is deliberately conservative.
+     *
+     * Only the message row/container ITSELF may identify itself as
+     * unread.
+     *
+     * If we cannot prove that a particular row is unread, it is not
+     * used for the preview.
+     *
+     * The badge still remains correct because Forside supplies the
+     * authoritative count.
+     */
+    function parseStrictUnreadPreviews(
+        doc
+    ) {
+        const units =
+            new Set();
+
+        /*
+         * Classic Lectio row marker.
+         */
+        for (
+            const row
+            of doc.querySelectorAll(
+                'tr.unread'
+            )
+        ) {
+            units.add(row);
+        }
+
+        /*
+         * Container itself explicitly marked unread.
+         */
+        for (
+            const container
+            of doc.querySelectorAll(
+                '.message-list-thread-container.unread'
+            )
+        ) {
+            units.add(
+                container.closest('tr') ||
+                container
+            );
+        }
+
+        /*
+         * Explicit state attributes on message rows.
+         */
+        for (
+            const row
+            of doc.querySelectorAll(
+                'tr[data-status="unread" i],' +
+                'tr[data-state="unread" i],' +
+                'tr[aria-label*="unread" i]'
+            )
+        ) {
+            units.add(row);
+        }
+
+        /*
+         * Danish explicit state attributes, if Lectio uses them.
+         */
+        for (
+            const row
+            of doc.querySelectorAll(
+                'tr[data-status*="ulæst" i],' +
+                'tr[data-state*="ulæst" i],' +
+                'tr[aria-label*="ulæst" i]'
+            )
+        ) {
+            units.add(row);
+        }
+
+        return [
+            ...units
+        ].map(
+            (
+                unit,
+                index
+            ) =>
+                parseMessagePreview(
+                    unit,
+                    index
+                )
+        );
+    }
+
+    function parseMessagePreview(
+        unit,
+        index
+    ) {
+        const sender =
+            cleanText(
+                unit.querySelector(
+                    '.message-list-thread-from,' +
+                    '[class*="thread-from"],' +
+                    '[class*="sender"]'
+                )
+                    ?.textContent ||
+                ''
+            );
+
+        const subject =
+            cleanText(
+                unit.querySelector(
+                    '.message-list-thread-subject,' +
+                    '[class*="thread-subject"],' +
+                    '[class*="subject"]'
+                )
+                    ?.textContent ||
+                ''
+            );
+
+        const datetime =
+            cleanText(
+                unit.querySelector(
+                    '.message-list-thread-datetime,' +
+                    '[class*="datetime"],' +
+                    '[class*="date"]'
+                )
+                    ?.textContent ||
+                ''
+            );
+
+        return {
+            sender,
+            subject,
+            datetime,
+
+            key:
+                [
+                    unit.id || '',
+                    sender,
+                    subject,
+                    datetime,
+                    index
+                ].join('|')
+        };
+    }
+
+    // ============================================================
+    // NAVIGATION LINK
+    // ============================================================
+
+    function getLinkLabel(link) {
+        const clone =
+            link.cloneNode(true);
+
+        clone
+            .querySelectorAll(
+                `.${BADGE_CLASS},` +
+                '.ls-fonticon'
+            )
+            .forEach(
+                node =>
+                    node.remove()
+            );
+
+        return cleanText(
+            clone.textContent
+        );
+    }
+
+    function isMessageNavCandidate(
+        link
+    ) {
+        if (
+            !(link instanceof
+                HTMLAnchorElement)
+        ) {
+            return false;
+        }
+
+        let url;
+
+        try {
+            url =
+                new URL(
+                    link.href,
+                    location.origin
+                );
+
+        } catch (_) {
+            return false;
+        }
+
+        if (
+            !url.pathname
+                .toLowerCase()
+                .endsWith(
+                    '/beskeder2.aspx'
+                )
+        ) {
+            return false;
+        }
+
+        return /^(Beskeder|Messages)$/i
+            .test(
+                getLinkLabel(link)
+            );
+    }
+
+    function findMessageNavLink() {
+        const candidates = [
+            ...document.querySelectorAll(
+                MESSAGE_LINK_SELECTOR
+            )
+        ].filter(
+            isMessageNavCandidate
+        );
+
+        if (
+            !candidates.length
+        ) {
+            return null;
+        }
+
+        /*
+         * There can also be a "Beskeder" link inside the front-page
+         * message card.
+         *
+         * The navigation link is physically higher on the page.
+         */
+        const visible =
+            candidates
+                .map(
+                    link => ({
+                        link,
+                        rect:
+                            link.getBoundingClientRect()
+                    })
+                )
+                .filter(
+                    item =>
+                        item.rect.width > 0 &&
+                        item.rect.height > 0
+                )
+                .sort(
+                    (a, b) =>
+                        a.rect.top -
+                        b.rect.top
+                );
+
+        if (
+            visible.length
+        ) {
+            return visible[0].link;
+        }
+
+        return candidates[0];
+    }
+
+    // ============================================================
+    // BADGE
+    // ============================================================
+
+    function syncBadge(
+        animate
+    ) {
+        const navLink =
+            findMessageNavLink();
+
+        if (!navLink) {
+            return;
+        }
+
+        /*
+         * Delete any old/duplicate bubbles.
+         */
+        for (
+            const badge
+            of document.querySelectorAll(
+                `.${BADGE_CLASS}`
+            )
+        ) {
+            if (
+                badge.parentElement !==
+                navLink
+            ) {
+                const oldParent =
+                    badge.parentElement;
+
+                badge.remove();
+
+                oldParent
+                    ?.classList
+                    .remove(
+                        HOST_CLASS
+                    );
+            }
+        }
+
+        navLink.classList.add(
+            HOST_CLASS
+        );
+
+        let badge =
+            navLink.querySelector(
+                `:scope > .${BADGE_CLASS}`
+            );
+
+        if (!badge) {
+            badge =
+                document.createElement(
+                    'span'
+                );
+
+            badge.className =
+                BADGE_CLASS;
+
+            const countElement =
+                document.createElement(
+                    'span'
+                );
+
+            countElement.className =
+                'lectio-unread-count';
+
+            badge.appendChild(
+                countElement
+            );
+
+            const tooltip =
+                document.createElement(
+                    'span'
+                );
+
+            tooltip.className =
+                TOOLTIP_CLASS;
+
+            badge.appendChild(
+                tooltip
+            );
+
+            navLink.appendChild(
+                badge
+            );
+        }
+
+        updateBadge(
+            badge,
+            animate
+        );
+    }
+
+    function updateBadge(
         badge,
         animate
-      );
+    ) {
+        const count =
+            getUnreadCount();
+
+        if (
+            count <= 0
+        ) {
+            badge.hidden = true;
+
+            badge.classList.remove(
+                'is-new'
+            );
+
+            return;
+        }
+
+        badge.hidden = false;
+
+        const countElement =
+            badge.querySelector(
+                '.lectio-unread-count'
+            );
+
+        if (countElement) {
+            countElement.textContent =
+                count > 99
+                    ? '99+'
+                    : String(count);
+        }
+
+        const language =
+            detectLanguage();
+
+        const labels =
+            language === 'en'
+                ? {
+                    header:
+                        `${count} unread ${
+                            count === 1
+                                ? 'message'
+                                : 'messages'
+                        }`,
+
+                    unknown:
+                        'Unknown sender',
+
+                    noSubject:
+                        'No subject',
+
+                    missingPreview:
+                        n =>
+                            `${n} ${
+                                n === 1
+                                    ? 'message is'
+                                    : 'messages are'
+                            } counted by Lectio but not available in the preview.`,
+
+                    checked:
+                        'Checked'
+                }
+
+                : {
+                    header:
+                        `${count} ${
+                            count === 1
+                                ? 'ulæst besked'
+                                : 'ulæste beskeder'
+                        }`,
+
+                    unknown:
+                        'Ukendt afsender',
+
+                    noSubject:
+                        'Intet emne',
+
+                    missingPreview:
+                        n =>
+                            `${n} ${
+                                n === 1
+                                    ? 'besked tælles'
+                                    : 'beskeder tælles'
+                            } af Lectio, men kan ikke vises i forhåndsvisningen.`,
+
+                    checked:
+                        'Tjekket'
+                };
+
+        badge.setAttribute(
+            'aria-label',
+            labels.header
+        );
+
+        const tooltip =
+            badge.querySelector(
+                `.${TOOLTIP_CLASS}`
+            );
+
+        if (tooltip) {
+            renderTooltip(
+                tooltip,
+                labels
+            );
+        }
+
+        if (animate) {
+            badge.classList.remove(
+                'is-new'
+            );
+
+            void badge.offsetWidth;
+
+            badge.classList.add(
+                'is-new'
+            );
+        }
     }
-  }
 
-  function updateBadge(
-    badge,
-    animate
-  ) {
-    const count =
-      state?.messages?.length ?? 0;
-
-    if (!count) {
-      badge.hidden = true;
-
-      badge.classList.remove(
-        'is-new'
-      );
-
-      badge.setAttribute(
-        'aria-hidden',
-        'true'
-      );
-
-      return;
-    }
-
-    badge.hidden = false;
-
-    badge.setAttribute(
-      'aria-hidden',
-      'false'
-    );
-
-    const countEl =
-      badge.querySelector(
-        '.lectio-unread-count'
-      );
-
-    if (countEl) {
-      countEl.textContent =
-        count > 99
-          ? '99+'
-          : String(count);
-    }
-
-    const lang =
-      detectUiLanguage();
-
-    const labels =
-      lang === 'en'
-        ? {
-            header:
-              `${count} unread ${
-                count === 1
-                  ? 'message'
-                  : 'messages'
-              }`,
-
-            unknown:
-              'Unknown sender',
-
-            noSubject:
-              'No subject',
-
-            more:
-              (n) => `+${n} more`,
-
-            checked:
-              'Checked',
-          }
-        : {
-            header:
-              `${count} ${
-                count === 1
-                  ? 'ulæst besked'
-                  : 'ulæste beskeder'
-              }`,
-
-            unknown:
-              'Ukendt afsender',
-
-            noSubject:
-              'Intet emne',
-
-            more:
-              (n) => `+${n} mere`,
-
-            checked:
-              'Tjekket',
-          };
-
-    badge.setAttribute(
-      'aria-label',
-      labels.header
-    );
-
-    const tooltip =
-      badge.querySelector(
-        `.${TOOLTIP_CLASS}`
-      );
-
-    if (tooltip) {
-      renderTooltip(
+    function renderTooltip(
         tooltip,
         labels
-      );
-    }
-
-    if (animate) {
-      badge.classList.remove(
-        'is-new'
-      );
-
-      /*
-       * Restart the animation if another
-       * unread-count increase occurred.
-       */
-      void badge.offsetWidth;
-
-      badge.classList.add(
-        'is-new'
-      );
-    }
-  }
-
-  function renderTooltip(
-    tooltip,
-    labels
-  ) {
-    tooltip.replaceChildren();
-
-    const header =
-      document.createElement('span');
-
-    header.className =
-      'lectio-unread-tooltip-header';
-
-    header.textContent =
-      labels.header;
-
-    tooltip.appendChild(
-      header
-    );
-
-    const list =
-      document.createElement('span');
-
-    list.className =
-      'lectio-unread-tooltip-list';
-
-    for (
-      const message
-      of state.messages.slice(
-        0,
-        MAX_PREVIEW_ITEMS
-      )
     ) {
-      const item =
-        document.createElement('span');
+        const count =
+            getUnreadCount();
 
-      item.className =
-        'lectio-unread-tooltip-item';
+        const messages =
+            state?.messages || [];
 
-      const sender =
-        document.createElement('span');
+        const signature =
+            JSON.stringify({
+                count,
 
-      sender.className =
-        'lectio-unread-tooltip-sender';
+                checkedAt:
+                    state?.checkedAt || 0,
 
-      sender.textContent =
-        message.sender ||
-        labels.unknown;
+                messages:
+                    messages.map(
+                        message => [
+                            message.key,
+                            message.sender,
+                            message.subject
+                        ]
+                    )
+            });
 
-      const subject =
-        document.createElement('span');
-
-      subject.className =
-        'lectio-unread-tooltip-subject';
-
-      subject.textContent =
-        message.subject ||
-        labels.noSubject;
-
-      item.append(
-        sender,
-        subject
-      );
-
-      list.appendChild(
-        item
-      );
-    }
-
-    if (
-      state.messages.length >
-      MAX_PREVIEW_ITEMS
-    ) {
-      const more =
-        document.createElement('span');
-
-      more.className =
-        'lectio-unread-tooltip-more';
-
-      more.textContent =
-        labels.more(
-          state.messages.length -
-          MAX_PREVIEW_ITEMS
-        );
-
-      list.appendChild(
-        more
-      );
-    }
-
-    tooltip.appendChild(
-      list
-    );
-
-    const footer =
-      document.createElement('span');
-
-    footer.className =
-      'lectio-unread-tooltip-footer';
-
-    footer.textContent =
-      `${labels.checked} ${
-        formatTime(
-          state.checkedAt
-        )
-      }`;
-
-    tooltip.appendChild(
-      footer
-    );
-  }
-
-  function detectUiLanguage() {
-    const links =
-      getMessageLinks();
-
-    for (
-      const link
-      of links
-    ) {
-      const clone =
-        link.cloneNode(true);
-
-      clone
-        .querySelectorAll(
-          `.${BADGE_CLASS}, .ls-fonticon`
-        )
-        .forEach(
-          (node) =>
-            node.remove()
-        );
-
-      const text =
-        cleanText(
-          clone.textContent
-        );
-
-      if (
-        /\bmessages?\b/i.test(
-          text
-        )
-      ) {
-        return 'en';
-      }
-
-      if (
-        /\bbeskeder?\b/i.test(
-          text
-        )
-      ) {
-        return 'da';
-      }
-    }
-
-    return 'da';
-  }
-
-  function formatTime(timestamp) {
-    try {
-      return new Date(
-        timestamp
-      ).toLocaleTimeString(
-        [],
-        {
-          hour: '2-digit',
-          minute: '2-digit',
-        }
-      );
-    } catch (_) {
-      return '';
-    }
-  }
-
-  function loadCache() {
-    try {
-      const parsed =
-        JSON.parse(
-          localStorage.getItem(
-            CACHE_KEY
-          ) ||
-          'null'
-        );
-
-      return isValidState(
-        parsed
-      )
-        ? parsed
-        : null;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  function saveCache(value) {
-    try {
-      localStorage.setItem(
-        CACHE_KEY,
-        JSON.stringify(value)
-      );
-    } catch (_) {
-      // Cache failure should never break Lectio.
-    }
-  }
-
-  function isValidState(value) {
-    return Boolean(
-      value &&
-        Number.isFinite(
-          value.checkedAt
-        ) &&
-        Array.isArray(
-          value.messages
-        )
-    );
-  }
-
-  function injectStyles() {
-    if (
-      document.getElementById(
-        'lectio-unread-message-styles'
-      )
-    ) {
-      return;
-    }
-
-    const style =
-      document.createElement(
-        'style'
-      );
-
-    style.id =
-      'lectio-unread-message-styles';
-
-    style.textContent = `
-      .${HOST_CLASS} {
-        position: relative !important;
-        overflow: visible !important;
-      }
-
-      .${BADGE_CLASS} {
-        position: absolute;
-        top: -0.48rem;
-        right: -0.42rem;
-        z-index: 10020;
-
-        min-width: 1.35rem;
-        height: 1.2rem;
-        padding: 0 0.36rem;
-        box-sizing: border-box;
-
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-
-        background: #cae6ff;
-        color: #001e2f;
-
-        border:
-          1px solid #c1c7ce;
-
-        border-radius:
-          0.38rem
-          0.38rem
-          0.38rem
-          0.12rem;
-
-        box-shadow:
-          rgba(0,0,0,0.16)
-            0 1px 3px,
-          rgba(0,0,0,0.08)
-            0 2px 5px;
-
-        font-family:
-          Roboto,
-          Arial,
-          sans-serif;
-
-        font-size: 0.72rem;
-        font-weight: 700;
-        line-height: 1;
-        letter-spacing: 0;
-        text-align: center;
-        text-decoration: none;
-
-        cursor: pointer;
-
-        transform-origin:
-          50% 70%;
-      }
-
-      .${BADGE_CLASS}[hidden] {
-        display:
-          none !important;
-      }
-
-      .${BADGE_CLASS}::after {
-        content: "";
-
-        position: absolute;
-
-        left: 0.12rem;
-        bottom: -0.22rem;
-
-        width: 0;
-        height: 0;
-
-        border-top:
-          0.28rem solid #cae6ff;
-
-        border-right:
-          0.28rem solid transparent;
-
-        pointer-events: none;
-      }
-
-      .${BADGE_CLASS}:hover,
-      .${BADGE_CLASS}:focus-within {
-        background: #cae6ff;
-        color: #001e2f;
-
-        opacity: 0.96;
-
-        box-shadow:
-          rgba(0,0,0,0.18)
-            0 2px 4px,
-          rgba(0,0,0,0.10)
-            0 4px 8px;
-      }
-
-      .${BADGE_CLASS}.is-new {
-        animation:
-          lectio-unread-pop
-          520ms
-          cubic-bezier(
-            .2,
-            .9,
-            .3,
-            1.25
-          );
-      }
-
-      @keyframes lectio-unread-pop {
-        0% {
-          transform:
-            scale(0.72)
-            translateY(2px);
+        /*
+         * Do not rewrite identical tooltip DOM.
+         *
+         * This is important for avoiding the old MutationObserver
+         * feedback/memory problem.
+         */
+        if (
+            tooltip.dataset.signature ===
+            signature
+        ) {
+            return;
         }
 
-        55% {
-          transform:
-            scale(1.16)
-            translateY(-1px);
-        }
+        tooltip.dataset.signature =
+            signature;
 
-        100% {
-          transform:
-            scale(1)
-            translateY(0);
-        }
-      }
+        tooltip.replaceChildren();
 
-      .${TOOLTIP_CLASS} {
-        position: absolute;
+        const header =
+            document.createElement(
+                'span'
+            );
 
-        top:
-          calc(
-            100% + 0.62rem
-          );
+        header.className =
+            'lectio-unread-tooltip-header';
 
-        right: -0.65rem;
+        header.textContent =
+            labels.header;
 
-        z-index: 10030;
+        tooltip.appendChild(
+            header
+        );
 
-        width:
-          min(
-            19rem,
-            calc(
-              100vw - 2rem
+        const list =
+            document.createElement(
+                'span'
+            );
+
+        list.className =
+            'lectio-unread-tooltip-list';
+
+        for (
+            const message
+            of messages.slice(
+                0,
+                MAX_PREVIEW_ITEMS
             )
-          );
+        ) {
+            const item =
+                document.createElement(
+                    'span'
+                );
 
-        padding:
-          0.7rem
-          0.78rem;
+            item.className =
+                'lectio-unread-tooltip-item';
 
-        box-sizing:
-          border-box;
+            const sender =
+                document.createElement(
+                    'span'
+                );
 
-        display: none;
+            sender.className =
+                'lectio-unread-tooltip-sender';
 
-        flex-direction:
-          column;
+            sender.textContent =
+                message.sender ||
+                labels.unknown;
 
-        gap: 0.48rem;
+            const subject =
+                document.createElement(
+                    'span'
+                );
 
-        background:
-          oklch(
-            0.9667
-            0.012
-            259.82
-            /
-            1
-          );
+            subject.className =
+                'lectio-unread-tooltip-subject';
 
-        color: #001e2f;
+            subject.textContent =
+                message.subject ||
+                labels.noSubject;
 
-        border:
-          1px solid #c1c7ce;
+            item.append(
+                sender,
+                subject
+            );
 
-        border-radius:
-          0.5rem;
-
-        box-shadow:
-          rgba(0,0,0,0.18)
-            0 4px 8px -2px,
-          rgba(0,0,0,0.12)
-            0 8px 16px 1px;
-
-        font-family:
-          Roboto,
-          Arial,
-          sans-serif;
-
-        font-size: 0.82rem;
-        font-weight: 400;
-        line-height: 1.28;
-        letter-spacing: normal;
-        text-align: left;
-        white-space: normal;
-
-        pointer-events: none;
-      }
-
-      .${BADGE_CLASS}:hover
-        > .${TOOLTIP_CLASS},
-
-      .${BADGE_CLASS}:focus
-        > .${TOOLTIP_CLASS},
-
-      .${BADGE_CLASS}:focus-within
-        > .${TOOLTIP_CLASS} {
-
-        display: flex;
-      }
-
-      .lectio-unread-tooltip-header {
-        display: block;
-
-        padding-bottom:
-          0.38rem;
-
-        border-bottom:
-          1px solid #d3dae0;
-
-        font-weight: 700;
-        font-size: 0.88rem;
-      }
-
-      .lectio-unread-tooltip-list {
-        display: flex;
-
-        flex-direction:
-          column;
-
-        gap: 0.42rem;
-      }
-
-      .lectio-unread-tooltip-item {
-        display: grid;
-
-        grid-template-columns:
-          minmax(
-            6.4rem,
-            0.8fr
-          )
-          minmax(
-            8rem,
-            1.2fr
-          );
-
-        gap: 0.5rem;
-
-        align-items:
-          baseline;
-      }
-
-      .lectio-unread-tooltip-sender {
-        overflow: hidden;
-
-        text-overflow:
-          ellipsis;
-
-        white-space:
-          nowrap;
-
-        font-weight: 600;
-      }
-
-      .lectio-unread-tooltip-subject {
-        overflow: hidden;
-
-        text-overflow:
-          ellipsis;
-
-        white-space:
-          nowrap;
-
-        color: #394a57;
-
-        font-weight: 400;
-      }
-
-      .lectio-unread-tooltip-more {
-        display: block;
-
-        padding-top:
-          0.1rem;
-
-        color: #394a57;
-
-        font-weight: 600;
-      }
-
-      .lectio-unread-tooltip-footer {
-        display: block;
-
-        padding-top:
-          0.36rem;
-
-        border-top:
-          1px solid #d3dae0;
-
-        color: #5e6870;
-
-        font-size: 0.72rem;
-        font-weight: 400;
-      }
-
-      @media (
-        max-width: 700px
-      ) {
-        .${BADGE_CLASS} {
-          top: -0.34rem;
-          right: -0.24rem;
-
-          min-width:
-            1.28rem;
-
-          height:
-            1.16rem;
-
-          padding:
-            0 0.32rem;
-
-          font-size:
-            0.7rem;
+            list.appendChild(
+                item
+            );
         }
-      }
 
-      @media (
-        hover: none
-      ) {
-        .${TOOLTIP_CLASS} {
-          display:
-            none !important;
+        /*
+         * If Lectio says 2 unread but we could only identify
+         * 0 or 1 specific inbox rows, the badge is still correct.
+         */
+        const missing =
+            Math.max(
+                0,
+                count -
+                messages.length
+            );
+
+        if (
+            missing > 0
+        ) {
+            const fallback =
+                document.createElement(
+                    'span'
+                );
+
+            fallback.className =
+                'lectio-unread-tooltip-fallback';
+
+            fallback.textContent =
+                labels.missingPreview(
+                    missing
+                );
+
+            list.appendChild(
+                fallback
+            );
         }
-      }
 
-      @media (
-        prefers-reduced-motion:
-          reduce
-      ) {
-        .${BADGE_CLASS}.is-new {
-          animation: none;
+        tooltip.appendChild(
+            list
+        );
+
+        const footer =
+            document.createElement(
+                'span'
+            );
+
+        footer.className =
+            'lectio-unread-tooltip-footer';
+
+        footer.textContent =
+            `${labels.checked} ${
+                formatTime(
+                    state?.checkedAt
+                )
+            }`;
+
+        tooltip.appendChild(
+            footer
+        );
+    }
+
+    // ============================================================
+    // NAVIGATION OBSERVER
+    // ============================================================
+
+    function installNavigationObserver() {
+        if (!document.body) {
+            return;
         }
-      }
-    `;
 
-    document.head.appendChild(
-      style
-    );
-  }
+        const observer =
+            new MutationObserver(
+                mutations => {
+                    /*
+                     * Completely ignore changes made inside our own
+                     * badge/tooltip.
+                     */
+                    const relevant =
+                        mutations.some(
+                            mutation => {
+                                if (
+                                    mutation.target instanceof
+                                        Element &&
+                                    mutation.target.closest(
+                                        `.${BADGE_CLASS}`
+                                    )
+                                ) {
+                                    return false;
+                                }
+
+                                for (
+                                    const node
+                                    of mutation.addedNodes
+                                ) {
+                                    if (
+                                        !(node instanceof
+                                            Element)
+                                    ) {
+                                        continue;
+                                    }
+
+                                    if (
+                                        node.matches?.(
+                                            MESSAGE_LINK_SELECTOR
+                                        ) ||
+                                        node.querySelector?.(
+                                            MESSAGE_LINK_SELECTOR
+                                        )
+                                    ) {
+                                        return true;
+                                    }
+                                }
+
+                                return false;
+                            }
+                        );
+
+                    if (
+                        !relevant ||
+                        observerQueued
+                    ) {
+                        return;
+                    }
+
+                    observerQueued = true;
+
+                    queueMicrotask(
+                        () => {
+                            observerQueued = false;
+
+                            syncBadge(false);
+                        }
+                    );
+                }
+            );
+
+        observer.observe(
+            document.body,
+            {
+                childList: true,
+                subtree: true
+            }
+        );
+    }
+
+    // ============================================================
+    // CROSS-TAB / VISIBILITY
+    // ============================================================
+
+    function handleStorageUpdate(
+        event
+    ) {
+        if (
+            event.key !== CACHE_KEY ||
+            !event.newValue
+        ) {
+            return;
+        }
+
+        try {
+            const incoming =
+                normalizeState(
+                    JSON.parse(
+                        event.newValue
+                    )
+                );
+
+            if (!incoming) {
+                return;
+            }
+
+            const oldCount =
+                getUnreadCount();
+
+            state = incoming;
+
+            syncBadge(
+                incoming.unreadCount >
+                oldCount
+            );
+
+        } catch (_) {
+            // Ignore corrupt state.
+        }
+    }
+
+    function handleVisibilityChange() {
+        if (
+            document.visibilityState !==
+            'visible'
+        ) {
+            return;
+        }
+
+        syncBadge(false);
+
+        const age =
+            Date.now() -
+            (state?.checkedAt || 0);
+
+        if (
+            age >=
+            RETURN_REFRESH_AGE
+        ) {
+            refreshUnreadMessages();
+        }
+    }
+
+    // ============================================================
+    // STATE
+    // ============================================================
+
+    function getUnreadCount() {
+        return (
+            Number.isFinite(
+                state?.unreadCount
+            )
+                ? Math.max(
+                    0,
+                    Math.floor(
+                        state.unreadCount
+                    )
+                )
+                : 0
+        );
+    }
+
+    function normalizeState(
+        value
+    ) {
+        if (
+            !value ||
+            !Number.isFinite(
+                value.checkedAt
+            ) ||
+            !Number.isFinite(
+                value.unreadCount
+            ) ||
+            !Array.isArray(
+                value.messages
+            )
+        ) {
+            return null;
+        }
+
+        return {
+            checkedAt:
+                value.checkedAt,
+
+            unreadCount:
+                Math.max(
+                    0,
+                    Math.floor(
+                        value.unreadCount
+                    )
+                ),
+
+            messages:
+                value.messages
+        };
+    }
+
+    function loadCache() {
+        try {
+            return normalizeState(
+                JSON.parse(
+                    localStorage.getItem(
+                        CACHE_KEY
+                    ) ||
+                    'null'
+                )
+            );
+
+        } catch (_) {
+            return null;
+        }
+    }
+
+    function saveCache(
+        value
+    ) {
+        try {
+            localStorage.setItem(
+                CACHE_KEY,
+                JSON.stringify(
+                    value
+                )
+            );
+
+        } catch (_) {
+            // Cache failure is non-fatal.
+        }
+    }
+
+    // ============================================================
+    // LANGUAGE / UTILITIES
+    // ============================================================
+
+    function detectLanguage() {
+        const link =
+            findMessageNavLink();
+
+        if (
+            link &&
+            /^Messages$/i.test(
+                getLinkLabel(link)
+            )
+        ) {
+            return 'en';
+        }
+
+        return 'da';
+    }
+
+    function cleanText(
+        value
+    ) {
+        return String(
+            value || ''
+        )
+            .replace(
+                /\u00a0/g,
+                ' '
+            )
+            .replace(
+                /\s+/g,
+                ' '
+            )
+            .trim();
+    }
+
+    function formatTime(
+        timestamp
+    ) {
+        if (!timestamp) {
+            return '';
+        }
+
+        try {
+            return new Date(
+                timestamp
+            ).toLocaleTimeString(
+                [],
+                {
+                    hour:
+                        '2-digit',
+
+                    minute:
+                        '2-digit'
+                }
+            );
+
+        } catch (_) {
+            return '';
+        }
+    }
+
+    // ============================================================
+    // STYLES
+    // ============================================================
+
+    function injectStyles() {
+        if (
+            document.getElementById(
+                'lectio-unread-message-styles'
+            )
+        ) {
+            return;
+        }
+
+        const style =
+            document.createElement(
+                'style'
+            );
+
+        style.id =
+            'lectio-unread-message-styles';
+
+        style.textContent = `
+            .${HOST_CLASS} {
+                position: relative !important;
+                overflow: visible !important;
+            }
+
+            .${BADGE_CLASS} {
+                position: absolute;
+                top: -0.48rem;
+                right: -0.42rem;
+                z-index: 10020;
+
+                min-width: 1.35rem;
+                height: 1.2rem;
+                padding: 0 0.36rem;
+                box-sizing: border-box;
+
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+
+                background: #cae6ff;
+                color: #001e2f;
+
+                border: 1px solid #c1c7ce;
+
+                border-radius:
+                    0.38rem
+                    0.38rem
+                    0.38rem
+                    0.12rem;
+
+                box-shadow:
+                    rgba(0,0,0,.16)
+                    0 1px 3px,
+
+                    rgba(0,0,0,.08)
+                    0 2px 5px;
+
+                font-family:
+                    Roboto,
+                    Arial,
+                    sans-serif;
+
+                font-size: .72rem;
+                font-weight: 700;
+                line-height: 1;
+
+                cursor: pointer;
+
+                transform-origin:
+                    50% 70%;
+            }
+
+            .${BADGE_CLASS}[hidden] {
+                display: none !important;
+            }
+
+            .${BADGE_CLASS}::after {
+                content: "";
+
+                position: absolute;
+
+                left: .12rem;
+                bottom: -.22rem;
+
+                width: 0;
+                height: 0;
+
+                border-top:
+                    .28rem solid
+                    #cae6ff;
+
+                border-right:
+                    .28rem solid
+                    transparent;
+
+                pointer-events:
+                    none;
+            }
+
+            .${BADGE_CLASS}.is-new {
+                animation:
+                    lectio-unread-pop
+                    520ms
+                    cubic-bezier(
+                        .2,
+                        .9,
+                        .3,
+                        1.25
+                    );
+            }
+
+            @keyframes lectio-unread-pop {
+                0% {
+                    transform:
+                        scale(.72)
+                        translateY(2px);
+                }
+
+                55% {
+                    transform:
+                        scale(1.16)
+                        translateY(-1px);
+                }
+
+                100% {
+                    transform:
+                        scale(1)
+                        translateY(0);
+                }
+            }
+
+            .${TOOLTIP_CLASS} {
+                position: absolute;
+
+                top:
+                    calc(
+                        100% + .62rem
+                    );
+
+                right: -.65rem;
+
+                z-index: 10030;
+
+                width:
+                    min(
+                        19rem,
+                        calc(
+                            100vw - 2rem
+                        )
+                    );
+
+                padding:
+                    .7rem .78rem;
+
+                box-sizing:
+                    border-box;
+
+                display: none;
+
+                flex-direction:
+                    column;
+
+                gap: .48rem;
+
+                background:
+                    #f5f8fb;
+
+                color:
+                    #001e2f;
+
+                border:
+                    1px solid
+                    #c1c7ce;
+
+                border-radius:
+                    .5rem;
+
+                box-shadow:
+                    rgba(0,0,0,.18)
+                    0 4px 8px -2px,
+
+                    rgba(0,0,0,.12)
+                    0 8px 16px 1px;
+
+                font-family:
+                    Roboto,
+                    Arial,
+                    sans-serif;
+
+                font-size:
+                    .82rem;
+
+                font-weight:
+                    400;
+
+                line-height:
+                    1.28;
+
+                text-align:
+                    left;
+
+                white-space:
+                    normal;
+
+                pointer-events:
+                    none;
+            }
+
+            .${BADGE_CLASS}:hover
+                > .${TOOLTIP_CLASS},
+
+            .${BADGE_CLASS}:focus-within
+                > .${TOOLTIP_CLASS} {
+
+                display: flex;
+            }
+
+            .lectio-unread-tooltip-header {
+                display: block;
+
+                padding-bottom:
+                    .38rem;
+
+                border-bottom:
+                    1px solid
+                    #d3dae0;
+
+                font-weight:
+                    700;
+
+                font-size:
+                    .88rem;
+            }
+
+            .lectio-unread-tooltip-list {
+                display: flex;
+
+                flex-direction:
+                    column;
+
+                gap:
+                    .42rem;
+            }
+
+            .lectio-unread-tooltip-item {
+                display: grid;
+
+                grid-template-columns:
+                    minmax(
+                        6.4rem,
+                        .8fr
+                    )
+                    minmax(
+                        8rem,
+                        1.2fr
+                    );
+
+                gap:
+                    .5rem;
+
+                align-items:
+                    baseline;
+            }
+
+            .lectio-unread-tooltip-sender {
+                overflow: hidden;
+
+                text-overflow:
+                    ellipsis;
+
+                white-space:
+                    nowrap;
+
+                font-weight:
+                    600;
+            }
+
+            .lectio-unread-tooltip-subject {
+                overflow: hidden;
+
+                text-overflow:
+                    ellipsis;
+
+                white-space:
+                    nowrap;
+
+                color:
+                    #394a57;
+            }
+
+            .lectio-unread-tooltip-fallback {
+                display: block;
+
+                padding-top:
+                    .2rem;
+
+                color:
+                    #5e6870;
+
+                font-size:
+                    .76rem;
+
+                line-height:
+                    1.3;
+            }
+
+            .lectio-unread-tooltip-footer {
+                display: block;
+
+                padding-top:
+                    .36rem;
+
+                border-top:
+                    1px solid
+                    #d3dae0;
+
+                color:
+                    #5e6870;
+
+                font-size:
+                    .72rem;
+            }
+
+            @media (hover: none) {
+                .${TOOLTIP_CLASS} {
+                    display:
+                        none !important;
+                }
+            }
+
+            @media (
+                prefers-reduced-motion:
+                reduce
+            ) {
+                .${BADGE_CLASS}.is-new {
+                    animation:
+                        none;
+                }
+            }
+        `;
+
+        document.head
+            .appendChild(
+                style
+            );
+    }
+
 })();
