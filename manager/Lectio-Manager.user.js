@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.7.0
+// @version      1.8.0
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules from one small gear panel.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
@@ -1054,7 +1054,10 @@
                 width: 22px;
                 height: 22px;
                 fill: none;
-                stroke: var(--lectio-theme-surface, #ffffff);
+                /* Fixed white: sits on the accent-coloured circle, not on
+                   the panel surface — see the nav-item.is-active comment
+                   below for why this can't be var(--lectio-theme-surface). */
+                stroke: #ffffff;
                 stroke-width: 1.6;
                 stroke-linecap: round;
                 stroke-linejoin: round;
@@ -1088,7 +1091,9 @@
                 gap: 8px;
                 padding: 10px 12px;
                 background: var(--lectio-theme-accent, #0f6f6f);
-                color: var(--lectio-theme-surface, #ffffff);
+                /* Fixed white, not var(--lectio-theme-surface) — on-accent
+                   text, same reasoning as nav-item.is-active below. */
+                color: #ffffff;
                 border-radius: 10px 10px 0 0;
             }
 
@@ -1132,7 +1137,9 @@
                 height: 26px;
                 border: none;
                 background: transparent;
-                color: var(--lectio-theme-surface, #ffffff);
+                /* Fixed white: these icons sit inside .lectio-manager-header
+                   (accent background), not on the panel surface. */
+                color: #ffffff;
                 text-decoration: none;
                 cursor: pointer;
                 display: flex;
@@ -1294,7 +1301,11 @@
 
             .lectio-manager-nav-item.is-active {
                 background: var(--lectio-theme-accent, #0f6f6f);
-                color: var(--lectio-theme-surface, #ffffff);
+                /* Fixed white, not var(--lectio-theme-surface): this text
+                   sits ON the accent colour, not on the surface, and a dark
+                   theme's dark surface would pair dark-on-accent instead of
+                   the light-on-accent contrast this needs. */
+                color: #ffffff;
                 font-weight: 700;
             }
 
@@ -1549,10 +1560,16 @@
                 min-width: 0;
                 width: 100%;
                 box-sizing: border-box;
-                border: 1px solid var(--lectio-theme-muted, #cbd7d9);
+                /* Deliberately NOT var(--lectio-theme-surface)/-text here: a
+                   <select>'s open native option list doesn't reliably inherit
+                   author background/text colour across browsers, so a dark
+                   theme's light text could land on a still-light native
+                   popup and become illegible. Keep a fixed, always-legible
+                   base and let only the border pick up the theme. */
+                border: 1px solid var(--lectio-theme-accent, #cbd7d9);
                 border-radius: 6px;
-                background: var(--lectio-theme-surface, #ffffff);
-                color: var(--lectio-theme-text, #10201e);
+                background: #ffffff;
+                color: #10201e;
                 padding: 5px 7px;
                 font: inherit;
             }
