@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.5.0
+// @version      1.5.1
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules from one small gear panel.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
@@ -437,15 +437,11 @@
                 panel.removeAttribute('hidden');
                 requestDiscovery();
             } else {
-                panel.setAttribute('hidden', '');
-                closeNavMenu();
+                closePanel();
             }
         });
 
-        closeBtn.addEventListener('click', () => {
-            panel.setAttribute('hidden', '');
-            closeNavMenu();
-        });
+        closeBtn.addEventListener('click', () => closePanel());
 
         refreshBtn.addEventListener('click', () => refreshCatalogue());
 
@@ -476,21 +472,32 @@
         });
 
         document.addEventListener('click', (event) => {
-            if (!elements || elements.navMenu.hidden) {
+            if (!elements) {
                 return;
             }
 
-            if (elements.navTrigger.contains(event.target) || elements.navMenu.contains(event.target)) {
-                return;
+            if (!elements.navMenu.hidden &&
+                !elements.navTrigger.contains(event.target) &&
+                !elements.navMenu.contains(event.target)) {
+                closeNavMenu();
             }
 
-            closeNavMenu();
+            if (!elements.panel.hasAttribute('hidden') && !elements.root.contains(event.target)) {
+                closePanel();
+            }
         });
 
         document.addEventListener('keydown', (event) => {
-            if (event.key === 'Escape') {
-                closeNavMenu();
+            if (event.key !== 'Escape' || !elements) {
+                return;
             }
+
+            if (!elements.navMenu.hidden) {
+                closeNavMenu();
+                return;
+            }
+
+            closePanel();
         });
 
         elements = {
@@ -505,6 +512,15 @@
             refreshedLabel: root.querySelector('.lectio-manager-refreshed-label'),
             errorBox: root.querySelector('.lectio-manager-error')
         };
+    }
+
+    function closePanel() {
+        if (!elements || elements.panel.hasAttribute('hidden')) {
+            return;
+        }
+
+        elements.panel.setAttribute('hidden', '');
+        closeNavMenu();
     }
 
     function toggleNavMenu() {
