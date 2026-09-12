@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.1.0
+// @version      1.2.0
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules from one small gear panel.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
@@ -47,8 +47,14 @@
 
     const STORAGE_CATALOGUE = 'lectioManager.catalogue.v1';
     const STORAGE_LAST_REFRESH = 'lectioManager.lastRefresh.v1';
-    const STORAGE_AUDIENCE_FILTER = 'lectioManager.audienceFilter.v1';
+    const STORAGE_VIEW = 'lectioManager.view.v1';
     const STORAGE_SORT_MODE = 'lectioManager.sortMode.v1';
+    const STORAGE_UPDATE_TIP_DISMISSED = 'lectioManager.updateTipDismissed.v1';
+
+    const ISSUES_URL = 'https://github.com/RktRobinhood/Lectio-Scripts/issues/new/choose';
+
+    const AUDIENCE_VIEW_PREFIX = 'audience:';
+    const CATEGORY_VIEW_PREFIX = 'category:';
 
     /*
      * Best-effort shortcut to Tampermonkey's own dashboard, where the
@@ -69,7 +75,7 @@
     let refreshing = false;
     let elements = null;
     let updatedLabelTimer = null;
-    let audienceFilter = 'all';
+    let currentView = 'all';
     let sortMode = 'category';
 
     const detected = new Map();
@@ -92,7 +98,7 @@
 
         catalogue = loadCachedCatalogue();
         lastRefresh = Number(GM_getValue(STORAGE_LAST_REFRESH, 0)) || 0;
-        audienceFilter = normalizeAudienceFilter(GM_getValue(STORAGE_AUDIENCE_FILTER, 'all'));
+        currentView = normalizeView(GM_getValue(STORAGE_VIEW, 'all'));
         sortMode = normalizeSortMode(GM_getValue(STORAGE_SORT_MODE, 'category'));
 
         buildUI();
@@ -296,12 +302,38 @@
         return typeof value === 'string' && value.trim().length > 0;
     }
 
-    function normalizeAudienceFilter(value) {
-        return ['all', 'student', 'teacher'].includes(value) ? value : 'all';
+    function normalizeView(value) {
+        if (value === 'all' || value === 'installed') {
+            return value;
+        }
+
+        if (isNonEmptyString(value) && (value.startsWith(AUDIENCE_VIEW_PREFIX) || value.startsWith(CATEGORY_VIEW_PREFIX))) {
+            return value;
+        }
+
+        return 'all';
     }
 
     function normalizeSortMode(value) {
         return ['category', 'name'].includes(value) ? value : 'category';
+    }
+
+    function getViewLabel(view) {
+        if (view === 'installed') {
+            const count = catalogue ? catalogue.modules.filter((module) => detected.has(module.id)).length : 0;
+            return `Installed (${count})`;
+        }
+
+        if (view.startsWith(AUDIENCE_VIEW_PREFIX)) {
+            const audience = view.slice(AUDIENCE_VIEW_PREFIX.length);
+            return audience.charAt(0).toUpperCase() + audience.slice(1);
+        }
+
+        if (view.startsWith(CATEGORY_VIEW_PREFIX)) {
+            return view.slice(CATEGORY_VIEW_PREFIX.length);
+        }
+
+        return 'All modules';
     }
 
     // ============================================================
@@ -358,19 +390,23 @@
                 <div class="lectio-manager-refreshed-row">
                     <span class="lectio-manager-refreshed-label"></span>
                 </div>
-                <div class="lectio-manager-controls">
-                    <div class="lectio-manager-audience-tabs" role="tablist" aria-label="Filter by audience">
-                        <button type="button" class="lectio-manager-audience-tab" data-audience="all">All</button>
-                        <button type="button" class="lectio-manager-audience-tab" data-audience="student">Student</button>
-                        <button type="button" class="lectio-manager-audience-tab" data-audience="teacher">Teacher</button>
-                    </div>
-                    <select class="lectio-manager-sort" aria-label="Sort modules">
-                        <option value="category">Category</option>
-                        <option value="name">Name (A-Z)</option>
-                    </select>
+                <div class="lectio-manager-tip" hidden>
+                    <span class="lectio-manager-tip-text">Get automatic updates: open Tampermonkey &rarr; Settings &rarr; enable "Check for updates".</span>
+                    <button type="button" class="lectio-manager-tip-dismiss" aria-label="Dismiss tip">&times;</button>
+                </div>
+                <div class="lectio-manager-nav">
+                    <button type="button" class="lectio-manager-nav-trigger" aria-haspopup="true" aria-expanded="false">
+                        <span class="lectio-manager-nav-current">All modules</span>
+                        ${chevronSvg()}
+                    </button>
+                    <div class="lectio-manager-nav-menu" role="menu" hidden></div>
                 </div>
                 <div class="lectio-manager-error" hidden></div>
+                <div class="lectio-manager-view-heading"></div>
                 <div class="lectio-manager-list"></div>
+                <div class="lectio-manager-footer">
+                    <a class="lectio-manager-footer-link" href="${ISSUES_URL}" target="_blank" rel="noopener noreferrer">Report a bug or idea</a>
+                </div>
             </div>
         `;
 
@@ -381,8 +417,20 @@
         const panel = root.querySelector('#lectio-manager-panel');
         const refreshBtn = root.querySelector('.lectio-manager-refresh');
         const closeBtn = root.querySelector('.lectio-manager-close');
-        const audienceTabs = [...root.querySelectorAll('.lectio-manager-audience-tab')];
-        const sortSelect = root.querySelector('.lectio-manager-sort');
+        const navTrigger = root.querySelector('.lectio-manager-nav-trigger');
+        const navMenu = root.querySelector('.lectio-manager-nav-menu');
+        const navCurrent = root.querySelector('.lectio-manager-nav-current');
+        const tipBanner = root.querySelector('.lectio-manager-tip');
+        const tipDismissBtn = root.querySelector('.lectio-manager-tip-dismiss');
+
+        if (!GM_getValue(STORAGE_UPDATE_TIP_DISMISSED, false)) {
+            tipBanner.hidden = false;
+        }
+
+        tipDismissBtn.addEventListener('click', () => {
+            tipBanner.hidden = true;
+            GM_setValue(STORAGE_UPDATE_TIP_DISMISSED, true);
+        });
 
         toggle.addEventListener('click', () => {
             if (panel.hasAttribute('hidden')) {
@@ -390,51 +438,95 @@
                 requestDiscovery();
             } else {
                 panel.setAttribute('hidden', '');
+                closeNavMenu();
             }
         });
 
-        closeBtn.addEventListener('click', () => panel.setAttribute('hidden', ''));
-        refreshBtn.addEventListener('click', () => refreshCatalogue());
-
-        for (const tab of audienceTabs) {
-            tab.addEventListener('click', () => {
-                audienceFilter = normalizeAudienceFilter(tab.dataset.audience);
-                GM_setValue(STORAGE_AUDIENCE_FILTER, audienceFilter);
-                updateAudienceTabsUI();
-                renderModuleList();
-            });
-        }
-
-        sortSelect.addEventListener('change', () => {
-            sortMode = normalizeSortMode(sortSelect.value);
-            GM_setValue(STORAGE_SORT_MODE, sortMode);
-            renderModuleList();
+        closeBtn.addEventListener('click', () => {
+            panel.setAttribute('hidden', '');
+            closeNavMenu();
         });
 
-        sortSelect.value = sortMode;
+        refreshBtn.addEventListener('click', () => refreshCatalogue());
+
+        navTrigger.addEventListener('click', (event) => {
+            event.stopPropagation();
+            toggleNavMenu();
+        });
+
+        navMenu.addEventListener('click', (event) => {
+            const viewItem = event.target.closest('[data-view]');
+
+            if (viewItem) {
+                currentView = normalizeView(viewItem.dataset.view);
+                GM_setValue(STORAGE_VIEW, currentView);
+                closeNavMenu();
+                renderModuleList();
+                return;
+            }
+
+            const sortItem = event.target.closest('[data-sort]');
+
+            if (sortItem) {
+                sortMode = normalizeSortMode(sortItem.dataset.sort);
+                GM_setValue(STORAGE_SORT_MODE, sortMode);
+                closeNavMenu();
+                renderModuleList();
+            }
+        });
+
+        document.addEventListener('click', (event) => {
+            if (!elements || elements.navMenu.hidden) {
+                return;
+            }
+
+            if (elements.navTrigger.contains(event.target) || elements.navMenu.contains(event.target)) {
+                return;
+            }
+
+            closeNavMenu();
+        });
+
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape') {
+                closeNavMenu();
+            }
+        });
 
         elements = {
             root,
             panel,
             refreshBtn,
-            audienceTabs,
-            sortSelect,
+            navTrigger,
+            navMenu,
+            navCurrent,
             list: root.querySelector('.lectio-manager-list'),
+            viewHeading: root.querySelector('.lectio-manager-view-heading'),
             refreshedLabel: root.querySelector('.lectio-manager-refreshed-label'),
             errorBox: root.querySelector('.lectio-manager-error')
         };
-
-        updateAudienceTabsUI();
     }
 
-    function updateAudienceTabsUI() {
+    function toggleNavMenu() {
+        if (elements.navMenu.hidden) {
+            openNavMenu();
+        } else {
+            closeNavMenu();
+        }
+    }
+
+    function openNavMenu() {
+        elements.navMenu.hidden = false;
+        elements.navTrigger.setAttribute('aria-expanded', 'true');
+    }
+
+    function closeNavMenu() {
         if (!elements) {
             return;
         }
 
-        for (const tab of elements.audienceTabs) {
-            tab.classList.toggle('is-active', tab.dataset.audience === audienceFilter);
-        }
+        elements.navMenu.hidden = true;
+        elements.navTrigger.setAttribute('aria-expanded', 'false');
     }
 
     // ============================================================
@@ -446,7 +538,9 @@
             return;
         }
 
-        const { list } = elements;
+        renderNavMenu();
+
+        const { list, viewHeading } = elements;
         list.innerHTML = '';
 
         if (!catalogue) {
@@ -454,62 +548,29 @@
             loading.className = 'lectio-manager-loading';
             loading.textContent = 'Loading catalogue…';
             list.appendChild(loading);
+            viewHeading.textContent = '';
             return;
         }
 
         const modules = getFilteredSortedModules();
 
+        viewHeading.textContent = modules.length
+            ? `${getViewLabel(currentView)} · ${modules.length}`
+            : getViewLabel(currentView);
+
         if (!modules.length) {
             const empty = document.createElement('div');
             empty.className = 'lectio-manager-loading';
-            empty.textContent = 'No modules match this filter.';
+            empty.textContent = 'No modules in this view yet.';
             list.appendChild(empty);
             return;
         }
 
-        const installedModules = modules.filter((module) => detected.has(module.id));
-        const availableModules = modules.filter((module) => !detected.has(module.id));
-
-        appendSection(list, `Installed (${installedModules.length})`, installedModules);
-        appendSection(list, `Available (${availableModules.length})`, availableModules);
-    }
-
-    function getFilteredSortedModules() {
-        if (!catalogue) {
-            return [];
-        }
-
-        const filtered = catalogue.modules.filter((module) => (
-            audienceFilter === 'all' ||
-            !module.audience.length ||
-            module.audience.includes(audienceFilter)
-        ));
-
-        const sorted = filtered.slice();
-
-        if (sortMode === 'name') {
-            sorted.sort((a, b) => a.name.localeCompare(b.name));
-        } else {
-            sorted.sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
-        }
-
-        return sorted;
-    }
-
-    function appendSection(list, label, modules) {
-        if (!modules.length) {
-            return;
-        }
-
-        const heading = document.createElement('div');
-        heading.className = 'lectio-manager-section-heading';
-        heading.textContent = label;
-        list.appendChild(heading);
-
+        const groupByCategory = sortMode === 'category' && !currentView.startsWith(CATEGORY_VIEW_PREFIX);
         let lastCategory = null;
 
         for (const module of modules) {
-            if (sortMode === 'category' && module.category !== lastCategory) {
+            if (groupByCategory && module.category !== lastCategory) {
                 lastCategory = module.category;
 
                 const categoryHeading = document.createElement('div');
@@ -520,6 +581,135 @@
 
             list.appendChild(buildModuleCard(module));
         }
+    }
+
+    function getFilteredSortedModules() {
+        if (!catalogue) {
+            return [];
+        }
+
+        let filtered;
+
+        if (currentView === 'installed') {
+            filtered = catalogue.modules.filter((module) => detected.has(module.id));
+        } else if (currentView.startsWith(AUDIENCE_VIEW_PREFIX)) {
+            const audience = currentView.slice(AUDIENCE_VIEW_PREFIX.length);
+            filtered = catalogue.modules.filter((module) => !module.audience.length || module.audience.includes(audience));
+        } else if (currentView.startsWith(CATEGORY_VIEW_PREFIX)) {
+            const category = currentView.slice(CATEGORY_VIEW_PREFIX.length);
+            filtered = catalogue.modules.filter((module) => module.category === category);
+        } else {
+            filtered = catalogue.modules.slice();
+        }
+
+        const sorted = filtered.slice();
+
+        if (sortMode === 'name' || currentView.startsWith(CATEGORY_VIEW_PREFIX)) {
+            sorted.sort((a, b) => a.name.localeCompare(b.name));
+        } else {
+            sorted.sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
+        }
+
+        return sorted;
+    }
+
+    // ============================================================
+    // UI: NAVIGATION MENU
+    // ============================================================
+
+    function renderNavMenu() {
+        if (!elements) {
+            return;
+        }
+
+        const { navMenu, navCurrent } = elements;
+
+        const categories = catalogue
+            ? [...new Set(catalogue.modules.map((module) => module.category))].sort((a, b) => a.localeCompare(b))
+            : [];
+
+        const installedCount = catalogue
+            ? catalogue.modules.filter((module) => detected.has(module.id)).length
+            : 0;
+
+        navMenu.innerHTML = '';
+
+        const topGroup = document.createElement('div');
+        topGroup.className = 'lectio-manager-nav-group';
+        topGroup.appendChild(buildNavMenuItem('all', 'All modules'));
+        topGroup.appendChild(buildNavMenuItem('installed', `Installed (${installedCount})`));
+        navMenu.appendChild(topGroup);
+
+        navMenu.appendChild(buildNavDivider());
+
+        const audienceGroup = document.createElement('div');
+        audienceGroup.className = 'lectio-manager-nav-group';
+        audienceGroup.appendChild(buildNavGroupLabel('Audience'));
+        audienceGroup.appendChild(buildNavMenuItem(`${AUDIENCE_VIEW_PREFIX}student`, 'Student'));
+        audienceGroup.appendChild(buildNavMenuItem(`${AUDIENCE_VIEW_PREFIX}teacher`, 'Teacher'));
+        navMenu.appendChild(audienceGroup);
+
+        if (categories.length) {
+            navMenu.appendChild(buildNavDivider());
+
+            const categoryGroup = document.createElement('div');
+            categoryGroup.className = 'lectio-manager-nav-group';
+            categoryGroup.appendChild(buildNavGroupLabel('Category'));
+
+            for (const category of categories) {
+                categoryGroup.appendChild(buildNavMenuItem(`${CATEGORY_VIEW_PREFIX}${category}`, category));
+            }
+
+            navMenu.appendChild(categoryGroup);
+        }
+
+        navMenu.appendChild(buildNavDivider());
+
+        const sortGroup = document.createElement('div');
+        sortGroup.className = 'lectio-manager-nav-group';
+        sortGroup.appendChild(buildNavGroupLabel('Sort'));
+        sortGroup.appendChild(buildSortMenuItem('category', 'Category'));
+        sortGroup.appendChild(buildSortMenuItem('name', 'Name (A-Z)'));
+        navMenu.appendChild(sortGroup);
+
+        navCurrent.textContent = getViewLabel(currentView);
+    }
+
+    function buildNavGroupLabel(text) {
+        const label = document.createElement('div');
+        label.className = 'lectio-manager-nav-group-label';
+        label.textContent = text;
+        return label;
+    }
+
+    function buildNavMenuItem(view, label) {
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.className = 'lectio-manager-nav-item';
+        item.dataset.view = view;
+        item.setAttribute('role', 'menuitemradio');
+        item.setAttribute('aria-checked', String(view === currentView));
+        item.classList.toggle('is-active', view === currentView);
+        item.textContent = label;
+        return item;
+    }
+
+    function buildSortMenuItem(mode, label) {
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.className = 'lectio-manager-nav-item';
+        item.dataset.sort = mode;
+        item.setAttribute('role', 'menuitemradio');
+        item.setAttribute('aria-checked', String(mode === sortMode));
+        item.classList.toggle('is-active', mode === sortMode);
+        item.textContent = label;
+        return item;
+    }
+
+    function buildNavDivider() {
+        const divider = document.createElement('div');
+        divider.className = 'lectio-manager-nav-divider';
+        return divider;
     }
 
     function buildModuleCard(module) {
@@ -772,6 +962,10 @@
         return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 5l14 14"></path><path d="M19 5 5 19"></path></svg>`;
     }
 
+    function chevronSvg() {
+        return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 9l6 6 6-6"></path></svg>`;
+    }
+
     // ============================================================
     // STYLES
     // ============================================================
@@ -830,7 +1024,6 @@
                 border: 1px solid #d6dde0;
                 border-radius: 10px;
                 box-shadow: 0 10px 28px rgba(0,0,0,.22);
-                overflow: hidden;
             }
 
             #lectio-manager-panel[hidden] {
@@ -844,6 +1037,26 @@
                 padding: 10px 12px;
                 background: #0f6f6f;
                 color: #ffffff;
+                border-radius: 10px 10px 0 0;
+            }
+
+            .lectio-manager-footer {
+                padding: 8px 12px;
+                text-align: center;
+                border-top: 1px solid #eef1f2;
+                background: #fafbfb;
+                border-radius: 0 0 10px 10px;
+            }
+
+            .lectio-manager-footer-link {
+                font-size: 11px;
+                font-weight: 600;
+                color: #0f6f6f;
+                text-decoration: none;
+            }
+
+            .lectio-manager-footer-link:hover {
+                text-decoration: underline;
             }
 
             .lectio-manager-title {
@@ -902,48 +1115,146 @@
                 color: #5e6870;
             }
 
-            .lectio-manager-controls {
-                display: flex;
-                align-items: center;
-                justify-content: space-between;
-                gap: 8px;
+            .lectio-manager-nav {
+                position: relative;
                 padding: 6px 12px;
                 border-bottom: 1px solid #eef1f2;
             }
 
-            .lectio-manager-audience-tabs {
+            .lectio-manager-nav-trigger {
                 display: flex;
-                gap: 4px;
-            }
-
-            .lectio-manager-audience-tab {
+                align-items: center;
+                justify-content: space-between;
+                width: 100%;
+                gap: 8px;
                 border: 1px solid #d6dde0;
                 background: #ffffff;
-                color: #394a57;
-                border-radius: 999px;
-                padding: 3px 10px;
-                font-size: 11px;
-                font-weight: 600;
+                border-radius: 8px;
+                padding: 6px 10px;
+                font-size: 12px;
+                font-weight: 700;
+                color: #10201e;
                 cursor: pointer;
             }
 
-            .lectio-manager-audience-tab:hover {
+            .lectio-manager-nav-trigger:hover {
+                border-color: #0f6f6f;
+            }
+
+            .lectio-manager-nav-trigger svg {
+                width: 12px;
+                height: 12px;
+                flex-shrink: 0;
+                fill: none;
+                stroke: #5e6870;
+                stroke-width: 2;
+                stroke-linecap: round;
+                stroke-linejoin: round;
+            }
+
+            .lectio-manager-nav-menu {
+                position: absolute;
+                left: 12px;
+                right: 12px;
+                top: calc(100% + 4px);
+                z-index: 10;
+                background: #ffffff;
+                border: 1px solid #d6dde0;
+                border-radius: 8px;
+                box-shadow: 0 8px 20px rgba(0,0,0,.18);
+                padding: 6px;
+                max-height: 260px;
+                overflow-y: auto;
+            }
+
+            .lectio-manager-nav-menu[hidden] {
+                display: none !important;
+            }
+
+            .lectio-manager-nav-divider {
+                height: 1px;
+                background: #eef1f2;
+                margin: 6px 2px;
+            }
+
+            .lectio-manager-nav-group {
+                display: flex;
+                flex-direction: column;
+                gap: 2px;
+            }
+
+            .lectio-manager-nav-group-label {
+                padding: 4px 8px 2px;
+                font-size: 10px;
+                font-weight: 700;
+                text-transform: uppercase;
+                letter-spacing: .04em;
+                color: #8a949c;
+            }
+
+            .lectio-manager-nav-item {
+                display: block;
+                width: 100%;
+                text-align: left;
+                border: none;
+                background: transparent;
+                border-radius: 6px;
+                padding: 6px 8px;
+                font-size: 12px;
+                font-weight: 500;
+                color: #10201e;
+                cursor: pointer;
+            }
+
+            .lectio-manager-nav-item:hover {
                 background: #f2f6f6;
             }
 
-            .lectio-manager-audience-tab.is-active {
+            .lectio-manager-nav-item.is-active {
                 background: #0f6f6f;
-                border-color: #0f6f6f;
                 color: #ffffff;
+                font-weight: 700;
             }
 
-            .lectio-manager-sort {
+            .lectio-manager-view-heading {
+                padding: 8px 12px 2px;
                 font-size: 11px;
-                border: 1px solid #d6dde0;
-                border-radius: 6px;
-                padding: 3px 6px;
-                color: #394a57;
-                background: #ffffff;
+                font-weight: 700;
+                text-transform: uppercase;
+                letter-spacing: .03em;
+                color: #5e6870;
+            }
+
+            .lectio-manager-tip {
+                display: flex;
+                align-items: flex-start;
+                gap: 8px;
+                margin: 6px 12px 0;
+                padding: 8px 10px;
+                font-size: 11px;
+                line-height: 1.35;
+                background: #eaf5f2;
+                color: #0d4d4d;
+                border: 1px solid #cfe8e3;
+                border-radius: 8px;
+            }
+
+            .lectio-manager-tip[hidden] {
+                display: none !important;
+            }
+
+            .lectio-manager-tip-text {
+                flex: 1;
+            }
+
+            .lectio-manager-tip-dismiss {
+                border: none;
+                background: transparent;
+                color: #0d4d4d;
+                font-size: 14px;
+                line-height: 1;
+                cursor: pointer;
+                padding: 0 2px;
             }
 
             .lectio-manager-error {
@@ -959,6 +1270,8 @@
             }
 
             .lectio-manager-list {
+                flex: 1;
+                min-height: 0;
                 overflow-y: auto;
                 padding: 6px 8px 10px;
             }
@@ -970,24 +1283,15 @@
                 font-size: 12px;
             }
 
-            .lectio-manager-section-heading {
-                margin: 10px 4px 4px;
-                font-size: 11px;
-                font-weight: 700;
-                text-transform: uppercase;
-                letter-spacing: .03em;
-                color: #5e6870;
-            }
-
-            .lectio-manager-section-heading:first-child {
-                margin-top: 4px;
-            }
-
             .lectio-manager-category-heading {
                 margin: 6px 4px 2px;
                 font-size: 10px;
                 font-weight: 600;
                 color: #8a949c;
+            }
+
+            .lectio-manager-category-heading:first-child {
+                margin-top: 0;
             }
 
             .lectio-manager-card {

@@ -36,8 +36,9 @@ They run locally in your browser while you use Lectio. Install only the modules 
 - lets you **install** a module with one click, using Tampermonkey's own install screen,
 - shows whether a module is currently **detected as running**,
 - caches the catalogue locally and refreshes it automatically at most once every 24 hours, with a manual refresh button whenever you want the latest list,
-- splits the list into **Installed** and **Available** sections, and lets you filter by audience (All / Student / Teacher) or sort by category / name as the library grows,
-- gives every installed module a **Manage** shortcut straight to the Tampermonkey dashboard, for disabling, updating, or removing it.
+- has a single **navigation menu** (tap the row under "Last refreshed") for moving between All modules, Installed, an audience (Student / Teacher), or a category — plus a Category/Name sort — so the panel stays navigable as the module library grows,
+- gives every installed module a **Manage** shortcut straight to the Tampermonkey dashboard, for disabling, updating, or removing it,
+- has a **Report a bug or idea** link at the bottom of the panel, straight to this repository's GitHub Issue templates.
 
 The Manager itself contains **no feature logic**. Translation, message polling, room logic, and every other feature live entirely inside their own independent module. Installing only the Manager and one module means only that module's code ever runs — nothing else is downloaded or executed.
 
@@ -204,7 +205,9 @@ These are two separate, independent things:
 | **A module's own code** | Normal Tampermonkey update check against that module's own file in `modules/`. |
 
 > [!TIP]
-> Every file in `manager/` and `modules/` includes an `@updateURL`/`@downloadURL` in its header, so Tampermonkey can check for updates **no matter how you installed it** — through the Manager, via GitHub Raw, or by copy-paste (as long as you copied the header too). This only works if Tampermonkey's own update checking is turned on: **Tampermonkey Dashboard → Settings → Update**, and confirm an interval is set (Tampermonkey checks in the background on that schedule; it does not update instantly the moment a new version is published here).
+> Every file in `manager/` and `modules/` includes an `@updateURL`/`@downloadURL` in its header, so Tampermonkey can check for updates **no matter how you installed it** — through the Manager, via GitHub Raw, or by copy-paste (as long as you copied the header too). This only works if Tampermonkey's own update checking is turned on: **Tampermonkey Dashboard → Settings → Update**, and confirm an interval is set (Tampermonkey checks in the background on that schedule; it does not update instantly the moment a new version is published here). The Manager shows a one-time dismissible reminder about this the first time you open its panel.
+>
+> There's no way around that manual step: Tampermonkey gives userscripts no API to read or change its own settings, and no reliable cross-browser way to deep-link straight to its Settings tab (only the general dashboard, which the **Manage** button already opens).
 
 ### Install several modules
 
