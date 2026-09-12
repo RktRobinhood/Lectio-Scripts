@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Lectio Theming
 // @namespace    https://www.lectio.dk/
-// @version      0.4.0
-// @description  Gives Lectio a soft, translucent glass shell with 26 built-in colour schemes (Catppuccin, Nord, Dracula, Cyberpunk and more), each with a matching background photo, and can derive a scheme from a website or image.
+// @version      0.5.0
+// @description  Gives Lectio a soft, translucent glass shell with 26 built-in colour schemes (Catppuccin, Nord, Dracula, Cyberpunk and more), each with its own distinct background photo, and can derive a scheme from a website or image.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-start
 // @grant        GM_xmlhttpRequest
@@ -16,7 +16,7 @@
 
     const MODULE_ID = 'lectio-theming';
     const MODULE_NAME = 'Lectio Theming';
-    const MODULE_VERSION = '0.4.0';
+    const MODULE_VERSION = '0.5.0';
     const STORAGE_KEY = 'lectioTheming.settings.v2';
     const STYLE_ID = 'lectio-theming-styles';
     const ROOT_CLASS = 'lectio-themed';
@@ -27,6 +27,12 @@
     // viewer's IP on every page load. One real photo per background pattern
     // family; see assets/theming/CREDITS.md for source/licence details.
     const ASSET_BASE_URL = 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/assets/theming';
+    // Lectio's own page shell — scoping link/form-control rules to live
+    // inside this (rather than excluding known sibling-module IDs one by
+    // one) means any other module's floating UI (appended straight to
+    // <body>, outside this shell) is never touched, without this module
+    // needing to know that other module exists.
+    const CONTENT_ROOT_SELECTOR = '#masterContent, #content, #m_Content, .ls-master-container, .ls-content-container';
 
     // Named themes carry their own authentic background/surface/text values,
     // so they keep their real character (a dark theme is meant to be dark).
@@ -372,13 +378,14 @@
                 background: theme.background, surface: theme.surface, surfaceAlt: theme.surfaceAlt,
                 text: theme.text, muted: theme.muted, accent: theme.accent, accentAlt: theme.accentAlt,
                 danger: theme.danger, blend: mixHex(theme.accent, theme.accentAlt, .5),
-                mode: theme.mode, pattern: theme.pattern
+                mode: theme.mode, pattern: theme.pattern, image: `bg-${preset}.jpg`
             };
         }
 
         const base = CUSTOM_BASE[mode] || CUSTOM_BASE.light;
         const hues = customHues || CUSTOM_FALLBACK_HUES;
         const ensureAccent = mode === 'dark' ? ensureAccentOnDark : ensureAccentOnLight;
+        const pattern = mode === 'dark' ? 'grid' : 'blobs';
 
         return {
             background: base.background, surface: base.surface, surfaceAlt: base.surfaceAlt,
@@ -387,7 +394,7 @@
             accentAlt: ensureAccent(hues.accentAlt, base.background),
             danger: hues.danger,
             blend: mixHex(hues.accent, hues.accentAlt, .5),
-            mode, pattern: mode === 'dark' ? 'grid' : 'blobs'
+            mode, pattern, image: `bg-${pattern}.jpg`
         };
     }
 
@@ -411,6 +418,7 @@
             '--lectio-theme-accent-alt': currentPalette.accentAlt,
             '--lectio-theme-blend': currentPalette.blend,
             '--lectio-theme-danger': currentPalette.danger,
+            '--lectio-theme-bg-image': `url('${ASSET_BASE_URL}/${currentPalette.image}')`,
             '--lectio-theme-radius': `${settings.radius}px`,
             '--lectio-theme-space': settings.density === 'compact' ? '6px' : '10px'
         };
@@ -461,7 +469,7 @@
                     radial-gradient(circle at 105% 8%, color-mix(in srgb, var(--lectio-theme-accent-alt) 20%, transparent), transparent 38rem),
                     radial-gradient(circle at 40% 118%, color-mix(in srgb, var(--lectio-theme-blend) 16%, transparent), transparent 46rem),
                     linear-gradient(color-mix(in srgb, var(--lectio-theme-bg) 62%, transparent), color-mix(in srgb, var(--lectio-theme-bg) 62%, transparent)),
-                    url('${ASSET_BASE_URL}/bg-blobs.jpg') !important;
+                    var(--lectio-theme-bg-image) !important;
             }
 
             html.${ROOT_CLASS}[data-lectio-theme-pattern="waves"] body {
@@ -470,7 +478,7 @@
                     linear-gradient(-115deg, color-mix(in srgb, var(--lectio-theme-accent-alt) 12%, transparent) 10%, transparent 55%),
                     radial-gradient(circle at 30% 15%, color-mix(in srgb, var(--lectio-theme-blend) 16%, transparent), transparent 50rem),
                     linear-gradient(color-mix(in srgb, var(--lectio-theme-bg) 60%, transparent), color-mix(in srgb, var(--lectio-theme-bg) 60%, transparent)),
-                    url('${ASSET_BASE_URL}/bg-waves.jpg') !important;
+                    var(--lectio-theme-bg-image) !important;
             }
 
             html.${ROOT_CLASS}[data-lectio-theme-pattern="grid"] body {
@@ -479,7 +487,7 @@
                     repeating-linear-gradient(90deg, color-mix(in srgb, var(--lectio-theme-accent) 6%, transparent) 0px, transparent 1px, transparent 42px),
                     radial-gradient(circle at 20% -10%, color-mix(in srgb, var(--lectio-theme-accent-alt) 14%, transparent), transparent 44rem),
                     linear-gradient(color-mix(in srgb, var(--lectio-theme-bg) 64%, transparent), color-mix(in srgb, var(--lectio-theme-bg) 64%, transparent)),
-                    url('${ASSET_BASE_URL}/bg-grid.jpg') !important;
+                    var(--lectio-theme-bg-image) !important;
             }
 
             html.${ROOT_CLASS}[data-lectio-theme-pattern="scanlines"] body {
@@ -489,11 +497,11 @@
                     radial-gradient(circle at 100% 10%, color-mix(in srgb, var(--lectio-theme-accent-alt) 22%, transparent), transparent 40rem),
                     linear-gradient(0deg, color-mix(in srgb, var(--lectio-theme-accent) 16%, transparent) 0%, transparent 30%),
                     linear-gradient(color-mix(in srgb, var(--lectio-theme-bg) 50%, transparent), color-mix(in srgb, var(--lectio-theme-bg) 50%, transparent)),
-                    url('${ASSET_BASE_URL}/bg-scanlines.jpg') !important;
+                    var(--lectio-theme-bg-image) !important;
             }
 
             html.${ROOT_CLASS} :where(#masterContent, #content, #m_Content, .ls-master-container, .ls-content-container,
-                .ls-card, .island, fieldset, .s2skemabrikcontainer, .s2skemabrik, .s2day, .s2weekHeader) {
+                [class*="ls-card"], .island, fieldset, .s2skemabrikcontainer, .s2skemabrik, .s2day, .s2weekHeader) {
                 border-radius: var(--lectio-theme-radius) !important;
             }
 
@@ -502,11 +510,11 @@
                 color: var(--lectio-theme-text) !important;
             }
 
-            html.${ROOT_CLASS} :where(.ls-card, .island, fieldset, .s2skemabrikcontainer, .s2day, .s2weekHeader) {
+            html.${ROOT_CLASS} :where([class*="ls-card"], .island, fieldset, .s2skemabrikcontainer, .s2day, .s2weekHeader) {
                 border: 1px solid color-mix(in srgb, var(--lectio-theme-accent) 10%, transparent) !important;
             }
 
-            html.${ROOT_CLASS} :where(.ls-card, .island, fieldset, .s2skemabrikcontainer, .s2day, table) {
+            html.${ROOT_CLASS} :where([class*="ls-card"], .island, fieldset, .s2skemabrikcontainer, .s2day, table) {
                 color: var(--lectio-theme-text);
             }
 
@@ -524,7 +532,7 @@
                 background: color-mix(in srgb, var(--lectio-theme-surface-alt) 40%, transparent) !important;
             }
 
-            html.${ROOT_CLASS} :where(.ls-card, .island, fieldset, .s2skemabrikcontainer) {
+            html.${ROOT_CLASS} :where([class*="ls-card"], .island, fieldset, .s2skemabrikcontainer) {
                 background: color-mix(in srgb, var(--lectio-theme-surface) 55%, transparent) !important;
                 box-shadow: 0 8px 22px color-mix(in srgb, var(--lectio-theme-muted) 18%, transparent), inset 0 1px color-mix(in srgb, var(--lectio-theme-text) 6%, transparent);
                 padding: var(--lectio-theme-space);
@@ -537,20 +545,20 @@
                 box-shadow: 0 10px 24px color-mix(in srgb, var(--lectio-theme-muted) 20%, transparent);
             }
 
-            html.${ROOT_CLASS}.lectio-theme-blur :where(#s_m_masterleftDiv, .ls-master-header, .ls-top-nav, .ls-card, .island) {
+            html.${ROOT_CLASS}.lectio-theme-blur :where(#s_m_masterleftDiv, .ls-master-header, .ls-top-nav, [class*="ls-card"], .island) {
                 backdrop-filter: blur(18px) saturate(130%);
             }
 
-            html.${ROOT_CLASS} :where(a, .ls-link):not(#lectio-manager-root *) {
+            html.${ROOT_CLASS} :is(${CONTENT_ROOT_SELECTOR}) :where(a, .ls-link) {
                 color: var(--lectio-theme-accent) !important;
                 text-decoration-color: color-mix(in srgb, var(--lectio-theme-accent) 45%, transparent);
             }
 
-            html.${ROOT_CLASS} :where(a:hover, .ls-link:hover):not(#lectio-manager-root *) {
+            html.${ROOT_CLASS} :is(${CONTENT_ROOT_SELECTOR}) :where(a:hover, .ls-link:hover) {
                 color: color-mix(in srgb, var(--lectio-theme-accent) 75%, var(--lectio-theme-text)) !important;
             }
 
-            html.${ROOT_CLASS} :where(input, select, textarea, button, .button, .ls-button):not(#lectio-manager-root *) {
+            html.${ROOT_CLASS} :is(${CONTENT_ROOT_SELECTOR}) :where(input, select, textarea, button, .button, .ls-button) {
                 border: 1px solid color-mix(in srgb, var(--lectio-theme-muted) 28%, transparent) !important;
                 border-radius: max(6px, calc(var(--lectio-theme-radius) - 4px)) !important;
                 background: color-mix(in srgb, var(--lectio-theme-surface-alt) 65%, transparent) !important;
@@ -558,12 +566,12 @@
                 padding: var(--lectio-theme-space);
             }
 
-            html.${ROOT_CLASS} :where(button, .button, .ls-button):not(#lectio-manager-root *):hover {
+            html.${ROOT_CLASS} :is(${CONTENT_ROOT_SELECTOR}) :where(button, .button, .ls-button):hover {
                 border-color: var(--lectio-theme-accent) !important;
                 box-shadow: 0 0 0 2px color-mix(in srgb, var(--lectio-theme-accent) 16%, transparent);
             }
 
-            html.${ROOT_CLASS} :where(input, select, textarea):not(#lectio-manager-root *):focus {
+            html.${ROOT_CLASS} :is(${CONTENT_ROOT_SELECTOR}) :where(input, select, textarea):focus {
                 outline: 2px solid color-mix(in srgb, var(--lectio-theme-accent) 55%, transparent) !important;
                 outline-offset: 1px;
             }
