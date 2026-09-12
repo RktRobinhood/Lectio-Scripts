@@ -10,6 +10,7 @@ This repo stores, versions, and updates Tampermonkey userscripts for Lectio (a D
 - **The Manager never gains feature-specific logic.** `manager/Lectio-Manager.user.js` only discovers modules, links to install them, renders a *generic* settings UI from a module-supplied schema, and shortcuts to Tampermonkey's dashboard. If a request sounds like "have the Manager do X for module Y," the answer is to put X in module Y, not in the Manager. See [ADR-0001](./docs/adr/0001-manager-module-separation.md).
 - **No memory leaks.** Modules run persistently on every matched Lectio page load. Any listener, `setInterval`/`setTimeout`, or `MutationObserver` a module adds must be capable of being torn down or scoped so it doesn't accumulate across navigations. Be conservative with polling.
 - **Modules should be school-agnostic by default.** The project's goal is to work at any Lectio school, not just the maintainer's own — derive the school id from `location.pathname` (as Chairs Up does) rather than hardcoding one school into `@match` or into scraping logic. See [ADR-0007](./docs/adr/0007-school-agnostic-by-default.md).
+- **New modules must expose their key colors as `--lectio-theme-*` CSS custom properties**, each with the module's own current hard-coded value as its `var()` fallback (e.g. `background: var(--lectio-theme-accent, #0f6f6f)`), so [Lectio Theming](./modules/Lectio-Theming.user.js) can recolor them automatically if installed, and the module looks visually unchanged if it isn't. See [ADR-0006](./docs/adr/0006-css-custom-property-theming-seam.md) for the exact variable names and semantics. This is required for new modules, not optional.
 
 ## Contribution model
 
@@ -23,6 +24,7 @@ A new module is just:
 
 1. A new `modules/<Name>.user.js` file with a standard header (`@name`, `@version`, `@match https://www.lectio.dk/lectio/*` or a narrower path, `@updateURL`/`@downloadURL` pointing at its own raw GitHub path) that, on load and on receiving the `lectio-manager:discover` event, dispatches `lectio-module:register` with `{ id, name, version, settingsSchema, currentValues }` (an empty `settingsSchema: []` is fine if the module has no configurable options yet).
 2. A matching entry in `catalogue/modules.json` (`id`, `name`, `description`, `category`, `audience`, `status`, `version`, `installUrl` under `raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/`, `supportUrl`).
+3. Any color the module's own UI hard-codes (backgrounds, text, borders, accents) written as `var(--lectio-theme-name, <the module's own hard-coded value>)` per [ADR-0006](./docs/adr/0006-css-custom-property-theming-seam.md) — required, not optional, for new modules.
 
 Nothing else is required, and the Manager's own code never needs to change for a new module.
 
@@ -40,16 +42,16 @@ Nothing else is required, and the Manager's own code never needs to change for a
 
 No shared stylesheet exists or should exist, but for visual consistency when hand-matching a new module's look:
 
-- **Manager**: teal `#0f6f6f` (header background, buttons, active nav items), white panel `#ffffff`, body text `#10201e`, secondary text `#5e6870`, `Roboto, Arial, sans-serif`, 10px card/panel border-radius, thin `#d6dde0`/`#eef1f2` borders, minimal-stroke line-art SVG icons (gear, wrench, refresh, close, chevron).
-- **Chairs Up**: alert-red gradient `#ff3155` → `#d9002f` for its badge/notice (deliberately urgent, not matched to the Manager's teal).
+- **Manager**: teal `#0f6f6f` (header background, buttons, active nav items), white panel `#ffffff`, body text `#10201e`, secondary text `#5e6870`, `Roboto, Arial, sans-serif`, 10px card/panel border-radius, thin `#d6dde0`/`#eef1f2` borders, minimal-stroke line-art SVG icons (gear, wrench, refresh, close, chevron). Its panel now reads the `--lectio-theme-*` seam (ADR-0006) with these as fallbacks.
+- **Chairs Up**: alert-red gradient `#ff3155` → `#d9002f` for its badge/notice (deliberately urgent, not matched to the Manager's teal — a semantic-urgency color like this is a reasonable exception to the theming seam, same as Lectio Theming's own error/success colors).
 - **Unread Message Notifications**: light blue `#cae6ff` badge background, dark navy `#001e2f` text.
-- **English Mode**: mid blue `#35658c` accents.
+- **English Mode**: mid blue `#35658c` accents, also migrated onto the `--lectio-theme-*` seam.
 
-There is no enforced consistency today — each module picked its own palette independently. A new module should either match the Manager's teal (if it's a neutral utility) or pick a deliberate, distinct accent color (as Chairs Up did for urgency) — but per [ADR-0006](./docs/adr/0006-css-custom-property-theming-seam.md), expose its key colors as CSS custom properties with hard-coded fallbacks so a future optional theme layer could override them.
+There is no enforced visual-*style* consistency (a new module can still pick its own accent color, as Chairs Up did deliberately for urgency), but every module's colors **must** go through the `--lectio-theme-*` seam from ADR-0006 with the module's own palette as the `var()` fallback — that's what lets [Lectio Theming](./modules/Lectio-Theming.user.js) recolor it automatically without either module depending on the other.
 
 ## Known gaps / future directions (not committed work, just notes)
 
 - **The Manager's settings seam is unused.** `manager/Lectio-Manager.user.js` fully implements rendering a generic settings panel (toggle/select/range/text/button controls) from a module's `settingsSchema`, wired through the `lectio-manager:set-setting` event — but all three existing modules currently register with `settingsSchema: []`. The first real candidate for future work is wiring an actual option (e.g. a chime on/off toggle for Unread Message Notifications, or a poll-interval control) into one existing module, to exercise this seam end-to-end for the first time.
 - **Resilience to Lectio's own changes.** Lectio can change its page structure at any time, and there's no automated monitoring for that today. The working principle: modules should feature-detect and degrade gracefully (as the "never treat a parse failure as zero unread" rule already does) rather than hard-depend on fragile selectors, and checking real Lectio pages for structural drift is a periodic manual/agent-assisted maintenance task, not an automated one yet.
 - **Generalizing Unread Message Notifications beyond school 223** is the concrete first test of ADR-0007 — widening its `@match` and re-verifying its unread-detection selectors against another school's actual rendering, since nothing here confirms those selectors are universal yet.
-- **School/class-level theming** is a motivating long-term idea (raised as "foundational") but nothing beyond the CSS-custom-property seam in ADR-0006 has been decided. Do not build a central theme layer speculatively — wait for an explicit decision.
+- **The central theme layer from ADR-0006 is now built**: [Lectio Theming](./modules/Lectio-Theming.user.js), with 26 named color schemes plus an imported-palette option. Remaining work here is retrofitting the `--lectio-theme-*` seam onto Chairs Up and Unread Message Notifications (Manager and English Mode are done), and continuing to verify Lectio's own unthemed surfaces against real saved pages (see the project's sample-pages memory) as new page types turn up gaps.
