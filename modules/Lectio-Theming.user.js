@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Lectio Theming
 // @namespace    https://www.lectio.dk/
-// @version      0.3.0
-// @description  Gives Lectio a soft, translucent glass shell with 26 built-in colour schemes (Catppuccin, Nord, Dracula, Cyberpunk and more), each with its own generated background style, and can derive a scheme from a website or image.
+// @version      0.4.0
+// @description  Gives Lectio a soft, translucent glass shell with 26 built-in colour schemes (Catppuccin, Nord, Dracula, Cyberpunk and more), each with a matching background photo, and can derive a scheme from a website or image.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-start
 // @grant        GM_xmlhttpRequest
@@ -16,13 +16,17 @@
 
     const MODULE_ID = 'lectio-theming';
     const MODULE_NAME = 'Lectio Theming';
-    const MODULE_VERSION = '0.3.0';
+    const MODULE_VERSION = '0.4.0';
     const STORAGE_KEY = 'lectioTheming.settings.v2';
     const STYLE_ID = 'lectio-theming-styles';
     const ROOT_CLASS = 'lectio-themed';
     const LOG = '[Lectio Theming]';
     const MAX_SOURCE_BYTES = 8 * 1024 * 1024;
     const MODE_KEYS = ['light', 'dark'];
+    // Self-hosted so nothing goes stale and no third-party image host sees a
+    // viewer's IP on every page load. One real photo per background pattern
+    // family; see assets/theming/CREDITS.md for source/licence details.
+    const ASSET_BASE_URL = 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/assets/theming';
 
     // Named themes carry their own authentic background/surface/text values,
     // so they keep their real character (a dark theme is meant to be dark).
@@ -446,27 +450,36 @@
 
             html.${ROOT_CLASS}[data-lectio-theme-pattern] body {
                 background-attachment: fixed !important;
+                background-repeat: no-repeat !important;
+                background-position: center !important;
+                background-size: cover !important;
             }
 
             html.${ROOT_CLASS}[data-lectio-theme-pattern="blobs"] body {
                 background-image:
                     radial-gradient(circle at 10% -10%, color-mix(in srgb, var(--lectio-theme-accent) 22%, transparent), transparent 40rem),
                     radial-gradient(circle at 105% 8%, color-mix(in srgb, var(--lectio-theme-accent-alt) 20%, transparent), transparent 38rem),
-                    radial-gradient(circle at 40% 118%, color-mix(in srgb, var(--lectio-theme-blend) 16%, transparent), transparent 46rem) !important;
+                    radial-gradient(circle at 40% 118%, color-mix(in srgb, var(--lectio-theme-blend) 16%, transparent), transparent 46rem),
+                    linear-gradient(color-mix(in srgb, var(--lectio-theme-bg) 62%, transparent), color-mix(in srgb, var(--lectio-theme-bg) 62%, transparent)),
+                    url('${ASSET_BASE_URL}/bg-blobs.jpg') !important;
             }
 
             html.${ROOT_CLASS}[data-lectio-theme-pattern="waves"] body {
                 background-image:
                     linear-gradient(125deg, color-mix(in srgb, var(--lectio-theme-accent) 14%, transparent) 0%, transparent 45%),
                     linear-gradient(-115deg, color-mix(in srgb, var(--lectio-theme-accent-alt) 12%, transparent) 10%, transparent 55%),
-                    radial-gradient(circle at 30% 15%, color-mix(in srgb, var(--lectio-theme-blend) 16%, transparent), transparent 50rem) !important;
+                    radial-gradient(circle at 30% 15%, color-mix(in srgb, var(--lectio-theme-blend) 16%, transparent), transparent 50rem),
+                    linear-gradient(color-mix(in srgb, var(--lectio-theme-bg) 60%, transparent), color-mix(in srgb, var(--lectio-theme-bg) 60%, transparent)),
+                    url('${ASSET_BASE_URL}/bg-waves.jpg') !important;
             }
 
             html.${ROOT_CLASS}[data-lectio-theme-pattern="grid"] body {
                 background-image:
                     repeating-linear-gradient(0deg, color-mix(in srgb, var(--lectio-theme-accent) 6%, transparent) 0px, transparent 1px, transparent 42px),
                     repeating-linear-gradient(90deg, color-mix(in srgb, var(--lectio-theme-accent) 6%, transparent) 0px, transparent 1px, transparent 42px),
-                    radial-gradient(circle at 20% -10%, color-mix(in srgb, var(--lectio-theme-accent-alt) 14%, transparent), transparent 44rem) !important;
+                    radial-gradient(circle at 20% -10%, color-mix(in srgb, var(--lectio-theme-accent-alt) 14%, transparent), transparent 44rem),
+                    linear-gradient(color-mix(in srgb, var(--lectio-theme-bg) 64%, transparent), color-mix(in srgb, var(--lectio-theme-bg) 64%, transparent)),
+                    url('${ASSET_BASE_URL}/bg-grid.jpg') !important;
             }
 
             html.${ROOT_CLASS}[data-lectio-theme-pattern="scanlines"] body {
@@ -474,12 +487,19 @@
                     repeating-linear-gradient(180deg, color-mix(in srgb, var(--lectio-theme-text) 5%, transparent) 0px, transparent 2px, transparent 5px),
                     radial-gradient(circle at 15% 0%, color-mix(in srgb, var(--lectio-theme-accent) 26%, transparent), transparent 42rem),
                     radial-gradient(circle at 100% 10%, color-mix(in srgb, var(--lectio-theme-accent-alt) 22%, transparent), transparent 40rem),
-                    linear-gradient(0deg, color-mix(in srgb, var(--lectio-theme-accent) 16%, transparent) 0%, transparent 30%) !important;
+                    linear-gradient(0deg, color-mix(in srgb, var(--lectio-theme-accent) 16%, transparent) 0%, transparent 30%),
+                    linear-gradient(color-mix(in srgb, var(--lectio-theme-bg) 50%, transparent), color-mix(in srgb, var(--lectio-theme-bg) 50%, transparent)),
+                    url('${ASSET_BASE_URL}/bg-scanlines.jpg') !important;
             }
 
             html.${ROOT_CLASS} :where(#masterContent, #content, #m_Content, .ls-master-container, .ls-content-container,
                 .ls-card, .island, fieldset, .s2skemabrikcontainer, .s2skemabrik, .s2day, .s2weekHeader) {
                 border-radius: var(--lectio-theme-radius) !important;
+            }
+
+            html.${ROOT_CLASS} :where(#masterContent, #content, #m_Content, .ls-master-container, .ls-content-container) {
+                background: color-mix(in srgb, var(--lectio-theme-surface) 55%, transparent) !important;
+                color: var(--lectio-theme-text) !important;
             }
 
             html.${ROOT_CLASS} :where(.ls-card, .island, fieldset, .s2skemabrikcontainer, .s2day, .s2weekHeader) {

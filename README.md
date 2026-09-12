@@ -69,7 +69,7 @@ All modules are designed for Lectio and are intended to work across Lectio insta
 | **[English Mode](modules/Lectio-English-Mode.user.js)** | Adds a **DA / EN** switch and translates the Lectio interface into context-aware English. | Students and staff |
 | **[Chairs Up](modules/Lectio-Chairs-Up.user.js)** | Marks a lesson when it is the **last booking of the day in that room**. | Teachers |
 | **[Unread Message Notifications](modules/Lectio-Unread-Message-Notifications.user.js)** | Shows an unread-message badge beside **Beskeder / Messages**. Currently limited to Lectio school `223`. | Students and staff at that school |
-| **[Lectio Theming](modules/Lectio-Theming.user.js)** | Applies a soft, translucent glass shell with **26 built-in colour schemes** (Catppuccin, Nord, Dracula, Cyberpunk and more), each with a matching generated background, or derive your own from an **image or website URL**. | Students and staff |
+| **[Lectio Theming](modules/Lectio-Theming.user.js)** | Applies a soft, translucent glass shell with **26 built-in colour schemes** (Catppuccin, Nord, Dracula, Cyberpunk and more), each with a matching background photo, or derive your own from an **image or website URL**. | Students and staff |
 
 You can install one, several, or all of them, either through the Manager or by copying a file directly (see below).
 
@@ -89,7 +89,7 @@ Each module keeps its own version and updates independently of the Manager and o
 
 Installed modules can expose their own settings in the Manager. Open Lectio Tools, find an installed module, and choose **Settings**. The Manager only renders these controls; each independent module owns and applies its values.
 
-For Lectio Theming, pick a **Theme** from 26 built-in colour schemes (Catppuccin, Nord, Dracula, Gruvbox, Solarized, Tokyo Night, Rosé Pine, Everforest, One Dark, Monokai Pro, Ayu, Kanagawa, Nightfox, Oxocarbon, Material Ocean, GitHub, Cyberpunk Neon, Synthwave '84, and more) — each keeps its own authentic light or dark look and a matching generated background style. To use your own colours instead, choose **Imported palette**, then paste an HTTPS image or website URL into **Palette source** and choose **Import**, or use **Choose image** for a local file that never leaves the browser; the **Light or dark** setting only affects this imported palette. Direct image URLs give the most predictable result; website imports use colours found in the page and up to six linked stylesheets.
+For Lectio Theming, pick a **Theme** from 26 built-in colour schemes (Catppuccin, Nord, Dracula, Gruvbox, Solarized, Tokyo Night, Rosé Pine, Everforest, One Dark, Monokai Pro, Ayu, Kanagawa, Nightfox, Oxocarbon, Material Ocean, GitHub, Cyberpunk Neon, Synthwave '84, and more) — each keeps its own authentic light or dark look and a matching background photo (see [assets/theming/CREDITS.md](assets/theming/CREDITS.md) for sources). To use your own colours instead, choose **Imported palette**, then paste an HTTPS image or website URL into **Palette source** and choose **Import**, or use **Choose image** for a local file that never leaves the browser; the **Light or dark** setting only affects this imported palette. Direct image URLs give the most predictable result; website imports use colours found in the page and up to six linked stylesheets.
 
 ### Manual: copy-paste a single module
 

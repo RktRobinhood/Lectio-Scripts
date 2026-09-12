@@ -38,11 +38,11 @@
     {
       "id": "lectio-theming",
       "name": "Lectio Theming",
-      "description": "Gives Lectio a soft, translucent glass shell with 26 built-in colour schemes and a matching generated background, or derives one from a website or image.",
+      "description": "Gives Lectio a soft, translucent glass shell with 26 built-in colour schemes and a matching background photo, or derives one from a website or image.",
       "category": "Interface",
       "audience": ["student", "teacher"],
       "status": "experimental",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Theming.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues"
     }
