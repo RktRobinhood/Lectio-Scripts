@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Lectio Theming
 // @namespace    https://www.lectio.dk/
-// @version      0.2.0
-// @description  Gives Lectio a soft, translucent glass shell over a subtly colourful background, and can derive its accent colours from a website or image.
+// @version      0.3.0
+// @description  Gives Lectio a soft, translucent glass shell with 26 built-in colour schemes (Catppuccin, Nord, Dracula, Cyberpunk and more), each with its own generated background style, and can derive a scheme from a website or image.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-start
 // @grant        GM_xmlhttpRequest
@@ -16,38 +16,174 @@
 
     const MODULE_ID = 'lectio-theming';
     const MODULE_NAME = 'Lectio Theming';
-    const MODULE_VERSION = '0.2.0';
+    const MODULE_VERSION = '0.3.0';
     const STORAGE_KEY = 'lectioTheming.settings.v2';
     const STYLE_ID = 'lectio-theming-styles';
     const ROOT_CLASS = 'lectio-themed';
     const LOG = '[Lectio Theming]';
     const MAX_SOURCE_BYTES = 8 * 1024 * 1024;
-    const PRESET_KEYS = ['aurora', 'coral', 'meadow', 'custom'];
     const MODE_KEYS = ['light', 'dark'];
 
-    // Presets only supply hue accents. Background/surface/text always come
-    // from MODE_BASE, so switching light/dark never loses the accent colours,
-    // and imported palettes stay legible instead of forcing a dark theme.
-    const HUES = Object.freeze({
-        aurora: { accent: '#4fb0a6', accentAlt: '#8b8fe8', danger: '#e0596b' },
-        coral: { accent: '#e08a5b', accentAlt: '#e6607a', danger: '#d9455b' },
-        meadow: { accent: '#4f9d6e', accentAlt: '#5aa9d6', danger: '#d9525f' }
-    });
-
-    const MODE_BASE = Object.freeze({
-        light: {
-            background: '#f6f5fb', surface: '#ffffff', surfaceAlt: '#eceffb',
-            text: '#20243a', muted: '#5b6178', blobStrength: '26%'
+    // Named themes carry their own authentic background/surface/text values,
+    // so they keep their real character (a dark theme is meant to be dark).
+    // "mode" only drives color-scheme + which background pattern family suits
+    // it; "pattern" picks a shared, parameterised CSS background generator
+    // below rather than hot-linking an external photo (nothing to go stale,
+    // nothing that leaks a viewer's IP to a third-party image host).
+    const THEMES = Object.freeze({
+        'catppuccin-latte': {
+            label: 'Catppuccin Latte', mode: 'light', pattern: 'blobs',
+            background: '#eff1f5', surface: '#ffffff', surfaceAlt: '#e6e9ef',
+            text: '#4c4f69', muted: '#6c6f85', accent: '#1e66f5', accentAlt: '#8839ef', danger: '#d20f39'
         },
-        dark: {
-            background: '#12141c', surface: '#1b1f2b', surfaceAlt: '#232840',
-            text: '#e7e9f5', muted: '#9aa0b8', blobStrength: '15%'
+        'gruvbox-light': {
+            label: 'Gruvbox Light', mode: 'light', pattern: 'blobs',
+            background: '#fbf1c7', surface: '#f9f5d7', surfaceAlt: '#ebdbb2',
+            text: '#3c3836', muted: '#7c6f64', accent: '#076678', accentAlt: '#427b58', danger: '#9d0006'
+        },
+        'solarized-light': {
+            label: 'Solarized Light', mode: 'light', pattern: 'blobs',
+            background: '#fdf6e3', surface: '#f7f0da', surfaceAlt: '#eee8d5',
+            text: '#657b83', muted: '#93a1a1', accent: '#268bd2', accentAlt: '#2aa198', danger: '#dc322f'
+        },
+        'rose-pine-dawn': {
+            label: 'Rosé Pine Dawn', mode: 'light', pattern: 'blobs',
+            background: '#faf4ed', surface: '#fffaf3', surfaceAlt: '#f2e9e1',
+            text: '#575279', muted: '#9893a5', accent: '#907aa9', accentAlt: '#56949f', danger: '#b4637a'
+        },
+        'everforest-light': {
+            label: 'Everforest Light', mode: 'light', pattern: 'blobs',
+            background: '#fdf6e3', surface: '#f4f0d9', surfaceAlt: '#efebd4',
+            text: '#5c6a72', muted: '#939f91', accent: '#8da101', accentAlt: '#35a77c', danger: '#f85552'
+        },
+        'github-light': {
+            label: 'GitHub Light', mode: 'light', pattern: 'blobs',
+            background: '#ffffff', surface: '#f6f8fa', surfaceAlt: '#eaeef2',
+            text: '#1f2328', muted: '#656d76', accent: '#0969da', accentAlt: '#8250df', danger: '#d1242f'
+        },
+        nord: {
+            label: 'Nord', mode: 'dark', pattern: 'waves',
+            background: '#2e3440', surface: '#3b4252', surfaceAlt: '#434c5e',
+            text: '#eceff4', muted: '#9aa5b1', accent: '#88c0d0', accentAlt: '#81a1c1', danger: '#bf616a'
+        },
+        'rose-pine': {
+            label: 'Rosé Pine', mode: 'dark', pattern: 'waves',
+            background: '#191724', surface: '#1f1d2e', surfaceAlt: '#26233a',
+            text: '#e0def4', muted: '#6e6a86', accent: '#c4a7e7', accentAlt: '#9ccfd8', danger: '#eb6f92'
+        },
+        'everforest-dark': {
+            label: 'Everforest Dark', mode: 'dark', pattern: 'waves',
+            background: '#2d353b', surface: '#343f44', surfaceAlt: '#3d484d',
+            text: '#d3c6aa', muted: '#859289', accent: '#a7c080', accentAlt: '#83c092', danger: '#e67e80'
+        },
+        kanagawa: {
+            label: 'Kanagawa', mode: 'dark', pattern: 'waves',
+            background: '#1f1f28', surface: '#2a2a37', surfaceAlt: '#363646',
+            text: '#dcd7ba', muted: '#727169', accent: '#7e9cd8', accentAlt: '#957fb8', danger: '#c34043'
+        },
+        'tokyo-night': {
+            label: 'Tokyo Night', mode: 'dark', pattern: 'waves',
+            background: '#1a1b26', surface: '#24283b', surfaceAlt: '#292e42',
+            text: '#c0caf5', muted: '#565f89', accent: '#7aa2f7', accentAlt: '#bb9af7', danger: '#f7768e'
+        },
+        dracula: {
+            label: 'Dracula', mode: 'dark', pattern: 'waves',
+            background: '#282a36', surface: '#343746', surfaceAlt: '#44475a',
+            text: '#f8f8f2', muted: '#6272a4', accent: '#bd93f9', accentAlt: '#ff79c6', danger: '#ff5555'
+        },
+        'catppuccin-mocha': {
+            label: 'Catppuccin Mocha', mode: 'dark', pattern: 'grid',
+            background: '#1e1e2e', surface: '#181825', surfaceAlt: '#313244',
+            text: '#cdd6f4', muted: '#a6adc8', accent: '#89b4fa', accentAlt: '#cba6f7', danger: '#f38ba8'
+        },
+        'catppuccin-frappe': {
+            label: 'Catppuccin Frappé', mode: 'dark', pattern: 'grid',
+            background: '#303446', surface: '#292c3c', surfaceAlt: '#414559',
+            text: '#c6d0f5', muted: '#a5adce', accent: '#8caaee', accentAlt: '#ca9ee6', danger: '#e78284'
+        },
+        'catppuccin-macchiato': {
+            label: 'Catppuccin Macchiato', mode: 'dark', pattern: 'grid',
+            background: '#24273a', surface: '#1e2030', surfaceAlt: '#363a4f',
+            text: '#cad3f5', muted: '#a5adcb', accent: '#8aadf4', accentAlt: '#c6a0f6', danger: '#ed8796'
+        },
+        'gruvbox-dark': {
+            label: 'Gruvbox Dark', mode: 'dark', pattern: 'grid',
+            background: '#282828', surface: '#3c3836', surfaceAlt: '#504945',
+            text: '#ebdbb2', muted: '#928374', accent: '#fe8019', accentAlt: '#8ec07c', danger: '#fb4934'
+        },
+        'solarized-dark': {
+            label: 'Solarized Dark', mode: 'dark', pattern: 'grid',
+            background: '#002b36', surface: '#073642', surfaceAlt: '#0a4a57',
+            text: '#93a1a1', muted: '#586e75', accent: '#268bd2', accentAlt: '#2aa198', danger: '#dc322f'
+        },
+        'one-dark': {
+            label: 'One Dark', mode: 'dark', pattern: 'grid',
+            background: '#282c34', surface: '#2c313a', surfaceAlt: '#3e4451',
+            text: '#abb2bf', muted: '#5c6370', accent: '#61afef', accentAlt: '#c678dd', danger: '#e06c75'
+        },
+        'monokai-pro': {
+            label: 'Monokai Pro', mode: 'dark', pattern: 'grid',
+            background: '#2d2a2e', surface: '#403e41', surfaceAlt: '#4a474a',
+            text: '#fcfcfa', muted: '#939293', accent: '#a9dc76', accentAlt: '#ab9df2', danger: '#ff6188'
+        },
+        'ayu-dark': {
+            label: 'Ayu Dark', mode: 'dark', pattern: 'grid',
+            background: '#0a0e14', surface: '#0d1420', surfaceAlt: '#131721',
+            text: '#b3b1ad', muted: '#5c6773', accent: '#ffb454', accentAlt: '#59c2ff', danger: '#f07178'
+        },
+        'ayu-mirage': {
+            label: 'Ayu Mirage', mode: 'dark', pattern: 'grid',
+            background: '#1f2430', surface: '#232834', surfaceAlt: '#2b3040',
+            text: '#cbccc6', muted: '#707a8c', accent: '#ffcc66', accentAlt: '#5ccfe6', danger: '#f28779'
+        },
+        nightfox: {
+            label: 'Nightfox', mode: 'dark', pattern: 'grid',
+            background: '#192330', surface: '#212e3f', surfaceAlt: '#29394f',
+            text: '#cdcecf', muted: '#71839b', accent: '#719cd6', accentAlt: '#63cdcf', danger: '#c94f6d'
+        },
+        oxocarbon: {
+            label: 'Oxocarbon', mode: 'dark', pattern: 'grid',
+            background: '#161616', surface: '#262626', surfaceAlt: '#393939',
+            text: '#f2f4f8', muted: '#8d8d8d', accent: '#3ddbd9', accentAlt: '#be95ff', danger: '#ff8389'
+        },
+        'material-ocean': {
+            label: 'Material Ocean', mode: 'dark', pattern: 'grid',
+            background: '#0f111a', surface: '#181a24', surfaceAlt: '#1f2233',
+            text: '#a6accd', muted: '#4b526d', accent: '#82aaff', accentAlt: '#c792ea', danger: '#ff5370'
+        },
+        cyberpunk: {
+            label: 'Cyberpunk Neon', mode: 'dark', pattern: 'scanlines',
+            background: '#0b0014', surface: '#150022', surfaceAlt: '#1f0233',
+            text: '#f4e8ff', muted: '#9d7bb0', accent: '#ff2bd6', accentAlt: '#00f0ff', danger: '#ff003c'
+        },
+        synthwave84: {
+            label: "Synthwave '84", mode: 'dark', pattern: 'scanlines',
+            background: '#241b2f', surface: '#2a2139', surfaceAlt: '#34294f',
+            text: '#f6eff5', muted: '#848bbd', accent: '#ff7edb', accentAlt: '#36f9f6', danger: '#fe4450'
         }
     });
 
+    const THEME_KEYS = Object.keys(THEMES);
+    const PRESET_KEYS = [...THEME_KEYS, 'custom'];
+    const PRESET_OPTIONS = [
+        ...THEME_KEYS.map((key) => ({
+            value: key,
+            label: `${THEMES[key].label} — ${THEMES[key].mode === 'dark' ? 'Dark' : 'Light'}`
+        })),
+        { value: 'custom', label: 'Imported palette' }
+    ];
+
+    // Neutral bases for the imported/custom palette only — named themes above
+    // never touch these, they carry their own authentic colours.
+    const CUSTOM_BASE = Object.freeze({
+        light: { background: '#f6f5fb', surface: '#ffffff', surfaceAlt: '#eceffb', text: '#20243a', muted: '#5b6178' },
+        dark: { background: '#14161f', surface: '#1c1f2b', surfaceAlt: '#242840', text: '#e5e7f0', muted: '#8890a8' }
+    });
+    const CUSTOM_FALLBACK_HUES = Object.freeze({ accent: '#4fb0a6', accentAlt: '#8b8fe8', danger: '#e0596b' });
+
     const DEFAULT_SETTINGS = Object.freeze({
         enabled: true,
-        preset: 'aurora',
+        preset: 'catppuccin-latte',
         mode: 'light',
         sourceUrl: '',
         radius: 12,
@@ -77,21 +213,16 @@
                         description: 'Switch the visual layer on or off.'
                     },
                     {
-                        key: 'mode', type: 'select', label: 'Light or dark',
-                        description: 'Lectio itself is always light, so light keeps things calm; dark is available if you prefer it.',
+                        key: 'preset', type: 'select', label: 'Theme',
+                        description: 'Pick a built-in colour scheme, or Imported palette for your own colours.',
+                        options: PRESET_OPTIONS
+                    },
+                    {
+                        key: 'mode', type: 'select', label: 'Light or dark (imported palette)',
+                        description: 'Only affects the imported palette below — built-in themes keep their own light or dark look.',
                         options: [
                             { value: 'light', label: 'Light' },
                             { value: 'dark', label: 'Dark' }
-                        ]
-                    },
-                    {
-                        key: 'preset', type: 'select', label: 'Accent colours',
-                        description: 'Pick a built-in accent pairing or your imported colours.',
-                        options: [
-                            { value: 'aurora', label: 'Aurora (teal / lavender)' },
-                            { value: 'coral', label: 'Coral (peach / pink)' },
-                            { value: 'meadow', label: 'Meadow (green / sky)' },
-                            { value: 'custom', label: 'Imported palette' }
                         ]
                     },
                     {
@@ -124,13 +255,13 @@
                     },
                     {
                         key: 'resetTheme', type: 'button', label: 'Reset theme',
-                        description: 'Restore the Aurora light defaults.', buttonLabel: 'Reset'
+                        description: 'Restore the Catppuccin Latte defaults.', buttonLabel: 'Reset'
                     }
                 ],
                 currentValues: {
                     enabled: settings.enabled,
-                    mode: settings.mode,
                     preset: settings.preset,
+                    mode: settings.mode,
                     sourceUrl: settings.sourceUrl,
                     radius: settings.radius,
                     blur: settings.blur,
@@ -230,21 +361,29 @@
     }
 
     function resolvePalette(preset, mode, customHues) {
-        const base = MODE_BASE[mode] || MODE_BASE.light;
-        const hues = (preset === 'custom' && customHues) ? customHues : (HUES[preset] || HUES.aurora);
+        const theme = THEMES[preset];
+
+        if (theme) {
+            return {
+                background: theme.background, surface: theme.surface, surfaceAlt: theme.surfaceAlt,
+                text: theme.text, muted: theme.muted, accent: theme.accent, accentAlt: theme.accentAlt,
+                danger: theme.danger, blend: mixHex(theme.accent, theme.accentAlt, .5),
+                mode: theme.mode, pattern: theme.pattern
+            };
+        }
+
+        const base = CUSTOM_BASE[mode] || CUSTOM_BASE.light;
+        const hues = customHues || CUSTOM_FALLBACK_HUES;
         const ensureAccent = mode === 'dark' ? ensureAccentOnDark : ensureAccentOnLight;
 
         return {
-            background: base.background,
-            surface: base.surface,
-            surfaceAlt: base.surfaceAlt,
-            text: base.text,
-            muted: base.muted,
+            background: base.background, surface: base.surface, surfaceAlt: base.surfaceAlt,
+            text: base.text, muted: base.muted,
             accent: ensureAccent(hues.accent, base.background),
             accentAlt: ensureAccent(hues.accentAlt, base.background),
             danger: hues.danger,
             blend: mixHex(hues.accent, hues.accentAlt, .5),
-            blobStrength: base.blobStrength
+            mode, pattern: mode === 'dark' ? 'grid' : 'blobs'
         };
     }
 
@@ -253,9 +392,10 @@
         root.classList.toggle(ROOT_CLASS, settings.enabled);
         root.classList.toggle('lectio-theme-blur', settings.blur);
         root.dataset.lectioThemeDensity = settings.density;
-        root.style.colorScheme = settings.mode === 'dark' ? 'dark' : 'light';
 
         currentPalette = resolvePalette(settings.preset, settings.mode, settings.customHues);
+        root.dataset.lectioThemePattern = currentPalette.pattern;
+        root.style.colorScheme = currentPalette.mode === 'dark' ? 'dark' : 'light';
 
         const variables = {
             '--lectio-theme-bg': currentPalette.background,
@@ -267,7 +407,6 @@
             '--lectio-theme-accent-alt': currentPalette.accentAlt,
             '--lectio-theme-blend': currentPalette.blend,
             '--lectio-theme-danger': currentPalette.danger,
-            '--lectio-theme-blob': currentPalette.blobStrength,
             '--lectio-theme-radius': `${settings.radius}px`,
             '--lectio-theme-space': settings.density === 'compact' ? '6px' : '10px'
         };
@@ -286,16 +425,15 @@
         style.id = STYLE_ID;
         style.textContent = `
             :root {
-                --lectio-theme-bg: #f6f5fb;
+                --lectio-theme-bg: #eff1f5;
                 --lectio-theme-surface: #ffffff;
-                --lectio-theme-surface-alt: #eceffb;
-                --lectio-theme-text: #20243a;
-                --lectio-theme-muted: #5b6178;
-                --lectio-theme-accent: #4fb0a6;
-                --lectio-theme-accent-alt: #8b8fe8;
-                --lectio-theme-blend: #6ba0c6;
-                --lectio-theme-danger: #e0596b;
-                --lectio-theme-blob: 26%;
+                --lectio-theme-surface-alt: #e6e9ef;
+                --lectio-theme-text: #4c4f69;
+                --lectio-theme-muted: #6c6f85;
+                --lectio-theme-accent: #1e66f5;
+                --lectio-theme-accent-alt: #8839ef;
+                --lectio-theme-blend: #5152ba;
+                --lectio-theme-danger: #d20f39;
                 --lectio-theme-radius: 12px;
                 --lectio-theme-space: 6px;
             }
@@ -306,52 +444,81 @@
                 color: var(--lectio-theme-text) !important;
             }
 
-            html.${ROOT_CLASS} body {
-                background-image:
-                    radial-gradient(circle at 10% -10%, color-mix(in srgb, var(--lectio-theme-accent) var(--lectio-theme-blob), transparent), transparent 40rem),
-                    radial-gradient(circle at 105% 8%, color-mix(in srgb, var(--lectio-theme-accent-alt) var(--lectio-theme-blob), transparent), transparent 38rem),
-                    radial-gradient(circle at 40% 118%, color-mix(in srgb, var(--lectio-theme-blend) var(--lectio-theme-blob), transparent), transparent 46rem) !important;
+            html.${ROOT_CLASS}[data-lectio-theme-pattern] body {
                 background-attachment: fixed !important;
+            }
+
+            html.${ROOT_CLASS}[data-lectio-theme-pattern="blobs"] body {
+                background-image:
+                    radial-gradient(circle at 10% -10%, color-mix(in srgb, var(--lectio-theme-accent) 22%, transparent), transparent 40rem),
+                    radial-gradient(circle at 105% 8%, color-mix(in srgb, var(--lectio-theme-accent-alt) 20%, transparent), transparent 38rem),
+                    radial-gradient(circle at 40% 118%, color-mix(in srgb, var(--lectio-theme-blend) 16%, transparent), transparent 46rem) !important;
+            }
+
+            html.${ROOT_CLASS}[data-lectio-theme-pattern="waves"] body {
+                background-image:
+                    linear-gradient(125deg, color-mix(in srgb, var(--lectio-theme-accent) 14%, transparent) 0%, transparent 45%),
+                    linear-gradient(-115deg, color-mix(in srgb, var(--lectio-theme-accent-alt) 12%, transparent) 10%, transparent 55%),
+                    radial-gradient(circle at 30% 15%, color-mix(in srgb, var(--lectio-theme-blend) 16%, transparent), transparent 50rem) !important;
+            }
+
+            html.${ROOT_CLASS}[data-lectio-theme-pattern="grid"] body {
+                background-image:
+                    repeating-linear-gradient(0deg, color-mix(in srgb, var(--lectio-theme-accent) 6%, transparent) 0px, transparent 1px, transparent 42px),
+                    repeating-linear-gradient(90deg, color-mix(in srgb, var(--lectio-theme-accent) 6%, transparent) 0px, transparent 1px, transparent 42px),
+                    radial-gradient(circle at 20% -10%, color-mix(in srgb, var(--lectio-theme-accent-alt) 14%, transparent), transparent 44rem) !important;
+            }
+
+            html.${ROOT_CLASS}[data-lectio-theme-pattern="scanlines"] body {
+                background-image:
+                    repeating-linear-gradient(180deg, color-mix(in srgb, var(--lectio-theme-text) 5%, transparent) 0px, transparent 2px, transparent 5px),
+                    radial-gradient(circle at 15% 0%, color-mix(in srgb, var(--lectio-theme-accent) 26%, transparent), transparent 42rem),
+                    radial-gradient(circle at 100% 10%, color-mix(in srgb, var(--lectio-theme-accent-alt) 22%, transparent), transparent 40rem),
+                    linear-gradient(0deg, color-mix(in srgb, var(--lectio-theme-accent) 16%, transparent) 0%, transparent 30%) !important;
             }
 
             html.${ROOT_CLASS} :where(#masterContent, #content, #m_Content, .ls-master-container, .ls-content-container,
                 .ls-card, .island, fieldset, .s2skemabrikcontainer, .s2skemabrik, .s2day, .s2weekHeader) {
-                border-color: color-mix(in srgb, var(--lectio-theme-accent) 20%, transparent) !important;
                 border-radius: var(--lectio-theme-radius) !important;
             }
 
-            html.${ROOT_CLASS} :where(.ls-card, .island, fieldset, .s2skemabrikcontainer, .s2day, table, tbody, tr, td, th) {
+            html.${ROOT_CLASS} :where(.ls-card, .island, fieldset, .s2skemabrikcontainer, .s2day, .s2weekHeader) {
+                border: 1px solid color-mix(in srgb, var(--lectio-theme-accent) 10%, transparent) !important;
+            }
+
+            html.${ROOT_CLASS} :where(.ls-card, .island, fieldset, .s2skemabrikcontainer, .s2day, table) {
                 color: var(--lectio-theme-text);
-                border-color: color-mix(in srgb, var(--lectio-theme-muted) 18%, transparent) !important;
             }
 
             html.${ROOT_CLASS} :where(table, tbody, tr, td, th) {
                 background-color: transparent !important;
+                border: none !important;
             }
 
             html.${ROOT_CLASS} table {
-                background: color-mix(in srgb, var(--lectio-theme-surface) 60%, transparent) !important;
+                background: color-mix(in srgb, var(--lectio-theme-surface) 55%, transparent) !important;
+                color: var(--lectio-theme-text);
             }
 
             html.${ROOT_CLASS} :where(th, tr:nth-child(even) > td) {
-                background: color-mix(in srgb, var(--lectio-theme-surface-alt) 45%, transparent) !important;
+                background: color-mix(in srgb, var(--lectio-theme-surface-alt) 40%, transparent) !important;
             }
 
             html.${ROOT_CLASS} :where(.ls-card, .island, fieldset, .s2skemabrikcontainer) {
                 background: color-mix(in srgb, var(--lectio-theme-surface) 55%, transparent) !important;
-                box-shadow: 0 10px 30px rgba(15, 23, 42, .08), inset 0 1px rgba(255, 255, 255, .5);
+                box-shadow: 0 8px 22px color-mix(in srgb, var(--lectio-theme-muted) 18%, transparent), inset 0 1px color-mix(in srgb, var(--lectio-theme-text) 6%, transparent);
                 padding: var(--lectio-theme-space);
             }
 
             html.${ROOT_CLASS} :where(#s_m_masterleftDiv, .ls-master-header, .ls-top-nav, .ls-master-pageheader) {
                 background: color-mix(in srgb, var(--lectio-theme-surface) 62%, transparent) !important;
-                border: 1px solid color-mix(in srgb, var(--lectio-theme-accent) 18%, transparent) !important;
+                border: 1px solid color-mix(in srgb, var(--lectio-theme-accent) 10%, transparent) !important;
                 color: var(--lectio-theme-text) !important;
-                box-shadow: 0 12px 30px rgba(15, 23, 42, .10);
+                box-shadow: 0 10px 24px color-mix(in srgb, var(--lectio-theme-muted) 20%, transparent);
             }
 
             html.${ROOT_CLASS}.lectio-theme-blur :where(#s_m_masterleftDiv, .ls-master-header, .ls-top-nav, .ls-card, .island) {
-                backdrop-filter: blur(18px) saturate(140%);
+                backdrop-filter: blur(18px) saturate(130%);
             }
 
             html.${ROOT_CLASS} :where(a, .ls-link):not(#lectio-manager-root *) {
@@ -364,9 +531,9 @@
             }
 
             html.${ROOT_CLASS} :where(input, select, textarea, button, .button, .ls-button):not(#lectio-manager-root *) {
-                border: 1px solid color-mix(in srgb, var(--lectio-theme-muted) 30%, transparent) !important;
+                border: 1px solid color-mix(in srgb, var(--lectio-theme-muted) 28%, transparent) !important;
                 border-radius: max(6px, calc(var(--lectio-theme-radius) - 4px)) !important;
-                background: color-mix(in srgb, var(--lectio-theme-surface-alt) 70%, transparent) !important;
+                background: color-mix(in srgb, var(--lectio-theme-surface-alt) 65%, transparent) !important;
                 color: var(--lectio-theme-text) !important;
                 padding: var(--lectio-theme-space);
             }
@@ -382,11 +549,11 @@
             }
 
             html.${ROOT_CLASS} :where(.s2skemabrik, a.s2skemabrik.s2brik) {
-                background: color-mix(in srgb, var(--lectio-theme-surface-alt) 70%, transparent) !important;
+                background: color-mix(in srgb, var(--lectio-theme-surface-alt) 68%, transparent) !important;
                 color: var(--lectio-theme-text) !important;
-                border: 1px solid color-mix(in srgb, var(--lectio-theme-accent-alt) 30%, transparent) !important;
+                border: 1px solid color-mix(in srgb, var(--lectio-theme-accent-alt) 14%, transparent) !important;
                 border-radius: max(5px, calc(var(--lectio-theme-radius) - 5px)) !important;
-                box-shadow: inset 3px 0 var(--lectio-theme-accent-alt), 0 3px 10px rgba(15, 23, 42, .08);
+                box-shadow: inset 3px 0 color-mix(in srgb, var(--lectio-theme-accent-alt) 55%, transparent), 0 3px 10px color-mix(in srgb, var(--lectio-theme-muted) 16%, transparent);
             }
 
             html.${ROOT_CLASS} :where(.s2cancelled, .ls-status-cancelled) {
@@ -677,12 +844,12 @@
         const vivid = ranked
             .filter((item) => item.light > .08 && item.light < .82 && item.saturation > .12)
             .sort((a, b) => (b.saturation * .75 + b.light * .25) - (a.saturation * .75 + a.light * .25));
-        const accent = vivid[0]?.hex || HUES.aurora.accent;
+        const accent = vivid[0]?.hex || CUSTOM_FALLBACK_HUES.accent;
         const accentAlt = vivid.find((item) => colourDistance(item.rgb, hexToRgb(accent)) > 90)?.hex
             || vivid[1]?.hex
-            || HUES.aurora.accentAlt;
+            || CUSTOM_FALLBACK_HUES.accentAlt;
 
-        return { accent, accentAlt, danger: HUES.aurora.danger };
+        return { accent, accentAlt, danger: CUSTOM_FALLBACK_HUES.danger };
     }
 
     function ensureAccentOnLight(colour, background) {
