@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Theming
 // @namespace    https://www.lectio.dk/
-// @version      0.10.0
+// @version      0.11.0
 // @description  Gives Lectio a soft, translucent glass shell with 26 built-in colour schemes (Catppuccin, Nord, Dracula, Cyberpunk and more), each with its own distinct background photo, and can derive a scheme from a website or image.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-start
@@ -16,7 +16,7 @@
 
     const MODULE_ID = 'lectio-theming';
     const MODULE_NAME = 'Lectio Theming';
-    const MODULE_VERSION = '0.10.0';
+    const MODULE_VERSION = '0.11.0';
     const STORAGE_KEY = 'lectioTheming.settings.v2';
     const STYLE_ID = 'lectio-theming-styles';
     const ROOT_CLASS = 'lectio-themed';
@@ -617,6 +617,16 @@
             html.${ROOT_CLASS} :where(.ls-toolbarMenuInnerContainer, .ls-std-toolbar-filled) {
                 background: color-mix(in srgb, var(--lectio-theme-surface-alt) 55%, transparent) !important;
                 color: var(--lectio-theme-text) !important;
+            }
+
+            html.${ROOT_CLASS} :where(.message-thread-container, .message-reply-summary, .message-thread-message) {
+                background: color-mix(in srgb, var(--lectio-theme-surface) 60%, transparent) !important;
+                color: var(--lectio-theme-text) !important;
+                border-color: color-mix(in srgb, var(--lectio-theme-muted) 25%, transparent) !important;
+            }
+
+            html.${ROOT_CLASS} :where(.message-thread-message.viewed-persons-message, .message-reply-summary.viewed-persons-message) {
+                background: color-mix(in srgb, var(--lectio-theme-accent-alt) 18%, var(--lectio-theme-surface)) !important;
             }
 
             html.${ROOT_CLASS} :where(.cke_top, .cke_bottom) {
