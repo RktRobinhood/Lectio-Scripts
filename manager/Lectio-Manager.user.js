@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.6.0
+// @version      1.7.0
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules from one small gear panel.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
@@ -1033,7 +1033,7 @@
                 z-index: 999999;
                 font-family: Roboto, Arial, sans-serif;
                 font-size: 13px;
-                color: #10201e;
+                color: var(--lectio-theme-text, #10201e);
             }
 
             #lectio-manager-toggle {
@@ -1041,7 +1041,7 @@
                 height: 44px;
                 border-radius: 50%;
                 border: none;
-                background: #0f6f6f;
+                background: var(--lectio-theme-accent, #0f6f6f);
                 box-shadow: 0 3px 10px rgba(0,0,0,.28);
                 cursor: pointer;
                 display: flex;
@@ -1054,14 +1054,14 @@
                 width: 22px;
                 height: 22px;
                 fill: none;
-                stroke: #ffffff;
+                stroke: var(--lectio-theme-surface, #ffffff);
                 stroke-width: 1.6;
                 stroke-linecap: round;
                 stroke-linejoin: round;
             }
 
             #lectio-manager-toggle:hover {
-                background: #0d5f5f;
+                background: color-mix(in srgb, var(--lectio-theme-accent, #0d5f5f) 85%, black);
             }
 
             #lectio-manager-panel {
@@ -1072,8 +1072,8 @@
                 max-height: min(78vh, 640px);
                 display: flex;
                 flex-direction: column;
-                background: #ffffff;
-                border: 1px solid #d6dde0;
+                background: var(--lectio-theme-surface, #ffffff);
+                border: 1px solid var(--lectio-theme-muted, #d6dde0);
                 border-radius: 10px;
                 box-shadow: 0 10px 28px rgba(0,0,0,.22);
             }
@@ -1087,8 +1087,8 @@
                 align-items: center;
                 gap: 8px;
                 padding: 10px 12px;
-                background: #0f6f6f;
-                color: #ffffff;
+                background: var(--lectio-theme-accent, #0f6f6f);
+                color: var(--lectio-theme-surface, #ffffff);
                 border-radius: 10px 10px 0 0;
             }
 
@@ -1098,8 +1098,8 @@
                 justify-content: center;
                 gap: 8px;
                 padding: 8px 12px;
-                border-top: 1px solid #eef1f2;
-                background: #fafbfb;
+                border-top: 1px solid var(--lectio-theme-muted, #eef1f2);
+                background: var(--lectio-theme-surface-alt, #fafbfb);
                 border-radius: 0 0 10px 10px;
             }
 
@@ -1110,7 +1110,7 @@
                 font-size: 11px;
                 font-weight: 600;
                 font-family: inherit;
-                color: #0f6f6f;
+                color: var(--lectio-theme-accent, #0f6f6f);
                 text-decoration: none;
                 cursor: pointer;
             }
@@ -1132,7 +1132,7 @@
                 height: 26px;
                 border: none;
                 background: transparent;
-                color: #ffffff;
+                color: var(--lectio-theme-surface, #ffffff);
                 text-decoration: none;
                 cursor: pointer;
                 display: flex;
@@ -1169,9 +1169,9 @@
                 padding: 8px 10px;
                 font-size: 11px;
                 line-height: 1.4;
-                background: #eef3f6;
-                color: #2a4250;
-                border: 1px solid #d8e3e9;
+                background: var(--lectio-theme-surface-alt, #eef3f6);
+                color: var(--lectio-theme-text, #2a4250);
+                border: 1px solid var(--lectio-theme-muted, #d8e3e9);
                 border-radius: 8px;
             }
 
@@ -1191,13 +1191,13 @@
             .lectio-manager-refreshed-row {
                 padding: 6px 12px 0;
                 font-size: 11px;
-                color: #5e6870;
+                color: var(--lectio-theme-muted, #5e6870);
             }
 
             .lectio-manager-nav {
                 position: relative;
                 padding: 6px 12px;
-                border-bottom: 1px solid #eef1f2;
+                border-bottom: 1px solid var(--lectio-theme-muted, #eef1f2);
             }
 
             .lectio-manager-nav-trigger {
@@ -1206,18 +1206,18 @@
                 justify-content: space-between;
                 width: 100%;
                 gap: 8px;
-                border: 1px solid #d6dde0;
-                background: #ffffff;
+                border: 1px solid var(--lectio-theme-muted, #d6dde0);
+                background: var(--lectio-theme-surface, #ffffff);
                 border-radius: 8px;
                 padding: 6px 10px;
                 font-size: 12px;
                 font-weight: 700;
-                color: #10201e;
+                color: var(--lectio-theme-text, #10201e);
                 cursor: pointer;
             }
 
             .lectio-manager-nav-trigger:hover {
-                border-color: #0f6f6f;
+                border-color: var(--lectio-theme-accent, #0f6f6f);
             }
 
             .lectio-manager-nav-trigger svg {
@@ -1225,7 +1225,7 @@
                 height: 12px;
                 flex-shrink: 0;
                 fill: none;
-                stroke: #5e6870;
+                stroke: var(--lectio-theme-muted, #5e6870);
                 stroke-width: 2;
                 stroke-linecap: round;
                 stroke-linejoin: round;
@@ -1237,8 +1237,8 @@
                 right: 12px;
                 top: calc(100% + 4px);
                 z-index: 10;
-                background: #ffffff;
-                border: 1px solid #d6dde0;
+                background: var(--lectio-theme-surface, #ffffff);
+                border: 1px solid var(--lectio-theme-muted, #d6dde0);
                 border-radius: 8px;
                 box-shadow: 0 8px 20px rgba(0,0,0,.18);
                 padding: 6px;
@@ -1254,9 +1254,9 @@
                 display: flex;
                 flex-direction: column;
                 gap: 2px;
-                border: 1px solid #e2e8ea;
+                border: 1px solid var(--lectio-theme-muted, #e2e8ea);
                 border-radius: 8px;
-                background: linear-gradient(180deg, #fbfdfd 0%, #f1f6f6 100%);
+                background: var(--lectio-theme-surface-alt, #f1f6f6);
                 padding: 4px;
                 margin-bottom: 6px;
             }
@@ -1271,7 +1271,7 @@
                 font-weight: 700;
                 text-transform: uppercase;
                 letter-spacing: .04em;
-                color: #8a949c;
+                color: var(--lectio-theme-muted, #8a949c);
             }
 
             .lectio-manager-nav-item {
@@ -1284,17 +1284,17 @@
                 padding: 6px 8px;
                 font-size: 12px;
                 font-weight: 500;
-                color: #10201e;
+                color: var(--lectio-theme-text, #10201e);
                 cursor: pointer;
             }
 
             .lectio-manager-nav-item:hover {
-                background: #f2f6f6;
+                background: var(--lectio-theme-surface-alt, #f2f6f6);
             }
 
             .lectio-manager-nav-item.is-active {
-                background: #0f6f6f;
-                color: #ffffff;
+                background: var(--lectio-theme-accent, #0f6f6f);
+                color: var(--lectio-theme-surface, #ffffff);
                 font-weight: 700;
             }
 
@@ -1304,7 +1304,7 @@
                 font-weight: 700;
                 text-transform: uppercase;
                 letter-spacing: .03em;
-                color: #5e6870;
+                color: var(--lectio-theme-muted, #5e6870);
             }
 
             .lectio-manager-tip {
@@ -1315,9 +1315,9 @@
                 padding: 8px 10px;
                 font-size: 11px;
                 line-height: 1.35;
-                background: #eaf5f2;
-                color: #0d4d4d;
-                border: 1px solid #cfe8e3;
+                background: var(--lectio-theme-surface-alt, #eaf5f2);
+                color: var(--lectio-theme-accent, #0d4d4d);
+                border: 1px solid var(--lectio-theme-muted, #cfe8e3);
                 border-radius: 8px;
             }
 
@@ -1332,7 +1332,7 @@
             .lectio-manager-tip-dismiss {
                 border: none;
                 background: transparent;
-                color: #0d4d4d;
+                color: var(--lectio-theme-accent, #0d4d4d);
                 font-size: 14px;
                 line-height: 1;
                 cursor: pointer;
@@ -1344,7 +1344,7 @@
                 font-size: 12px;
                 background: #fff4e5;
                 color: #7a4a00;
-                border-bottom: 1px solid #eef1f2;
+                border-bottom: 1px solid var(--lectio-theme-muted, #eef1f2);
             }
 
             .lectio-manager-error[hidden] {
@@ -1360,7 +1360,7 @@
 
             .lectio-manager-loading {
                 padding: 16px 8px;
-                color: #5e6870;
+                color: var(--lectio-theme-muted, #5e6870);
                 text-align: center;
                 font-size: 12px;
             }
@@ -1369,7 +1369,7 @@
                 margin: 12px 2px 5px;
                 font-size: 10px;
                 font-weight: 800;
-                color: #66767b;
+                color: var(--lectio-theme-muted, #66767b);
                 letter-spacing: .08em;
                 text-transform: uppercase;
             }
@@ -1381,9 +1381,9 @@
             .lectio-manager-card {
                 position: relative;
                 padding: 11px 12px;
-                border: 1px solid #dde5e6;
+                border: 1px solid var(--lectio-theme-muted, #dde5e6);
                 border-radius: 10px;
-                background: #ffffff;
+                background: var(--lectio-theme-surface, #ffffff);
                 box-shadow: 0 1px 2px rgba(16,32,30,.04);
                 overflow: hidden;
             }
@@ -1397,11 +1397,11 @@
                 position: absolute;
                 inset: 0 auto 0 0;
                 width: 3px;
-                background: #69a9a5;
+                background: var(--lectio-theme-accent-alt, #69a9a5);
             }
 
             .lectio-manager-card:hover {
-                border-color: #b9cbcc;
+                border-color: var(--lectio-theme-muted, #b9cbcc);
             }
 
             .lectio-manager-card-main {
@@ -1418,8 +1418,8 @@
             .lectio-manager-card-category {
                 padding: 2px 6px;
                 border-radius: 999px;
-                background: #e9f3f2;
-                color: #176766;
+                background: var(--lectio-theme-surface-alt, #e9f3f2);
+                color: var(--lectio-theme-accent, #176766);
                 font-size: 9px;
                 font-weight: 800;
                 letter-spacing: .05em;
@@ -1437,7 +1437,7 @@
             .lectio-manager-card-audience {
                 font-weight: 600;
                 font-size: 9px;
-                color: #778187;
+                color: var(--lectio-theme-muted, #778187);
                 text-transform: uppercase;
                 letter-spacing: .04em;
             }
@@ -1445,7 +1445,7 @@
             .lectio-manager-card-desc {
                 margin-top: 3px;
                 font-size: 12px;
-                color: #394a57;
+                color: var(--lectio-theme-text, #394a57);
                 line-height: 1.4;
             }
 
@@ -1468,7 +1468,7 @@
 
             .lectio-manager-status-missing {
                 font-size: 11px;
-                color: #5e6870;
+                color: var(--lectio-theme-muted, #5e6870);
             }
 
             .lectio-manager-card-actions {
@@ -1478,9 +1478,9 @@
 
             .lectio-manager-install-btn,
             .lectio-manager-settings-btn {
-                border: 1px solid #0f6f6f;
-                color: #0f6f6f;
-                background: #ffffff;
+                border: 1px solid var(--lectio-theme-accent, #0f6f6f);
+                color: var(--lectio-theme-accent, #0f6f6f);
+                background: var(--lectio-theme-surface, #ffffff);
                 border-radius: 6px;
                 padding: 3px 10px;
                 font-size: 11px;
@@ -1492,15 +1492,15 @@
 
             .lectio-manager-install-btn:hover,
             .lectio-manager-settings-btn:hover {
-                background: #e8f3f3;
+                background: var(--lectio-theme-surface-alt, #e8f3f3);
             }
 
             .lectio-manager-settings {
                 margin: 10px -4px -3px;
                 padding: 10px;
-                border: 1px solid #dce9e8;
+                border: 1px solid var(--lectio-theme-muted, #dce9e8);
                 border-radius: 8px;
-                background: #f6f9f9;
+                background: var(--lectio-theme-surface-alt, #f6f9f9);
                 display: flex;
                 flex-direction: column;
                 gap: 10px;
@@ -1521,7 +1521,7 @@
             .lectio-manager-settings-heading {
                 font-size: 10px;
                 font-weight: 800;
-                color: #176766;
+                color: var(--lectio-theme-accent, #176766);
                 letter-spacing: .07em;
                 text-transform: uppercase;
             }
@@ -1534,12 +1534,12 @@
             }
 
             .lectio-manager-setting-label {
-                color: #203431;
+                color: var(--lectio-theme-text, #203431);
                 font-weight: 650;
             }
 
             .lectio-manager-setting-description {
-                color: #68767b;
+                color: var(--lectio-theme-muted, #68767b);
                 font-size: 10px;
                 line-height: 1.3;
             }
@@ -1549,10 +1549,10 @@
                 min-width: 0;
                 width: 100%;
                 box-sizing: border-box;
-                border: 1px solid #cbd7d9;
+                border: 1px solid var(--lectio-theme-muted, #cbd7d9);
                 border-radius: 6px;
-                background: #ffffff;
-                color: #10201e;
+                background: var(--lectio-theme-surface, #ffffff);
+                color: var(--lectio-theme-text, #10201e);
                 padding: 5px 7px;
                 font: inherit;
             }
@@ -1561,7 +1561,7 @@
                 justify-self: end;
                 width: 34px;
                 height: 18px;
-                accent-color: #0f6f6f;
+                accent-color: var(--lectio-theme-accent, #0f6f6f);
             }
 
             .lectio-manager-setting-row.is-range {
@@ -1572,14 +1572,14 @@
                 grid-column: 2;
                 min-width: 0;
                 width: 100%;
-                accent-color: #0f6f6f;
+                accent-color: var(--lectio-theme-accent, #0f6f6f);
             }
 
             .lectio-manager-range-value {
                 grid-column: 3;
                 grid-row: 1;
                 min-width: 35px;
-                color: #176766;
+                color: var(--lectio-theme-accent, #176766);
                 font-size: 10px;
                 font-weight: 700;
                 text-align: right;
@@ -1590,10 +1590,10 @@
             }
 
             .lectio-manager-setting-row.is-button button {
-                border: 1px solid #0f6f6f;
+                border: 1px solid var(--lectio-theme-accent, #0f6f6f);
                 border-radius: 6px;
-                background: #ffffff;
-                color: #0f6f6f;
+                background: var(--lectio-theme-surface, #ffffff);
+                color: var(--lectio-theme-accent, #0f6f6f);
                 padding: 5px 9px;
                 font: inherit;
                 font-weight: 700;
