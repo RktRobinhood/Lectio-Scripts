@@ -35,7 +35,9 @@ They run locally in your browser while you use Lectio. Install only the modules 
 - shows a **catalogue** of every available module, fetched from this repository (`catalogue/modules.json`),
 - lets you **install** a module with one click, using Tampermonkey's own install screen,
 - shows whether a module is currently **detected as running**,
-- caches the catalogue locally and refreshes it automatically at most once every 24 hours, with a manual refresh button whenever you want the latest list.
+- caches the catalogue locally and refreshes it automatically at most once every 24 hours, with a manual refresh button whenever you want the latest list,
+- splits the list into **Installed** and **Available** sections, and lets you filter by audience (All / Student / Teacher) or sort by category / name as the library grows,
+- gives every installed module a **Manage** shortcut straight to the Tampermonkey dashboard, for disabling, updating, or removing it.
 
 The Manager itself contains **no feature logic**. Translation, message polling, room logic, and every other feature live entirely inside their own independent module. Installing only the Manager and one module means only that module's code ever runs — nothing else is downloaded or executed.
 
@@ -43,6 +45,9 @@ Look for a small teal gear button in the bottom-right corner of any Lectio page 
 
 > [!NOTE]
 > The Manager can only tell a module is installed if that module is currently **enabled and running** and replies to the Manager's handshake. If a module was disabled directly in Tampermonkey, or simply isn't installed, the Manager shows the same honest **"Not detected"** status either way — it cannot tell those two states apart.
+
+> [!NOTE]
+> Tampermonkey has no API for a userscript to uninstall or disable *another* script, so the Manager can't do that directly — that stays Tampermonkey's job by design. The **Manage** button is a shortcut, not a bypass: it opens Tampermonkey's dashboard directly via its fixed Chrome Web Store extension ID, which works on Chrome/Edge/Brave/Opera installed from that store. On Firefox or Safari (or if it doesn't open), click your browser's Tampermonkey toolbar icon and choose **Dashboard** instead.
 
 ---
 
@@ -196,9 +201,10 @@ These are two separate, independent things:
 |---|---|
 | **The catalogue** (which modules exist, their description/version) | The Manager fetches `catalogue/modules.json` on its own, at most once every 24 hours, or immediately when you click its refresh button. |
 | **The Manager's own code** | Normal Tampermonkey update check against `manager/Lectio-Manager.user.js`. |
-| **A module's own code** | Normal Tampermonkey update check against that module's own file in `modules/`. Installing a module through the Manager or via GitHub Raw sets this up automatically. |
+| **A module's own code** | Normal Tampermonkey update check against that module's own file in `modules/`. |
 
-If you installed a module by copy-paste instead, treat it as a **manual installation**: Tampermonkey will not auto-update it. Repeat the copy-paste steps whenever a new version is published.
+> [!TIP]
+> Every file in `manager/` and `modules/` includes an `@updateURL`/`@downloadURL` in its header, so Tampermonkey can check for updates **no matter how you installed it** — through the Manager, via GitHub Raw, or by copy-paste (as long as you copied the header too). This only works if Tampermonkey's own update checking is turned on: **Tampermonkey Dashboard → Settings → Update**, and confirm an interval is set (Tampermonkey checks in the background on that schedule; it does not update instantly the moment a new version is published here).
 
 ### Install several modules
 
@@ -220,6 +226,7 @@ To remove it completely, delete it from the Dashboard. Nothing needs to be remov
 | **No gear button appears** | Confirm the Lectio Manager script is installed and enabled in the Tampermonkey Dashboard, then reload Lectio. |
 | **The Manager's module list is empty or stuck loading** | This means it has never successfully fetched the catalogue. Check your connection and click the manual refresh (circular arrow) button. |
 | **A module always shows "Not detected" even though it's installed** | Confirm it is **enabled** (not just installed) in the Tampermonkey Dashboard, then reload Lectio. The Manager cannot distinguish "disabled" from "never installed." |
+| **The "Manage" button doesn't open the Tampermonkey dashboard** | It relies on Tampermonkey's fixed Chrome Web Store extension ID, so it only works on Chrome/Edge/Brave/Opera installed from that store. On Firefox, Safari, or a sideloaded Tampermonkey, click your browser's Tampermonkey toolbar icon and choose **Dashboard** instead. |
 | **GitHub Raw only shows JavaScript** | Copy the complete file and use **Create a new script...** instead. |
 | **English translation is incomplete** | Reload, switch **DA → EN**, and report repeatable untranslated text. |
 | **English Mode requests extra permissions** | It can use Tampermonkey storage and Google Translate fallback; review the permissions before installing. |
