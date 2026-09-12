@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.2.0
+// @version      1.3.0
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules from one small gear panel.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
@@ -56,17 +56,22 @@
     const AUDIENCE_VIEW_PREFIX = 'audience:';
     const CATEGORY_VIEW_PREFIX = 'category:';
 
+    const STORAGE_DASHBOARD_URL = 'lectioManager.dashboardUrl.v1';
+
     /*
      * Best-effort shortcut to Tampermonkey's own dashboard, where the
      * user can disable, update, or remove a script - actions the
-     * Manager itself has no API to perform. This is Tampermonkey's
-     * fixed Chrome Web Store extension ID, so it only works on
-     * Chromium browsers that installed Tampermonkey from that store.
-     * Firefox/Safari users get a fallback hint instead (see the
-     * "Manage" button's title attribute).
+     * Manager itself has no API to perform.
+     *
+     * This is Tampermonkey's fixed Chrome Web Store extension ID, so
+     * it only works on Chromium browsers that installed Tampermonkey
+     * from that store. Firefox assigns a random per-profile extension
+     * ID (moz-extension://<uuid>/...) that cannot be hardcoded at all,
+     * so on non-Chromium browsers we instead ask the user to paste
+     * their own dashboard link once and remember it (STORAGE_DASHBOARD_URL).
      */
     const TAMPERMONKEY_DASHBOARD_URL =
-        'chrome-extension://dhdgffkkebhmkfjojejmpbldmpobfkfo/options.html#nav=';
+        'chrome-extension://dhdgffkkebhmkfjojejmpbldmpobfkfo/options.html#nav=dashboard';
 
     const LOG = '[Lectio Manager]';
 
@@ -406,6 +411,7 @@
                 <div class="lectio-manager-list"></div>
                 <div class="lectio-manager-footer">
                     <a class="lectio-manager-footer-link" href="${ISSUES_URL}" target="_blank" rel="noopener noreferrer">Report a bug or idea</a>
+                    <button type="button" class="lectio-manager-footer-link lectio-manager-dashboard-link-btn">Set dashboard link</button>
                 </div>
             </div>
         `;
@@ -431,6 +437,8 @@
             tipBanner.hidden = true;
             GM_setValue(STORAGE_UPDATE_TIP_DISMISSED, true);
         });
+
+        root.querySelector('.lectio-manager-dashboard-link-btn').addEventListener('click', () => promptForDashboardUrl());
 
         toggle.addEventListener('click', () => {
             if (panel.hasAttribute('hidden')) {
@@ -787,18 +795,79 @@
     }
 
     function buildManageLink() {
-        const manageLink = document.createElement('a');
-        manageLink.className = 'lectio-manager-manage-btn';
-        manageLink.href = TAMPERMONKEY_DASHBOARD_URL;
-        manageLink.target = '_blank';
-        manageLink.rel = 'noopener noreferrer';
-        manageLink.textContent = 'Manage';
-        manageLink.title =
+        const manageBtn = document.createElement('button');
+        manageBtn.type = 'button';
+        manageBtn.className = 'lectio-manager-manage-btn';
+        manageBtn.textContent = 'Manage';
+        manageBtn.title =
             'Opens the Tampermonkey dashboard, where you can disable, update, or remove this script. ' +
-            'Works on Chrome/Edge installed from the Chrome Web Store. If nothing opens, click your ' +
-            'browser\'s Tampermonkey icon and choose Dashboard.';
+            'On Firefox (or if the default link fails), this asks once for your own dashboard link and ' +
+            'remembers it.';
+        manageBtn.addEventListener('click', () => openTampermonkeyDashboard());
 
-        return manageLink;
+        return manageBtn;
+    }
+
+    function isChromiumLike() {
+        return typeof navigator !== 'undefined' && !/firefox|seamonkey/i.test(navigator.userAgent);
+    }
+
+    function isPlausibleExtensionUrl(value) {
+        try {
+            const url = new URL(value);
+            return ['moz-extension:', 'chrome-extension:', 'edge-extension:'].includes(url.protocol);
+        } catch (_) {
+            return false;
+        }
+    }
+
+    function openTampermonkeyDashboard() {
+        const saved = GM_getValue(STORAGE_DASHBOARD_URL, '');
+
+        if (saved) {
+            window.open(saved, '_blank');
+            return;
+        }
+
+        if (isChromiumLike()) {
+            window.open(TAMPERMONKEY_DASHBOARD_URL, '_blank');
+            return;
+        }
+
+        promptForDashboardUrl();
+    }
+
+    function promptForDashboardUrl() {
+        const entered = window.prompt(
+            'Paste your Tampermonkey dashboard link to save it (one-time setup):\n\n' +
+            '1. Click your browser toolbar\'s Tampermonkey icon\n' +
+            '2. Choose "Dashboard"\n' +
+            '3. Copy the full address bar URL and paste it here\n\n' +
+            'Leave blank and press OK to clear a previously saved link.',
+            GM_getValue(STORAGE_DASHBOARD_URL, '')
+        );
+
+        if (entered === null) {
+            return;
+        }
+
+        const trimmed = entered.trim();
+
+        if (!trimmed) {
+            GM_setValue(STORAGE_DASHBOARD_URL, '');
+            return;
+        }
+
+        if (!isPlausibleExtensionUrl(trimmed)) {
+            window.alert(
+                'That doesn\'t look like a browser extension link (it should start with ' +
+                'moz-extension:// or chrome-extension://). Nothing was saved.'
+            );
+            return;
+        }
+
+        GM_setValue(STORAGE_DASHBOARD_URL, trimmed);
+        window.open(trimmed, '_blank');
     }
 
     function toggleSettingsPanel(card, module, registration) {
@@ -1041,22 +1110,46 @@
             }
 
             .lectio-manager-footer {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 8px;
                 padding: 8px 12px;
-                text-align: center;
                 border-top: 1px solid #eef1f2;
                 background: #fafbfb;
                 border-radius: 0 0 10px 10px;
             }
 
             .lectio-manager-footer-link {
+                border: none;
+                background: transparent;
+                padding: 0;
                 font-size: 11px;
                 font-weight: 600;
+                font-family: inherit;
                 color: #0f6f6f;
                 text-decoration: none;
+                cursor: pointer;
             }
 
             .lectio-manager-footer-link:hover {
                 text-decoration: underline;
+            }
+
+            .lectio-manager-dashboard-link-btn {
+                color: #5e6870;
+                position: relative;
+                padding-left: 9px;
+            }
+
+            .lectio-manager-dashboard-link-btn::before {
+                content: '';
+                position: absolute;
+                left: 0;
+                top: 1px;
+                bottom: 1px;
+                width: 1px;
+                background: #d6dde0;
             }
 
             .lectio-manager-title {

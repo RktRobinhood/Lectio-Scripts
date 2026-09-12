@@ -48,7 +48,7 @@ Look for a small teal gear button in the bottom-right corner of any Lectio page 
 > The Manager can only tell a module is installed if that module is currently **enabled and running** and replies to the Manager's handshake. If a module was disabled directly in Tampermonkey, or simply isn't installed, the Manager shows the same honest **"Not detected"** status either way — it cannot tell those two states apart.
 
 > [!NOTE]
-> Tampermonkey has no API for a userscript to uninstall or disable *another* script, so the Manager can't do that directly — that stays Tampermonkey's job by design. The **Manage** button is a shortcut, not a bypass: it opens Tampermonkey's dashboard directly via its fixed Chrome Web Store extension ID, which works on Chrome/Edge/Brave/Opera installed from that store. On Firefox or Safari (or if it doesn't open), click your browser's Tampermonkey toolbar icon and choose **Dashboard** instead.
+> Tampermonkey has no API for a userscript to uninstall or disable *another* script, so the Manager can't do that directly — that stays Tampermonkey's job by design. The **Manage** button is a shortcut, not a bypass. On Chrome/Edge/Brave/Opera it opens Tampermonkey's dashboard directly via its fixed Chrome Web Store extension ID. Firefox assigns a random per-install extension ID that can never be hardcoded, so there the button instead asks **once** for your own dashboard link (open your Tampermonkey icon → Dashboard, copy the address bar URL, paste it in) and remembers it after that — use the **Set dashboard link** button at the bottom of the panel to add, change, or clear it any time.
 
 ---
 
@@ -229,7 +229,7 @@ To remove it completely, delete it from the Dashboard. Nothing needs to be remov
 | **No gear button appears** | Confirm the Lectio Manager script is installed and enabled in the Tampermonkey Dashboard, then reload Lectio. |
 | **The Manager's module list is empty or stuck loading** | This means it has never successfully fetched the catalogue. Check your connection and click the manual refresh (circular arrow) button. |
 | **A module always shows "Not detected" even though it's installed** | Confirm it is **enabled** (not just installed) in the Tampermonkey Dashboard, then reload Lectio. The Manager cannot distinguish "disabled" from "never installed." |
-| **The "Manage" button doesn't open the Tampermonkey dashboard** | It relies on Tampermonkey's fixed Chrome Web Store extension ID, so it only works on Chrome/Edge/Brave/Opera installed from that store. On Firefox, Safari, or a sideloaded Tampermonkey, click your browser's Tampermonkey toolbar icon and choose **Dashboard** instead. |
+| **The "Manage" button doesn't open the Tampermonkey dashboard** | On Chrome/Edge/Brave/Opera it should work automatically. On Firefox (or anywhere the default guess fails) it will prompt you once for your own dashboard link — get it from your Tampermonkey icon → Dashboard, copy the address bar URL, and paste it in. Use **Set dashboard link** at the bottom of the panel to add or fix it manually. |
 | **GitHub Raw only shows JavaScript** | Copy the complete file and use **Create a new script...** instead. |
 | **English translation is incomplete** | Reload, switch **DA → EN**, and report repeatable untranslated text. |
 | **English Mode requests extra permissions** | It can use Tampermonkey storage and Google Translate fallback; review the permissions before installing. |
