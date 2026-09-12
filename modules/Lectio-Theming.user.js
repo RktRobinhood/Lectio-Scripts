@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Theming
 // @namespace    https://www.lectio.dk/
-// @version      0.5.0
+// @version      0.7.0
 // @description  Gives Lectio a soft, translucent glass shell with 26 built-in colour schemes (Catppuccin, Nord, Dracula, Cyberpunk and more), each with its own distinct background photo, and can derive a scheme from a website or image.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-start
@@ -16,7 +16,7 @@
 
     const MODULE_ID = 'lectio-theming';
     const MODULE_NAME = 'Lectio Theming';
-    const MODULE_VERSION = '0.5.0';
+    const MODULE_VERSION = '0.7.0';
     const STORAGE_KEY = 'lectioTheming.settings.v2';
     const STYLE_ID = 'lectio-theming-styles';
     const ROOT_CLASS = 'lectio-themed';
@@ -501,7 +501,7 @@
             }
 
             html.${ROOT_CLASS} :where(#masterContent, #content, #m_Content, .ls-master-container, .ls-content-container,
-                [class*="ls-card"], .island, fieldset, .s2skemabrikcontainer, .s2skemabrik, .s2day, .s2weekHeader) {
+                [class*="ls-card"], [class*="ls-island"], fieldset, .s2skemabrikcontainer, .s2skemabrik, .s2day, .s2weekHeader) {
                 border-radius: var(--lectio-theme-radius) !important;
             }
 
@@ -510,11 +510,11 @@
                 color: var(--lectio-theme-text) !important;
             }
 
-            html.${ROOT_CLASS} :where([class*="ls-card"], .island, fieldset, .s2skemabrikcontainer, .s2day, .s2weekHeader) {
+            html.${ROOT_CLASS} :where([class*="ls-card"], [class*="ls-island"], fieldset, .s2skemabrikcontainer, .s2day, .s2weekHeader) {
                 border: 1px solid color-mix(in srgb, var(--lectio-theme-accent) 10%, transparent) !important;
             }
 
-            html.${ROOT_CLASS} :where([class*="ls-card"], .island, fieldset, .s2skemabrikcontainer, .s2day, table) {
+            html.${ROOT_CLASS} :where([class*="ls-card"], [class*="ls-island"], fieldset, .s2skemabrikcontainer, .s2day, table) {
                 color: var(--lectio-theme-text);
             }
 
@@ -532,21 +532,27 @@
                 background: color-mix(in srgb, var(--lectio-theme-surface-alt) 40%, transparent) !important;
             }
 
-            html.${ROOT_CLASS} :where([class*="ls-card"], .island, fieldset, .s2skemabrikcontainer) {
+            html.${ROOT_CLASS} :where([class*="ls-card"], [class*="ls-island"], fieldset, .s2skemabrikcontainer) {
                 background: color-mix(in srgb, var(--lectio-theme-surface) 55%, transparent) !important;
                 box-shadow: 0 8px 22px color-mix(in srgb, var(--lectio-theme-muted) 18%, transparent), inset 0 1px color-mix(in srgb, var(--lectio-theme-text) 6%, transparent);
                 padding: var(--lectio-theme-space);
             }
 
-            html.${ROOT_CLASS} :where(#s_m_masterleftDiv, .ls-master-header, .ls-top-nav, .ls-master-pageheader) {
+            html.${ROOT_CLASS} :where(#s_m_masterleftDiv, .ls-master-header, .ls-top-nav, .ls-master-pageheader, #s_m_mastermenu, .lectioToolbar) {
                 background: color-mix(in srgb, var(--lectio-theme-surface) 62%, transparent) !important;
                 border: 1px solid color-mix(in srgb, var(--lectio-theme-accent) 10%, transparent) !important;
                 color: var(--lectio-theme-text) !important;
                 box-shadow: 0 10px 24px color-mix(in srgb, var(--lectio-theme-muted) 20%, transparent);
             }
 
-            html.${ROOT_CLASS}.lectio-theme-blur :where(#s_m_masterleftDiv, .ls-master-header, .ls-top-nav, [class*="ls-card"], .island) {
+            html.${ROOT_CLASS}.lectio-theme-blur :where(#s_m_masterleftDiv, .ls-master-header, .ls-top-nav, #s_m_mastermenu, .lectioToolbar, [class*="ls-card"], [class*="ls-island"]) {
                 backdrop-filter: blur(18px) saturate(130%);
+            }
+
+            html.${ROOT_CLASS} :where(.s2infoHeader, .ls-mobil-menu, .ls-mobil-mere-sheet-menu) {
+                background: color-mix(in srgb, var(--lectio-theme-surface) 60%, transparent) !important;
+                color: var(--lectio-theme-text) !important;
+                border-color: color-mix(in srgb, var(--lectio-theme-muted) 20%, transparent) !important;
             }
 
             html.${ROOT_CLASS} :is(${CONTENT_ROOT_SELECTOR}) :where(a, .ls-link) {
@@ -574,6 +580,20 @@
             html.${ROOT_CLASS} :is(${CONTENT_ROOT_SELECTOR}) :where(input, select, textarea):focus {
                 outline: 2px solid color-mix(in srgb, var(--lectio-theme-accent) 55%, transparent) !important;
                 outline-offset: 1px;
+            }
+
+            html.${ROOT_CLASS} .s2module-bg {
+                background: color-mix(in srgb, var(--lectio-theme-surface) 40%, transparent) !important;
+                border-top: 1px solid color-mix(in srgb, var(--lectio-theme-muted) 14%, transparent) !important;
+                border-bottom: 1px solid color-mix(in srgb, var(--lectio-theme-muted) 14%, transparent) !important;
+            }
+
+            html.${ROOT_CLASS} .s2time-off {
+                background: color-mix(in srgb, var(--lectio-theme-muted) 14%, transparent) !important;
+            }
+
+            html.${ROOT_CLASS} .s2module-info {
+                color: var(--lectio-theme-muted) !important;
             }
 
             html.${ROOT_CLASS} :where(.s2skemabrik, a.s2skemabrik.s2brik) {
