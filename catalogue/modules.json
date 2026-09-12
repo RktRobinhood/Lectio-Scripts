@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-09-12T10:00:00Z",
+  "modules": [
+    {
+      "id": "english-mode",
+      "name": "English Mode",
+      "description": "Adds a DA / EN switch and translates the Lectio interface into context-aware English.",
+      "category": "Interface",
+      "audience": ["student", "teacher"],
+      "status": "stable",
+      "version": "1.5.3",
+      "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-English-Mode.user.js",
+      "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues"
+    },
+    {
+      "id": "chairs-up",
+      "name": "Chairs Up",
+      "description": "Marks a lesson when it is the last active booking of the day in that room.",
+      "category": "Timetable",
+      "audience": ["teacher"],
+      "status": "stable",
+      "version": "1.0.5",
+      "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Chairs-Up.user.js",
+      "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues"
+    },
+    {
+      "id": "message-notifications",
+      "name": "Unread Message Notifications",
+      "description": "Shows an unread-message badge beside Beskeder / Messages and plays a soft chime when the unread count increases. Currently limited to Lectio school 223.",
+      "category": "Messages",
+      "audience": ["student", "teacher"],
+      "status": "stable",
+      "version": "0.2.4",
+      "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Unread-Message-Notifications.user.js",
+      "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues"
+    }
+  ]
+}

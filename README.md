@@ -2,7 +2,7 @@
 
 Small, unofficial **Tampermonkey userscripts** that add useful features to [Lectio](https://www.lectio.dk/).
 
-They run locally in your browser while you use Lectio. Install only the scripts you want; each works independently.
+They run locally in your browser while you use Lectio. Install only the modules you want; each works independently.
 
 > [!NOTE]
 > This project is not affiliated with or endorsed by Lectio or Tampermonkey.
@@ -11,46 +11,78 @@ They run locally in your browser while you use Lectio. Install only the scripts 
 
 ## Contents
 
-- [Scripts](#scripts)
+- [Lectio Manager](#lectio-manager)
+- [Modules](#modules)
 - [Quick install](#quick-install)
 - [Tampermonkey setup](#tampermonkey-setup)
 - [Phones and tablets](#phones-and-tablets)
-- [Using and updating scripts](#using-and-updating-scripts)
+- [Using and updating things](#using-and-updating-things)
 - [Troubleshooting](#troubleshooting)
 - [Reporting bugs and ideas](#reporting-bugs-and-ideas)
 - [Getting Console errors](#getting-console-errors)
 - [Make it yours with an LLM](#make-it-yours-with-an-llm)
 - [Privacy and security](#privacy-and-security)
+- [Repository layout](#repository-layout)
 - [Useful links](#useful-links)
 - [License](#license)
 
 ---
 
-## Scripts
+## Lectio Manager
 
-All scripts are designed for Lectio and are intended to work across Lectio installations.
+**[Lectio Manager](manager/Lectio-Manager.user.js)** is a small, stable control surface that lives inside Lectio. Install it once and it:
 
-| Script | What it does | Best for |
+- shows a **catalogue** of every available module, fetched from this repository (`catalogue/modules.json`),
+- lets you **install** a module with one click, using Tampermonkey's own install screen,
+- shows whether a module is currently **detected as running**,
+- caches the catalogue locally and refreshes it automatically at most once every 24 hours, with a manual refresh button whenever you want the latest list.
+
+The Manager itself contains **no feature logic**. Translation, message polling, room logic, and every other feature live entirely inside their own independent module. Installing only the Manager and one module means only that module's code ever runs — nothing else is downloaded or executed.
+
+Look for a small teal gear button in the bottom-right corner of any Lectio page after installing it.
+
+> [!NOTE]
+> The Manager can only tell a module is installed if that module is currently **enabled and running** and replies to the Manager's handshake. If a module was disabled directly in Tampermonkey, or simply isn't installed, the Manager shows the same honest **"Not detected"** status either way — it cannot tell those two states apart.
+
+---
+
+## Modules
+
+All modules are designed for Lectio and are intended to work across Lectio installations, unless noted otherwise.
+
+| Module | What it does | Best for |
 |---|---|---|
-| **[Chairs Up](scripts/Chairs%20Up.js)** | Marks a lesson when it is the **last booking of the day in that room**. | Teachers |
-| **[English Mode](scripts/English%20Mode.js)** | Adds a **DA / EN** switch and translates the Lectio interface into context-aware English. | Students and staff |
-| **[Unread Message Notifications](scripts/Unread%20Message%20Notifications.js)** | Shows unread messages beside **Beskeder / Messages** and plays a soft chime when the unread count increases. | Students and staff |
+| **[English Mode](modules/Lectio-English-Mode.user.js)** | Adds a **DA / EN** switch and translates the Lectio interface into context-aware English. | Students and staff |
+| **[Chairs Up](modules/Lectio-Chairs-Up.user.js)** | Marks a lesson when it is the **last booking of the day in that room**. | Teachers |
+| **[Unread Message Notifications](modules/Lectio-Unread-Message-Notifications.user.js)** | Shows unread messages beside **Beskeder / Messages** and plays a soft chime when the unread count increases. Currently limited to Lectio school `223`. | Students and staff at that school |
 
-You can install one, several, or all of them.
+You can install one, several, or all of them, either through the Manager or by copying a file directly (see below).
 
 ---
 
 ## Quick install
 
-For most users, this is all you need:
+### Recommended: through the Manager
 
 1. Install **[Tampermonkey](https://www.tampermonkey.net/)**.
-2. Open the script you want in the [`/scripts`](scripts/) folder.
+2. Install **[Lectio Manager](https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/manager/Lectio-Manager.user.js)** — Tampermonkey should offer its normal install screen; confirm it.
+3. Open Lectio and click the small gear button in the bottom-right corner.
+4. Click **Install** next to any module you want.
+5. Confirm Tampermonkey's install screen for that module too.
+
+Each module keeps its own version and updates independently of the Manager and of every other module.
+
+### Manual: copy-paste a single module
+
+If you'd rather not use the Manager, any module still works entirely on its own:
+
+1. Install **[Tampermonkey](https://www.tampermonkey.net/)**.
+2. Open the module you want in the [`/modules`](modules/) folder.
 3. Copy the **entire JavaScript file**.
 4. Click the Tampermonkey icon.
 5. Choose **Create a new script...**
 6. Delete Tampermonkey's example code.
-7. Paste the Lectio script.
+7. Paste the module's code.
 8. Save with **Ctrl + S** / **Cmd + S**.
 9. Reload Lectio.
 
@@ -98,9 +130,12 @@ Tampermonkey can sometimes install a userscript directly from GitHub:
 
 Current raw files:
 
-- [Chairs Up — Raw](https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/scripts/Chairs%20Up.js)
-- [English Mode — Raw](https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/scripts/English%20Mode.js)
-- [Unread Message Notifications — Raw](https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/scripts/Unread%20Message%20Notifications.js)
+- [Lectio Manager — Raw](https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/manager/Lectio-Manager.user.js)
+- [English Mode — Raw](https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-English-Mode.user.js)
+- [Chairs Up — Raw](https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Chairs-Up.user.js)
+- [Unread Message Notifications — Raw](https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Unread-Message-Notifications.user.js)
+
+Installing this way (rather than copy-paste) lets Tampermonkey check that raw URL for updates automatically.
 
 </details>
 
@@ -118,7 +153,9 @@ Yes — userscripts can run on supported phones and tablets, but mobile browser 
 | **iPhone / iPad** | Safari | Yes, through the Tampermonkey App Store extension |
 | **Desktop** | Chrome / Edge / Firefox / Safari / Opera | Yes |
 
-### Mobile notes for these scripts
+### Mobile notes
+
+**Lectio Manager** renders as a small floating gear button; on very narrow screens its panel takes up nearly the full width of the viewport but stays scrollable.
 
 **English Mode** should generally translate Lectio normally, although very narrow screens may expose layout issues.
 
@@ -136,11 +173,11 @@ Official mobile links:
 - [Tampermonkey for iPhone/iPad](https://apps.apple.com/dk/app/tampermonkey/id6738342400)
 
 > [!NOTE]
-> Mobile support for the scripts is still worth testing across different devices and browsers. If something looks or behaves incorrectly, please report it.
+> Mobile support is still worth testing across different devices and browsers. If something looks or behaves incorrectly, please report it.
 
 ---
 
-## Using and updating scripts
+## Using and updating things
 
 ### Check that a script is running
 
@@ -148,37 +185,30 @@ Official mobile links:
 2. Click the Tampermonkey icon.
 3. Make sure Tampermonkey is **Enabled**.
 4. Open **Dashboard** if needed.
-5. Confirm the Lectio script is enabled.
+5. Confirm the script is enabled.
 6. Reload Lectio.
 
-### Install several scripts
+### The Manager's catalogue vs. script updates
 
-Repeat the normal installation process for each file. They appear separately in the Tampermonkey Dashboard.
+These are two separate, independent things:
 
-### Update
+| What | How it updates |
+|---|---|
+| **The catalogue** (which modules exist, their description/version) | The Manager fetches `catalogue/modules.json` on its own, at most once every 24 hours, or immediately when you click its refresh button. |
+| **The Manager's own code** | Normal Tampermonkey update check against `manager/Lectio-Manager.user.js`. |
+| **A module's own code** | Normal Tampermonkey update check against that module's own file in `modules/`. Installing a module through the Manager or via GitHub Raw sets this up automatically. |
 
-Scripts installed by copy-paste should be treated as **manual installations** unless their userscript metadata says otherwise.
+If you installed a module by copy-paste instead, treat it as a **manual installation**: Tampermonkey will not auto-update it. Repeat the copy-paste steps whenever a new version is published.
 
-To update:
+### Install several modules
 
-1. Open the newest version in this repository.
-2. Copy the entire script.
-3. Open the installed script in **Tampermonkey → Dashboard**.
-4. Replace the old code.
-5. Save.
-6. Reload Lectio.
-
-The installed version can usually be found near the top of the script:
-
-```javascript
-// @version ...
-```
+Repeat the install steps for each one, through the Manager or manually. They appear separately in the Tampermonkey Dashboard.
 
 ### Disable or remove
 
-To temporarily disable a script, switch it **Off** in the Tampermonkey Dashboard and reload Lectio.
+To temporarily disable a script, switch it **Off** in the Tampermonkey Dashboard and reload Lectio. The Manager will then correctly show that module as **"Not detected"**.
 
-To remove it completely, delete it from the Dashboard. Nothing needs to be removed from Lectio itself.
+To remove it completely, delete it from the Dashboard. Nothing needs to be removed from Lectio itself, and nothing needs to be removed from the Manager either — an uninstalled module simply disappears from the "installed" state the next time the Manager asks.
 
 ---
 
@@ -187,6 +217,9 @@ To remove it completely, delete it from the Dashboard. Nothing needs to be remov
 | Problem | What to try |
 |---|---|
 | **Nothing happens** | Confirm Tampermonkey and the script are enabled, reload Lectio, and check Chrome/Edge userscript permissions. |
+| **No gear button appears** | Confirm the Lectio Manager script is installed and enabled in the Tampermonkey Dashboard, then reload Lectio. |
+| **The Manager's module list is empty or stuck loading** | This means it has never successfully fetched the catalogue. Check your connection and click the manual refresh (circular arrow) button. |
+| **A module always shows "Not detected" even though it's installed** | Confirm it is **enabled** (not just installed) in the Tampermonkey Dashboard, then reload Lectio. The Manager cannot distinguish "disabled" from "never installed." |
 | **GitHub Raw only shows JavaScript** | Copy the complete file and use **Create a new script...** instead. |
 | **English translation is incomplete** | Reload, switch **DA → EN**, and report repeatable untranslated text. |
 | **English Mode requests extra permissions** | It can use Tampermonkey storage and Google Translate fallback; review the permissions before installing. |
@@ -214,7 +247,7 @@ Use **[GitHub Issues](https://github.com/RktRobinhood/Lectio-Scripts/issues)** f
 
 ### Include this information
 
-- script name and `@version`
+- script/module name and `@version` (or the Manager's own version, if the issue is with the Manager itself)
 - browser and browser version
 - Tampermonkey version
 - device/OS if relevant
@@ -228,8 +261,8 @@ Use **[GitHub Issues](https://github.com/RktRobinhood/Lectio-Scripts/issues)** f
 A report like this is actionable:
 
 ```text
-Script: Unread Message Notifications
-Version: 1.x
+Module: Unread Message Notifications
+Version: 0.2.x
 Browser: Firefox 154
 Tampermonkey: 5.x
 Page: Timetable
@@ -403,7 +436,7 @@ For example:
 
 Userscripts are JavaScript with permission to run on specified webpages. Treat them as software.
 
-Before installing or modifying a script:
+Before installing or modifying anything:
 
 - read its userscript header and `@match` rules
 - review requested permissions
@@ -411,6 +444,12 @@ Before installing or modifying a script:
 - install code only from a source you trust
 - never put your Lectio password into a userscript
 - never publish cookies, tokens, or private Lectio data
+
+### Lectio Manager and the catalogue
+
+The Manager fetches `catalogue/modules.json` from this repository over HTTPS and reads it as **text data only** — names, descriptions, versions, and install links. It never executes catalogue content as code, and it only opens install links that point at this repository's own `raw.githubusercontent.com` files.
+
+Detecting whether a module is running uses a small, namespaced browser event (`lectio-manager:discover` / `lectio-module:register`) rather than reading another script's private Tampermonkey storage.
 
 ### English Mode and translation
 
@@ -433,12 +472,35 @@ Assume anything attached to an Issue can be seen publicly. Redact screenshots an
 
 ---
 
+## Repository layout
+
+```text
+Lectio-Scripts/
+├── manager/
+│   └── Lectio-Manager.user.js       Discovery + install UI. No feature logic.
+├── catalogue/
+│   └── modules.json                 Metadata only: what modules exist and where to install them.
+├── modules/
+│   ├── Lectio-English-Mode.user.js
+│   ├── Lectio-Chairs-Up.user.js
+│   └── Lectio-Unread-Message-Notifications.user.js
+├── assets/
+├── .github/                         Issue templates
+└── README.md
+```
+
+Each module owns its own `@version` and update URL. Adding a new module means adding its file under `modules/` and adding a matching entry to `catalogue/modules.json` — the Manager's own code does not need to change.
+
+---
+
 ## Useful links
 
 | Resource | Link |
 |---|---|
 | Repository | [RktRobinhood/Lectio-Scripts](https://github.com/RktRobinhood/Lectio-Scripts) |
-| Scripts | [`/scripts`](https://github.com/RktRobinhood/Lectio-Scripts/tree/main/scripts) |
+| Lectio Manager | [`manager/Lectio-Manager.user.js`](https://github.com/RktRobinhood/Lectio-Scripts/tree/main/manager) |
+| Modules | [`/modules`](https://github.com/RktRobinhood/Lectio-Scripts/tree/main/modules) |
+| Catalogue | [`catalogue/modules.json`](https://github.com/RktRobinhood/Lectio-Scripts/tree/main/catalogue) |
 | Report a problem or idea | [GitHub Issues](https://github.com/RktRobinhood/Lectio-Scripts/issues) |
 | Tampermonkey | [tampermonkey.net](https://www.tampermonkey.net/) |
 | Installing userscripts | [Tampermonkey FAQ](https://www.tampermonkey.net/faq.php?q=Q102) |

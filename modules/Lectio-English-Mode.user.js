@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio English Mode
 // @namespace    lectio-english-mode
-// @version      1.5.2
+// @version      1.5.3
 // @description  Context-aware English layer for Lectio with instant core UI translation, persistent cache and Google fallback.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-start
@@ -10,10 +10,38 @@
 // @grant        GM_xmlhttpRequest
 // @connect      translate.googleapis.com
 // @connect      translate.google.com
+// @updateURL    https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-English-Mode.user.js
+// @downloadURL  https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-English-Mode.user.js
 // ==/UserScript==
 
 (() => {
     'use strict';
+
+    /*
+     * Lectio Manager handshake.
+     * Lets the Manager show this module as installed without
+     * touching its private storage. See catalogue/modules.json.
+     */
+    (function registerWithLectioManager() {
+        const MODULE_ID = 'english-mode';
+        const MODULE_NAME = 'Lectio English Mode';
+        const MODULE_VERSION = '1.5.3';
+
+        function announce() {
+            window.dispatchEvent(new CustomEvent('lectio-module:register', {
+                detail: {
+                    id: MODULE_ID,
+                    name: MODULE_NAME,
+                    version: MODULE_VERSION,
+                    settingsSchema: [],
+                    currentValues: {}
+                }
+            }));
+        }
+
+        window.addEventListener('lectio-manager:discover', announce);
+        announce();
+    })();
 
     const MODE_DA = 'da';
     const MODE_EN = 'en';

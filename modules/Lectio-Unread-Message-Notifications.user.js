@@ -1,15 +1,46 @@
 // ==UserScript==
 // @name         Lectio - Unread Message Notifications
 // @namespace    https://www.lectio.dk/lectio/223/
-// @version      0.2.3
+// @version      0.2.4
 // @description  Shows one unread-message badge using Lectio's own unread count. Includes direct and group-addressed messages.
 // @match        https://www.lectio.dk/lectio/223/*
 // @grant        none
 // @run-at       document-idle
+// @updateURL    https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Unread-Message-Notifications.user.js
+// @downloadURL  https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Unread-Message-Notifications.user.js
 // ==/UserScript==
 
 (() => {
     'use strict';
+
+    // ============================================================
+    // LECTIO MANAGER HANDSHAKE
+    // ============================================================
+
+    /*
+     * Lets the Manager show this module as installed without
+     * touching its private storage. See catalogue/modules.json.
+     */
+    (function registerWithLectioManager() {
+        const MODULE_ID = 'message-notifications';
+        const MODULE_NAME = 'Lectio - Unread Message Notifications';
+        const MODULE_VERSION = '0.2.4';
+
+        function announce() {
+            window.dispatchEvent(new CustomEvent('lectio-module:register', {
+                detail: {
+                    id: MODULE_ID,
+                    name: MODULE_NAME,
+                    version: MODULE_VERSION,
+                    settingsSchema: [],
+                    currentValues: {}
+                }
+            }));
+        }
+
+        window.addEventListener('lectio-manager:discover', announce);
+        announce();
+    })();
 
     // ============================================================
     // CONFIG

@@ -1,15 +1,47 @@
 // ==UserScript==
 // @name         Lectio - Chairs Up
 // @namespace    https://www.lectio.dk/
-// @version      1.0.4
+// @version      1.0.5
 // @description  Shows when a lesson is the final active booking of the day in its room. Universal Lectio version.
 // @match        https://www.lectio.dk/lectio/*/SkemaNy.aspx*
 // @match        https://www.lectio.dk/lectio/*/aktivitet/aktivitetforside2.aspx*
 // @grant        none
+// @updateURL    https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Chairs-Up.user.js
+// @downloadURL  https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Chairs-Up.user.js
 // ==/UserScript==
 
 (() => {
   'use strict';
+
+
+  // =========================================================
+  // LECTIO MANAGER HANDSHAKE
+  // =========================================================
+
+  /*
+   * Lets the Manager show this module as installed without
+   * touching its private storage. See catalogue/modules.json.
+   */
+  (function registerWithLectioManager() {
+    const MODULE_ID = 'chairs-up';
+    const MODULE_NAME = 'Lectio - Chairs Up';
+    const MODULE_VERSION = '1.0.5';
+
+    function announce() {
+      window.dispatchEvent(new CustomEvent('lectio-module:register', {
+        detail: {
+          id: MODULE_ID,
+          name: MODULE_NAME,
+          version: MODULE_VERSION,
+          settingsSchema: [],
+          currentValues: {}
+        }
+      }));
+    }
+
+    window.addEventListener('lectio-manager:discover', announce);
+    announce();
+  })();
 
 
   // =========================================================
@@ -25,7 +57,7 @@
     schoolMatch[1];
 
   console.info(
-    `[Lectio Chairs Up] v1.0.4 started - school ${SCHOOL}`
+    `[Lectio Chairs Up] v1.0.5 started - school ${SCHOOL}`
   );
 
 
