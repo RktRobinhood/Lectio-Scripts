@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.4.0
+// @version      1.4.1
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules from one small gear panel.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
@@ -393,7 +393,7 @@
             <div id="lectio-manager-panel" hidden>
                 <div class="lectio-manager-header">
                     <span class="lectio-manager-title">Lectio Tools</span>
-                    <button type="button" class="lectio-manager-dashboard" title="Open Tampermonkey to manage, disable, or remove scripts" aria-label="Open Tampermonkey">${wrenchSvg()}</button>
+                    <a class="lectio-manager-dashboard" href="#" target="_blank" rel="noopener noreferrer" title="Open Tampermonkey to manage, disable, or remove scripts" aria-label="Open Tampermonkey">${wrenchSvg()}</a>
                     <button type="button" class="lectio-manager-refresh" title="Refresh catalogue" aria-label="Refresh catalogue">${refreshSvg()}</button>
                     <button type="button" class="lectio-manager-close" title="Close" aria-label="Close">${closeSvg()}</button>
                 </div>
@@ -435,7 +435,18 @@
         const tipBanner = root.querySelector('.lectio-manager-tip');
         const tipDismissBtn = root.querySelector('.lectio-manager-tip-dismiss');
 
-        dashboardBtn.addEventListener('click', () => openTampermonkeyDashboard());
+        dashboardBtn.addEventListener('click', (event) => {
+            if (dashboardBtn.dataset.needsSetup === 'true') {
+                event.preventDefault();
+                promptForDashboardUrl();
+            }
+            // Otherwise let the real <a href> navigation proceed natively -
+            // window.open() from inside a Tampermonkey script frequently gets
+            // silently popup-blocked because the sandboxed execution context
+            // doesn't reliably carry the "real user click" signal browsers
+            // require. A genuine anchor click in the real page DOM does not
+            // have that problem.
+        });
 
         if (!GM_getValue(STORAGE_UPDATE_TIP_DISMISSED, false)) {
             tipBanner.hidden = false;
@@ -512,6 +523,7 @@
         elements = {
             root,
             panel,
+            dashboardBtn,
             refreshBtn,
             navTrigger,
             navMenu,
@@ -521,6 +533,8 @@
             refreshedLabel: root.querySelector('.lectio-manager-refreshed-label'),
             errorBox: root.querySelector('.lectio-manager-error')
         };
+
+        updateDashboardLink();
     }
 
     function toggleNavMenu() {
@@ -832,22 +846,32 @@
         }
     }
 
-    function openTampermonkeyDashboard() {
+    function resolveDashboardUrl() {
         const saved = GM_getValue(STORAGE_DASHBOARD_URL, '');
+        return saved || guessDashboardUrl();
+    }
 
-        if (saved) {
-            window.open(saved, '_blank');
+    /*
+     * Keeps the header link's real href in sync with whatever URL we can
+     * currently resolve. Deliberately never opens anything itself - the
+     * <a> element's native click-through is what actually navigates,
+     * since window.open() from inside a Tampermonkey script is prone to
+     * being silently popup-blocked (see the click handler in buildUI).
+     */
+    function updateDashboardLink() {
+        if (!elements) {
             return;
         }
 
-        const guess = guessDashboardUrl();
+        const url = resolveDashboardUrl();
 
-        if (guess) {
-            window.open(guess, '_blank');
-            return;
+        if (url) {
+            elements.dashboardBtn.href = url;
+            delete elements.dashboardBtn.dataset.needsSetup;
+        } else {
+            elements.dashboardBtn.href = '#';
+            elements.dashboardBtn.dataset.needsSetup = 'true';
         }
-
-        promptForDashboardUrl();
     }
 
     function promptForDashboardUrl() {
@@ -864,6 +888,7 @@
         );
 
         if (entered === null) {
+            updateDashboardLink();
             return;
         }
 
@@ -871,6 +896,7 @@
 
         if (!trimmed) {
             GM_setValue(STORAGE_DASHBOARD_URL, '');
+            updateDashboardLink();
             return;
         }
 
@@ -883,7 +909,8 @@
         }
 
         GM_setValue(STORAGE_DASHBOARD_URL, trimmed);
-        window.open(trimmed, '_blank');
+        updateDashboardLink();
+        window.alert('Saved. Click the wrench icon in the header to open your Tampermonkey dashboard.');
     }
 
     function toggleSettingsPanel(card, module, registration) {
@@ -1186,6 +1213,7 @@
                 border: none;
                 background: transparent;
                 color: #ffffff;
+                text-decoration: none;
                 cursor: pointer;
                 display: flex;
                 align-items: center;

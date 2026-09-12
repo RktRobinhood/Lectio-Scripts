@@ -56,7 +56,7 @@ Look for a small teal gear button in the bottom-right corner of any Lectio page 
 > | Firefox | Assigns a random per-profile extension ID that can never be hardcoded, so it asks **once** for your own dashboard link (open your Tampermonkey icon → Dashboard, copy the address bar URL, paste it in) and remembers it after that. |
 > | Safari | Tampermonkey's settings live inside Safari's own Settings → Extensions panel rather than a normal browser tab, so there's usually no link to paste at all — open it from there instead. |
 >
-> Use the **Set dashboard link** button at the bottom of the panel to add, fix, or clear a saved link at any time (useful if a Chromium guess is wrong, or after Tampermonkey gets reinstalled and Firefox assigns it a new ID).
+> Use the **Set dashboard link** button at the bottom of the panel to add, fix, or clear a saved link at any time (useful if a Chromium guess is wrong, or after Tampermonkey gets reinstalled and Firefox assigns it a new ID). The wrench icon is a real link (not a script-driven popup), so it always reflects whatever URL was last saved or guessed — click it directly rather than expecting anything to happen automatically right after saving a link.
 
 ---
 
