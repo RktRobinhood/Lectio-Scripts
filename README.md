@@ -68,7 +68,7 @@ All modules are designed for Lectio and are intended to work across Lectio insta
 |---|---|---|
 | **[English Mode](modules/Lectio-English-Mode.user.js)** | Adds a **DA / EN** switch and translates the Lectio interface into context-aware English. | Students and staff |
 | **[Chairs Up](modules/Lectio-Chairs-Up.user.js)** | Marks a lesson when it is the **last booking of the day in that room**. | Teachers |
-| **[Unread Message Notifications](modules/Lectio-Unread-Message-Notifications.user.js)** | Shows unread messages beside **Beskeder / Messages** and plays a soft chime when the unread count increases. Currently limited to Lectio school `223`. | Students and staff at that school |
+| **[Unread Message Notifications](modules/Lectio-Unread-Message-Notifications.user.js)** | Shows an unread-message badge beside **Beskeder / Messages**. Currently limited to Lectio school `223`. | Students and staff at that school |
 
 You can install one, several, or all of them, either through the Manager or by copying a file directly (see below).
 
@@ -177,7 +177,7 @@ Yes — userscripts can run on supported phones and tablets, but mobile browser 
 
 **Unread Message Notifications** works while Lectio is open, but it is **not a native push-notification service**. Phones often suspend background browser tabs, so do not expect reliable alerts while the browser is closed or Lectio is suspended.
 
-When you return to Lectio, the script can check again. The notification sound may also require one tap or other interaction with the page before the browser allows audio.
+When you return to Lectio, the script can check again.
 
 Official mobile links:
 
@@ -241,7 +241,6 @@ To remove it completely, delete it from the Dashboard. Nothing needs to be remov
 | **GitHub Raw only shows JavaScript** | Copy the complete file and use **Create a new script...** instead. |
 | **English translation is incomplete** | Reload, switch **DA → EN**, and report repeatable untranslated text. |
 | **English Mode requests extra permissions** | It can use Tampermonkey storage and Google Translate fallback; review the permissions before installing. |
-| **Message sound does not play** | Interact with the Lectio page once, check tab/system audio, and remember that the first unread check is deliberately silent. |
 | **Chairs Up does not appear** | Confirm the lesson is actually the final booking in that room; if it is, collect Console errors and report it. |
 | **A script suddenly stops working** | Lectio may have changed its page structure. Check for an updated script and open an Issue if the problem is reproducible. |
 | **Only one device/browser has a problem** | Include the device, OS, browser, and browser version in a compatibility report. |

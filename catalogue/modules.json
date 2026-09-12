@@ -27,7 +27,7 @@
     {
       "id": "message-notifications",
       "name": "Unread Message Notifications",
-      "description": "Shows an unread-message badge beside Beskeder / Messages and plays a soft chime when the unread count increases. Currently limited to Lectio school 223.",
+      "description": "Shows an unread-message badge beside Beskeder / Messages. Currently limited to Lectio school 223.",
       "category": "Messages",
       "audience": ["student", "teacher"],
       "status": "stable",

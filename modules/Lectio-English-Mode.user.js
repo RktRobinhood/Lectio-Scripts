@@ -3296,7 +3296,7 @@
     function init() {
         console.log(
             LOG,
-            'v1.5.2 started'
+            'v1.5.3 started'
         );
 
         installStyles();
