@@ -69,7 +69,7 @@ All modules are designed for Lectio and are intended to work across Lectio insta
 | **[English Mode](modules/Lectio-English-Mode.user.js)** | Adds a **DA / EN** switch and translates the Lectio interface into context-aware English. | Students and staff |
 | **[Chairs Up](modules/Lectio-Chairs-Up.user.js)** | Marks a lesson when it is the **last booking of the day in that room**. | Teachers |
 | **[Unread Message Notifications](modules/Lectio-Unread-Message-Notifications.user.js)** | Shows an unread-message badge beside **Beskeder / Messages**. Currently limited to Lectio school `223`. | Students and staff at that school |
-| **[Lectio Theming](modules/Lectio-Theming.user.js)** | Applies a compact, Hyprland-inspired visual shell and can derive its palette from an **image or website URL**. | Students and staff |
+| **[Lectio Theming](modules/Lectio-Theming.user.js)** | Applies a soft, translucent glass shell (light or dark) and can derive its accent colours from an **image or website URL**. | Students and staff |
 
 You can install one, several, or all of them, either through the Manager or by copying a file directly (see below).
 
@@ -89,7 +89,7 @@ Each module keeps its own version and updates independently of the Manager and o
 
 Installed modules can expose their own settings in the Manager. Open Lectio Tools, find an installed module, and choose **Settings**. The Manager only renders these controls; each independent module owns and applies its values.
 
-For Lectio Theming, paste an HTTPS image or website URL into **Palette source**, then choose **Import**, or use **Choose image** for a local file that never leaves the browser. Direct image URLs give the most predictable result; website imports use colours found in the page and up to six linked stylesheets. Built-in Graphite mint, Catppuccin, and Nord palettes are available without a source.
+For Lectio Theming, choose **Light or dark** to match your preference (Lectio itself is always light, so Light keeps the shell close to native contrast). Paste an HTTPS image or website URL into **Palette source**, then choose **Import**, or use **Choose image** for a local file that never leaves the browser, to derive the accent colours. Direct image URLs give the most predictable result; website imports use colours found in the page and up to six linked stylesheets. Built-in Aurora, Coral, and Meadow accent pairings are available without a source.
 
 ### Manual: copy-paste a single module
 

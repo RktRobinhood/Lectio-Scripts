@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Lectio Theming
 // @namespace    https://www.lectio.dk/
-// @version      0.1.0
-// @description  Gives Lectio a polished Hyprland-inspired shell and can derive its palette from a website or image.
+// @version      0.2.0
+// @description  Gives Lectio a soft, translucent glass shell over a subtly colourful background, and can derive its accent colours from a website or image.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-start
 // @grant        GM_xmlhttpRequest
@@ -16,39 +16,48 @@
 
     const MODULE_ID = 'lectio-theming';
     const MODULE_NAME = 'Lectio Theming';
-    const MODULE_VERSION = '0.1.0';
-    const STORAGE_KEY = 'lectioTheming.settings.v1';
+    const MODULE_VERSION = '0.2.0';
+    const STORAGE_KEY = 'lectioTheming.settings.v2';
     const STYLE_ID = 'lectio-theming-styles';
     const ROOT_CLASS = 'lectio-themed';
     const LOG = '[Lectio Theming]';
     const MAX_SOURCE_BYTES = 8 * 1024 * 1024;
+    const PRESET_KEYS = ['aurora', 'coral', 'meadow', 'custom'];
+    const MODE_KEYS = ['light', 'dark'];
 
-    const PRESETS = Object.freeze({
-        graphite: {
-            background: '#0b1014', surface: '#141b21', surfaceAlt: '#1b252c',
-            text: '#e8f0f2', muted: '#9babb1', accent: '#65d1c7', accentAlt: '#8aa8ff', danger: '#ff6b81'
+    // Presets only supply hue accents. Background/surface/text always come
+    // from MODE_BASE, so switching light/dark never loses the accent colours,
+    // and imported palettes stay legible instead of forcing a dark theme.
+    const HUES = Object.freeze({
+        aurora: { accent: '#4fb0a6', accentAlt: '#8b8fe8', danger: '#e0596b' },
+        coral: { accent: '#e08a5b', accentAlt: '#e6607a', danger: '#d9455b' },
+        meadow: { accent: '#4f9d6e', accentAlt: '#5aa9d6', danger: '#d9525f' }
+    });
+
+    const MODE_BASE = Object.freeze({
+        light: {
+            background: '#f6f5fb', surface: '#ffffff', surfaceAlt: '#eceffb',
+            text: '#20243a', muted: '#5b6178', blobStrength: '26%'
         },
-        catppuccin: {
-            background: '#11111b', surface: '#181825', surfaceAlt: '#24243a',
-            text: '#cdd6f4', muted: '#a6adc8', accent: '#cba6f7', accentAlt: '#89b4fa', danger: '#f38ba8'
-        },
-        nord: {
-            background: '#242933', surface: '#2e3440', surfaceAlt: '#3b4252',
-            text: '#eceff4', muted: '#aeb8c7', accent: '#88c0d0', accentAlt: '#81a1c1', danger: '#bf616a'
+        dark: {
+            background: '#12141c', surface: '#1b1f2b', surfaceAlt: '#232840',
+            text: '#e7e9f5', muted: '#9aa0b8', blobStrength: '15%'
         }
     });
 
     const DEFAULT_SETTINGS = Object.freeze({
         enabled: true,
-        preset: 'graphite',
+        preset: 'aurora',
+        mode: 'light',
         sourceUrl: '',
         radius: 12,
         blur: true,
         density: 'compact',
-        palette: PRESETS.graphite
+        customHues: null
     });
 
     let settings = loadSettings();
+    let currentPalette = resolvePalette(settings.preset, settings.mode, settings.customHues);
 
     announce();
     applyTheme();
@@ -68,12 +77,20 @@
                         description: 'Switch the visual layer on or off.'
                     },
                     {
-                        key: 'preset', type: 'select', label: 'Base palette',
-                        description: 'Start with a built-in palette or your imported colours.',
+                        key: 'mode', type: 'select', label: 'Light or dark',
+                        description: 'Lectio itself is always light, so light keeps things calm; dark is available if you prefer it.',
                         options: [
-                            { value: 'graphite', label: 'Graphite mint' },
-                            { value: 'catppuccin', label: 'Catppuccin' },
-                            { value: 'nord', label: 'Nord' },
+                            { value: 'light', label: 'Light' },
+                            { value: 'dark', label: 'Dark' }
+                        ]
+                    },
+                    {
+                        key: 'preset', type: 'select', label: 'Accent colours',
+                        description: 'Pick a built-in accent pairing or your imported colours.',
+                        options: [
+                            { value: 'aurora', label: 'Aurora (teal / lavender)' },
+                            { value: 'coral', label: 'Coral (peach / pink)' },
+                            { value: 'meadow', label: 'Meadow (green / sky)' },
                             { value: 'custom', label: 'Imported palette' }
                         ]
                     },
@@ -107,11 +124,12 @@
                     },
                     {
                         key: 'resetTheme', type: 'button', label: 'Reset theme',
-                        description: 'Restore the Graphite mint defaults.', buttonLabel: 'Reset'
+                        description: 'Restore the Aurora light defaults.', buttonLabel: 'Reset'
                     }
                 ],
                 currentValues: {
                     enabled: settings.enabled,
+                    mode: settings.mode,
                     preset: settings.preset,
                     sourceUrl: settings.sourceUrl,
                     radius: settings.radius,
@@ -133,10 +151,13 @@
             case 'enabled':
                 settings.enabled = Boolean(detail.value);
                 break;
+            case 'mode':
+                if (!MODE_KEYS.includes(detail.value)) return;
+                settings.mode = detail.value;
+                break;
             case 'preset':
-                if (!['graphite', 'catppuccin', 'nord', 'custom'].includes(detail.value)) return;
+                if (!PRESET_KEYS.includes(detail.value)) return;
                 settings.preset = detail.value;
-                if (PRESETS[detail.value]) settings.palette = { ...PRESETS[detail.value] };
                 break;
             case 'sourceUrl':
                 settings.sourceUrl = String(detail.value || '').trim();
@@ -173,19 +194,16 @@
     function loadSettings() {
         try {
             const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-            const preset = ['graphite', 'catppuccin', 'nord', 'custom'].includes(saved.preset)
-                ? saved.preset
-                : DEFAULT_SETTINGS.preset;
-            const savedPalette = validatePalette(saved.palette);
 
             return {
                 enabled: typeof saved.enabled === 'boolean' ? saved.enabled : DEFAULT_SETTINGS.enabled,
-                preset,
+                preset: PRESET_KEYS.includes(saved.preset) ? saved.preset : DEFAULT_SETTINGS.preset,
+                mode: MODE_KEYS.includes(saved.mode) ? saved.mode : DEFAULT_SETTINGS.mode,
                 sourceUrl: typeof saved.sourceUrl === 'string' ? saved.sourceUrl : '',
                 radius: clamp(Number(saved.radius) || DEFAULT_SETTINGS.radius, 4, 20),
                 blur: typeof saved.blur === 'boolean' ? saved.blur : DEFAULT_SETTINGS.blur,
                 density: ['compact', 'comfortable'].includes(saved.density) ? saved.density : DEFAULT_SETTINGS.density,
-                palette: preset === 'custom' && savedPalette ? savedPalette : { ...(PRESETS[preset] || PRESETS.graphite) }
+                customHues: validateHues(saved.customHues)
             };
         } catch (_) {
             return cloneDefaults();
@@ -193,7 +211,7 @@
     }
 
     function cloneDefaults() {
-        return { ...DEFAULT_SETTINGS, palette: { ...DEFAULT_SETTINGS.palette } };
+        return { ...DEFAULT_SETTINGS, customHues: null };
     }
 
     function saveSettings() {
@@ -204,11 +222,30 @@
         }
     }
 
-    function validatePalette(value) {
-        const keys = ['background', 'surface', 'surfaceAlt', 'text', 'muted', 'accent', 'accentAlt', 'danger'];
+    function validateHues(value) {
+        const keys = ['accent', 'accentAlt', 'danger'];
         return value && keys.every((key) => /^#[0-9a-f]{6}$/i.test(value[key] || ''))
             ? Object.fromEntries(keys.map((key) => [key, value[key]]))
             : null;
+    }
+
+    function resolvePalette(preset, mode, customHues) {
+        const base = MODE_BASE[mode] || MODE_BASE.light;
+        const hues = (preset === 'custom' && customHues) ? customHues : (HUES[preset] || HUES.aurora);
+        const ensureAccent = mode === 'dark' ? ensureAccentOnDark : ensureAccentOnLight;
+
+        return {
+            background: base.background,
+            surface: base.surface,
+            surfaceAlt: base.surfaceAlt,
+            text: base.text,
+            muted: base.muted,
+            accent: ensureAccent(hues.accent, base.background),
+            accentAlt: ensureAccent(hues.accentAlt, base.background),
+            danger: hues.danger,
+            blend: mixHex(hues.accent, hues.accentAlt, .5),
+            blobStrength: base.blobStrength
+        };
     }
 
     function applyTheme() {
@@ -216,17 +253,21 @@
         root.classList.toggle(ROOT_CLASS, settings.enabled);
         root.classList.toggle('lectio-theme-blur', settings.blur);
         root.dataset.lectioThemeDensity = settings.density;
+        root.style.colorScheme = settings.mode === 'dark' ? 'dark' : 'light';
 
-        const palette = settings.palette;
+        currentPalette = resolvePalette(settings.preset, settings.mode, settings.customHues);
+
         const variables = {
-            '--lectio-theme-bg': palette.background,
-            '--lectio-theme-surface': palette.surface,
-            '--lectio-theme-surface-alt': palette.surfaceAlt,
-            '--lectio-theme-text': palette.text,
-            '--lectio-theme-muted': palette.muted,
-            '--lectio-theme-accent': palette.accent,
-            '--lectio-theme-accent-alt': palette.accentAlt,
-            '--lectio-theme-danger': palette.danger,
+            '--lectio-theme-bg': currentPalette.background,
+            '--lectio-theme-surface': currentPalette.surface,
+            '--lectio-theme-surface-alt': currentPalette.surfaceAlt,
+            '--lectio-theme-text': currentPalette.text,
+            '--lectio-theme-muted': currentPalette.muted,
+            '--lectio-theme-accent': currentPalette.accent,
+            '--lectio-theme-accent-alt': currentPalette.accentAlt,
+            '--lectio-theme-blend': currentPalette.blend,
+            '--lectio-theme-danger': currentPalette.danger,
+            '--lectio-theme-blob': currentPalette.blobStrength,
             '--lectio-theme-radius': `${settings.radius}px`,
             '--lectio-theme-space': settings.density === 'compact' ? '6px' : '10px'
         };
@@ -245,41 +286,43 @@
         style.id = STYLE_ID;
         style.textContent = `
             :root {
-                --lectio-theme-bg: #0b1014;
-                --lectio-theme-surface: #141b21;
-                --lectio-theme-surface-alt: #1b252c;
-                --lectio-theme-text: #e8f0f2;
-                --lectio-theme-muted: #9babb1;
-                --lectio-theme-accent: #65d1c7;
-                --lectio-theme-accent-alt: #8aa8ff;
-                --lectio-theme-danger: #ff6b81;
+                --lectio-theme-bg: #f6f5fb;
+                --lectio-theme-surface: #ffffff;
+                --lectio-theme-surface-alt: #eceffb;
+                --lectio-theme-text: #20243a;
+                --lectio-theme-muted: #5b6178;
+                --lectio-theme-accent: #4fb0a6;
+                --lectio-theme-accent-alt: #8b8fe8;
+                --lectio-theme-blend: #6ba0c6;
+                --lectio-theme-danger: #e0596b;
+                --lectio-theme-blob: 26%;
                 --lectio-theme-radius: 12px;
                 --lectio-theme-space: 6px;
             }
 
             html.${ROOT_CLASS},
             html.${ROOT_CLASS} body {
-                color-scheme: dark;
                 background: var(--lectio-theme-bg) !important;
                 color: var(--lectio-theme-text) !important;
             }
 
             html.${ROOT_CLASS} body {
                 background-image:
-                    radial-gradient(circle at 15% -10%, color-mix(in srgb, var(--lectio-theme-accent) 16%, transparent), transparent 34rem),
-                    radial-gradient(circle at 100% 15%, color-mix(in srgb, var(--lectio-theme-accent-alt) 12%, transparent), transparent 30rem) !important;
+                    radial-gradient(circle at 10% -10%, color-mix(in srgb, var(--lectio-theme-accent) var(--lectio-theme-blob), transparent), transparent 40rem),
+                    radial-gradient(circle at 105% 8%, color-mix(in srgb, var(--lectio-theme-accent-alt) var(--lectio-theme-blob), transparent), transparent 38rem),
+                    radial-gradient(circle at 40% 118%, color-mix(in srgb, var(--lectio-theme-blend) var(--lectio-theme-blob), transparent), transparent 46rem) !important;
                 background-attachment: fixed !important;
             }
 
             html.${ROOT_CLASS} :where(#masterContent, #content, #m_Content, .ls-master-container, .ls-content-container,
                 .ls-card, .island, fieldset, .s2skemabrikcontainer, .s2skemabrik, .s2day, .s2weekHeader) {
-                border-color: color-mix(in srgb, var(--lectio-theme-accent) 24%, transparent) !important;
+                border-color: color-mix(in srgb, var(--lectio-theme-accent) 20%, transparent) !important;
                 border-radius: var(--lectio-theme-radius) !important;
             }
 
             html.${ROOT_CLASS} :where(.ls-card, .island, fieldset, .s2skemabrikcontainer, .s2day, table, tbody, tr, td, th) {
                 color: var(--lectio-theme-text);
-                border-color: color-mix(in srgb, var(--lectio-theme-muted) 22%, transparent) !important;
+                border-color: color-mix(in srgb, var(--lectio-theme-muted) 18%, transparent) !important;
             }
 
             html.${ROOT_CLASS} :where(table, tbody, tr, td, th) {
@@ -287,28 +330,28 @@
             }
 
             html.${ROOT_CLASS} table {
-                background: var(--lectio-theme-surface) !important;
+                background: color-mix(in srgb, var(--lectio-theme-surface) 60%, transparent) !important;
             }
 
             html.${ROOT_CLASS} :where(th, tr:nth-child(even) > td) {
-                background: color-mix(in srgb, var(--lectio-theme-surface-alt) 72%, transparent) !important;
+                background: color-mix(in srgb, var(--lectio-theme-surface-alt) 45%, transparent) !important;
             }
 
             html.${ROOT_CLASS} :where(.ls-card, .island, fieldset, .s2skemabrikcontainer) {
-                background: color-mix(in srgb, var(--lectio-theme-surface) 94%, transparent) !important;
-                box-shadow: 0 10px 30px rgba(0, 0, 0, .18), inset 0 1px rgba(255, 255, 255, .035);
+                background: color-mix(in srgb, var(--lectio-theme-surface) 55%, transparent) !important;
+                box-shadow: 0 10px 30px rgba(15, 23, 42, .08), inset 0 1px rgba(255, 255, 255, .5);
                 padding: var(--lectio-theme-space);
             }
 
             html.${ROOT_CLASS} :where(#s_m_masterleftDiv, .ls-master-header, .ls-top-nav, .ls-master-pageheader) {
-                background: color-mix(in srgb, var(--lectio-theme-surface) 88%, transparent) !important;
-                border: 1px solid color-mix(in srgb, var(--lectio-theme-accent) 22%, transparent) !important;
+                background: color-mix(in srgb, var(--lectio-theme-surface) 62%, transparent) !important;
+                border: 1px solid color-mix(in srgb, var(--lectio-theme-accent) 18%, transparent) !important;
                 color: var(--lectio-theme-text) !important;
-                box-shadow: 0 12px 30px rgba(0, 0, 0, .24);
+                box-shadow: 0 12px 30px rgba(15, 23, 42, .10);
             }
 
             html.${ROOT_CLASS}.lectio-theme-blur :where(#s_m_masterleftDiv, .ls-master-header, .ls-top-nav, .ls-card, .island) {
-                backdrop-filter: blur(18px) saturate(125%);
+                backdrop-filter: blur(18px) saturate(140%);
             }
 
             html.${ROOT_CLASS} :where(a, .ls-link):not(#lectio-manager-root *) {
@@ -317,33 +360,33 @@
             }
 
             html.${ROOT_CLASS} :where(a:hover, .ls-link:hover):not(#lectio-manager-root *) {
-                color: color-mix(in srgb, var(--lectio-theme-accent) 72%, white) !important;
+                color: color-mix(in srgb, var(--lectio-theme-accent) 75%, var(--lectio-theme-text)) !important;
             }
 
             html.${ROOT_CLASS} :where(input, select, textarea, button, .button, .ls-button):not(#lectio-manager-root *) {
-                border: 1px solid color-mix(in srgb, var(--lectio-theme-muted) 35%, transparent) !important;
+                border: 1px solid color-mix(in srgb, var(--lectio-theme-muted) 30%, transparent) !important;
                 border-radius: max(6px, calc(var(--lectio-theme-radius) - 4px)) !important;
-                background: var(--lectio-theme-surface-alt) !important;
+                background: color-mix(in srgb, var(--lectio-theme-surface-alt) 70%, transparent) !important;
                 color: var(--lectio-theme-text) !important;
                 padding: var(--lectio-theme-space);
             }
 
             html.${ROOT_CLASS} :where(button, .button, .ls-button):not(#lectio-manager-root *):hover {
                 border-color: var(--lectio-theme-accent) !important;
-                box-shadow: 0 0 0 2px color-mix(in srgb, var(--lectio-theme-accent) 18%, transparent);
+                box-shadow: 0 0 0 2px color-mix(in srgb, var(--lectio-theme-accent) 16%, transparent);
             }
 
             html.${ROOT_CLASS} :where(input, select, textarea):not(#lectio-manager-root *):focus {
-                outline: 2px solid color-mix(in srgb, var(--lectio-theme-accent) 65%, transparent) !important;
+                outline: 2px solid color-mix(in srgb, var(--lectio-theme-accent) 55%, transparent) !important;
                 outline-offset: 1px;
             }
 
             html.${ROOT_CLASS} :where(.s2skemabrik, a.s2skemabrik.s2brik) {
-                background: var(--lectio-theme-surface-alt) !important;
+                background: color-mix(in srgb, var(--lectio-theme-surface-alt) 70%, transparent) !important;
                 color: var(--lectio-theme-text) !important;
-                border: 1px solid color-mix(in srgb, var(--lectio-theme-accent-alt) 35%, transparent) !important;
+                border: 1px solid color-mix(in srgb, var(--lectio-theme-accent-alt) 30%, transparent) !important;
                 border-radius: max(5px, calc(var(--lectio-theme-radius) - 5px)) !important;
-                box-shadow: inset 3px 0 var(--lectio-theme-accent-alt), 0 3px 10px rgba(0, 0, 0, .16);
+                box-shadow: inset 3px 0 var(--lectio-theme-accent-alt), 0 3px 10px rgba(15, 23, 42, .08);
             }
 
             html.${ROOT_CLASS} :where(.s2cancelled, .ls-status-cancelled) {
@@ -362,7 +405,7 @@
             }
 
             html.${ROOT_CLASS} ::selection {
-                background: color-mix(in srgb, var(--lectio-theme-accent) 45%, transparent);
+                background: color-mix(in srgb, var(--lectio-theme-accent) 35%, transparent);
                 color: var(--lectio-theme-text);
             }
 
@@ -404,7 +447,7 @@
                 throw new Error('Not enough distinct colours were found. Try a direct image URL.');
             }
 
-            settings.palette = derivePalette(colours);
+            settings.customHues = deriveHues(colours);
             settings.preset = 'custom';
             saveSettings();
             applyTheme();
@@ -431,7 +474,7 @@
             try {
                 const colours = await sampleImageColours(await file.arrayBuffer(), file.type || 'image/png');
                 if (colours.length < 2) throw new Error('Not enough distinct colours were found.');
-                settings.palette = derivePalette(colours);
+                settings.customHues = deriveHues(colours);
                 settings.preset = 'custom';
                 saveSettings();
                 applyTheme();
@@ -623,7 +666,7 @@
         return base.map((value) => (value + match) * 255);
     }
 
-    function derivePalette(colours) {
+    function deriveHues(colours) {
         const ranked = [...new Set(colours)].map((hex) => ({
             hex,
             rgb: hexToRgb(hex),
@@ -631,34 +674,35 @@
             saturation: colourSaturation(hexToRgb(hex))
         }));
 
-        const darkest = ranked.reduce((best, item) => item.light < best.light ? item : best);
-        const lightest = ranked.reduce((best, item) => item.light > best.light ? item : best);
         const vivid = ranked
             .filter((item) => item.light > .08 && item.light < .82 && item.saturation > .12)
             .sort((a, b) => (b.saturation * .75 + b.light * .25) - (a.saturation * .75 + a.light * .25));
-        const fallbackAccent = {
-            hex: PRESETS.graphite.accent,
-            rgb: hexToRgb(PRESETS.graphite.accent)
-        };
-        const accent = vivid[0] || fallbackAccent;
-        const accentAlt = vivid.find((item) => colourDistance(item.rgb, accent.rgb) > 90) || vivid[1] || accent;
-        const background = mixHex(darkest.hex, '#05080d', darkest.light > .12 ? .7 : .25);
-        const surface = mixHex(background, accent.hex, .10);
+        const accent = vivid[0]?.hex || HUES.aurora.accent;
+        const accentAlt = vivid.find((item) => colourDistance(item.rgb, hexToRgb(accent)) > 90)?.hex
+            || vivid[1]?.hex
+            || HUES.aurora.accentAlt;
 
-        return {
-            background,
-            surface,
-            surfaceAlt: mixHex(surface, '#ffffff', .07),
-            text: mixHex(lightest.hex, '#ffffff', .62),
-            muted: mixHex(lightest.hex, background, .38),
-            accent: ensureAccent(accent.hex, background),
-            accentAlt: ensureAccent(accentAlt.hex, background),
-            danger: '#ff6b81'
-        };
+        return { accent, accentAlt, danger: HUES.aurora.danger };
     }
 
-    function ensureAccent(colour, background) {
-        return contrastRatio(colour, background) >= 3 ? colour : mixHex(colour, '#ffffff', .34);
+    function ensureAccentOnLight(colour, background) {
+        let result = colour;
+        let guard = 0;
+        while (contrastRatio(result, background) < 3.2 && guard < 6) {
+            result = mixHex(result, '#000000', .18);
+            guard += 1;
+        }
+        return result;
+    }
+
+    function ensureAccentOnDark(colour, background) {
+        let result = colour;
+        let guard = 0;
+        while (contrastRatio(result, background) < 3 && guard < 6) {
+            result = mixHex(result, '#ffffff', .18);
+            guard += 1;
+        }
+        return result;
     }
 
     function hexToRgb(hex) {
@@ -713,9 +757,9 @@
             Object.assign(toast.style, {
                 position: 'fixed', right: '18px', bottom: '72px', zIndex: '999998',
                 maxWidth: '300px', padding: '10px 13px', borderRadius: '10px',
-                background: isError ? settings.palette.danger : settings.palette.surfaceAlt,
-                color: settings.palette.text, border: `1px solid ${isError ? settings.palette.danger : settings.palette.accent}`,
-                boxShadow: '0 10px 28px rgba(0,0,0,.32)', font: '600 12px Roboto, Arial, sans-serif'
+                background: isError ? currentPalette.danger : currentPalette.surfaceAlt,
+                color: currentPalette.text, border: `1px solid ${isError ? currentPalette.danger : currentPalette.accent}`,
+                boxShadow: '0 10px 28px rgba(0,0,0,.24)', font: '600 12px Roboto, Arial, sans-serif'
             });
             document.body.appendChild(toast);
             window.setTimeout(() => toast.remove(), isError ? 5000 : 3000);
