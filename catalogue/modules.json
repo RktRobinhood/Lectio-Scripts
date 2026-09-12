@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-09-12T10:00:00Z",
+  "generatedAt": "2026-09-12T12:00:00Z",
   "modules": [
     {
       "id": "english-mode",
@@ -9,7 +9,7 @@
       "category": "Interface",
       "audience": ["student", "teacher"],
       "status": "stable",
-      "version": "1.5.3",
+      "version": "1.6.0",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-English-Mode.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues"
     },
@@ -20,7 +20,7 @@
       "category": "Timetable",
       "audience": ["teacher"],
       "status": "stable",
-      "version": "1.0.5",
+      "version": "1.1.0",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Chairs-Up.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues"
     },
@@ -31,8 +31,19 @@
       "category": "Messages",
       "audience": ["student", "teacher"],
       "status": "stable",
-      "version": "0.2.4",
+      "version": "0.3.0",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Unread-Message-Notifications.user.js",
+      "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues"
+    },
+    {
+      "id": "lectio-theming",
+      "name": "Lectio Theming",
+      "description": "Gives Lectio a polished Hyprland-inspired shell and derives a colour palette from a website or image.",
+      "category": "Interface",
+      "audience": ["student", "teacher"],
+      "status": "experimental",
+      "version": "0.1.0",
+      "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Theming.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues"
     }
   ]

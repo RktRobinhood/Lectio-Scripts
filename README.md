@@ -69,6 +69,7 @@ All modules are designed for Lectio and are intended to work across Lectio insta
 | **[English Mode](modules/Lectio-English-Mode.user.js)** | Adds a **DA / EN** switch and translates the Lectio interface into context-aware English. | Students and staff |
 | **[Chairs Up](modules/Lectio-Chairs-Up.user.js)** | Marks a lesson when it is the **last booking of the day in that room**. | Teachers |
 | **[Unread Message Notifications](modules/Lectio-Unread-Message-Notifications.user.js)** | Shows an unread-message badge beside **Beskeder / Messages**. Currently limited to Lectio school `223`. | Students and staff at that school |
+| **[Lectio Theming](modules/Lectio-Theming.user.js)** | Applies a compact, Hyprland-inspired visual shell and can derive its palette from an **image or website URL**. | Students and staff |
 
 You can install one, several, or all of them, either through the Manager or by copying a file directly (see below).
 
@@ -85,6 +86,10 @@ You can install one, several, or all of them, either through the Manager or by c
 5. Confirm Tampermonkey's install screen for that module too.
 
 Each module keeps its own version and updates independently of the Manager and of every other module.
+
+Installed modules can expose their own settings in the Manager. Open Lectio Tools, find an installed module, and choose **Settings**. The Manager only renders these controls; each independent module owns and applies its values.
+
+For Lectio Theming, paste an HTTPS image or website URL into **Palette source**, then choose **Import**, or use **Choose image** for a local file that never leaves the browser. Direct image URLs give the most predictable result; website imports use colours found in the page and up to six linked stylesheets. Built-in Graphite mint, Catppuccin, and Nord palettes are available without a source.
 
 ### Manual: copy-paste a single module
 
@@ -148,6 +153,7 @@ Current raw files:
 - [English Mode — Raw](https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-English-Mode.user.js)
 - [Chairs Up — Raw](https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Chairs-Up.user.js)
 - [Unread Message Notifications — Raw](https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Unread-Message-Notifications.user.js)
+- [Lectio Theming — Raw](https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Theming.user.js)
 
 Installing this way (rather than copy-paste) lets Tampermonkey check that raw URL for updates automatically.
 
@@ -482,6 +488,10 @@ translate.google.com
 ```
 
 Consider your institution's privacy/data-protection requirements before using translation features on pages containing confidential or personally identifiable information.
+
+### Lectio Theming and palette sources
+
+Lectio Theming only contacts a palette-source URL when you press **Import**. That anonymous request is made from your browser to the URL you supplied, so the destination can receive normal connection metadata such as your IP address. The module reads image pixels or colour values from responses of at most 8 MB; it does not send Lectio page content, cookies, or login details to the palette source. Its broad `@connect *` permission is required because the source website is chosen by you.
 
 ### GitHub Issues are public
 

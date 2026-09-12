@@ -1,10 +1,9 @@
 // ==UserScript==
 // @name         Lectio - Chairs Up
 // @namespace    https://www.lectio.dk/
-// @version      1.0.5
+// @version      1.1.0
 // @description  Shows when a lesson is the final active booking of the day in its room. Universal Lectio version.
-// @match        https://www.lectio.dk/lectio/*/SkemaNy.aspx*
-// @match        https://www.lectio.dk/lectio/*/aktivitet/aktivitetforside2.aspx*
+// @match        https://www.lectio.dk/lectio/*
 // @grant        none
 // @updateURL    https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Chairs-Up.user.js
 // @downloadURL  https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Chairs-Up.user.js
@@ -12,6 +11,17 @@
 
 (() => {
   'use strict';
+
+  const SETTINGS_KEY =
+    'lectioChairsUp.settings.v1';
+
+  const DEFAULT_SETTINGS = {
+    markerStyle: 'badge',
+    showLessonNotice: true
+  };
+
+  let settings =
+    loadSettings();
 
 
   // =========================================================
@@ -25,7 +35,7 @@
   (function registerWithLectioManager() {
     const MODULE_ID = 'chairs-up';
     const MODULE_NAME = 'Lectio - Chairs Up';
-    const MODULE_VERSION = '1.0.5';
+    const MODULE_VERSION = '1.1.0';
 
     function announce() {
       window.dispatchEvent(new CustomEvent('lectio-module:register', {
@@ -33,15 +43,89 @@
           id: MODULE_ID,
           name: MODULE_NAME,
           version: MODULE_VERSION,
-          settingsSchema: [],
-          currentValues: {}
+          settingsSchema: [
+            {
+              key: 'markerStyle',
+              type: 'select',
+              label: 'Timetable marker',
+              description: 'Choose how strongly the final lesson stands out.',
+              options: [
+                { value: 'badge', label: 'Chair badge' },
+                { value: 'outline', label: 'Outline' },
+                { value: 'quiet', label: 'Quiet dot' }
+              ]
+            },
+            {
+              key: 'showLessonNotice',
+              type: 'toggle',
+              label: 'Lesson-page notice',
+              description: 'Show the large Chairs Up notice on activity pages.'
+            }
+          ],
+          currentValues: { ...settings }
         }
       }));
     }
 
+    function handleSetting(event) {
+      const detail = event?.detail;
+
+      if (detail?.id !== MODULE_ID) {
+        return;
+      }
+
+      if (
+        detail.key === 'markerStyle' &&
+        ['badge', 'outline', 'quiet'].includes(detail.value)
+      ) {
+        settings.markerStyle = detail.value;
+      } else if (detail.key === 'showLessonNotice') {
+        settings.showLessonNotice = Boolean(detail.value);
+      } else {
+        return;
+      }
+
+      saveSettings();
+      applySettingsToPage();
+      announce();
+    }
+
     window.addEventListener('lectio-manager:discover', announce);
+    window.addEventListener('lectio-manager:set-setting', handleSetting);
     announce();
   })();
+
+  function loadSettings() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
+      return {
+        markerStyle: ['badge', 'outline', 'quiet'].includes(parsed.markerStyle)
+          ? parsed.markerStyle
+          : DEFAULT_SETTINGS.markerStyle,
+        showLessonNotice: typeof parsed.showLessonNotice === 'boolean'
+          ? parsed.showLessonNotice
+          : DEFAULT_SETTINGS.showLessonNotice
+      };
+    } catch (_) {
+      return { ...DEFAULT_SETTINGS };
+    }
+  }
+
+  function saveSettings() {
+    try {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    } catch (_) {
+      // The visual setting still applies for this page when storage is unavailable.
+    }
+  }
+
+  function applySettingsToPage() {
+    document.documentElement.dataset.lectioChairsUpMarker = settings.markerStyle;
+    document.documentElement.classList.toggle(
+      'lectio-chairs-up-hide-notice',
+      !settings.showLessonNotice
+    );
+  }
 
 
   // =========================================================
@@ -57,7 +141,7 @@
     schoolMatch[1];
 
   console.info(
-    `[Lectio Chairs Up] v1.0.5 started - school ${SCHOOL}`
+    `[Lectio Chairs Up] v1.1.0 started - school ${SCHOOL}`
   );
 
 
@@ -131,6 +215,7 @@
   // =========================================================
 
   injectStyles();
+  applySettingsToPage();
 
   main().catch(error => {
     console.error(
@@ -2897,6 +2982,31 @@
       .${LAST_CLASS} {
         z-index:
           25 !important;
+      }
+
+      html[data-lectio-chairs-up-marker='outline'] .${LAST_CLASS} {
+        outline: 3px solid #e31845 !important;
+        outline-offset: 2px !important;
+      }
+
+      html[data-lectio-chairs-up-marker='outline'] .${ICON_CLASS} {
+        display: none !important;
+      }
+
+      html[data-lectio-chairs-up-marker='quiet'] .${ICON_CLASS} {
+        width: 12px;
+        height: 12px;
+        top: -3px;
+        right: -3px;
+        border-width: 1px;
+      }
+
+      html[data-lectio-chairs-up-marker='quiet'] .${ICON_CLASS} svg {
+        display: none;
+      }
+
+      html.lectio-chairs-up-hide-notice .${LESSON_NOTICE_CLASS} {
+        display: none !important;
       }
 
 

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Unread Message Notifications
 // @namespace    https://www.lectio.dk/lectio/223/
-// @version      0.2.4
+// @version      0.3.0
 // @description  Shows one unread-message badge using Lectio's own unread count. Includes direct and group-addressed messages.
 // @match        https://www.lectio.dk/lectio/223/*
 // @grant        none
@@ -12,6 +12,14 @@
 
 (() => {
     'use strict';
+
+    const SETTINGS_KEY = 'lectioUnreadMessages.settings.v1';
+    const DEFAULT_SETTINGS = {
+        pollMinutes: 10,
+        showPreview: true
+    };
+    let settings = loadSettings();
+    let pollTimer = null;
 
     // ============================================================
     // LECTIO MANAGER HANDSHAKE
@@ -24,7 +32,7 @@
     (function registerWithLectioManager() {
         const MODULE_ID = 'message-notifications';
         const MODULE_NAME = 'Lectio - Unread Message Notifications';
-        const MODULE_VERSION = '0.2.4';
+        const MODULE_VERSION = '0.3.0';
 
         function announce() {
             window.dispatchEvent(new CustomEvent('lectio-module:register', {
@@ -32,15 +40,93 @@
                     id: MODULE_ID,
                     name: MODULE_NAME,
                     version: MODULE_VERSION,
-                    settingsSchema: [],
-                    currentValues: {}
+                    settingsSchema: [
+                        {
+                            key: 'pollMinutes',
+                            type: 'select',
+                            label: 'Check for messages',
+                            description: 'How often to refresh while Lectio is visible.',
+                            options: [
+                                { value: '2', label: 'Every 2 minutes' },
+                                { value: '5', label: 'Every 5 minutes' },
+                                { value: '10', label: 'Every 10 minutes' },
+                                { value: '15', label: 'Every 15 minutes' },
+                                { value: '30', label: 'Every 30 minutes' }
+                            ]
+                        },
+                        {
+                            key: 'showPreview',
+                            type: 'toggle',
+                            label: 'Message preview',
+                            description: 'Show recent unread messages when hovering the badge.'
+                        }
+                    ],
+                    currentValues: {
+                        pollMinutes: String(settings.pollMinutes),
+                        showPreview: settings.showPreview
+                    }
                 }
             }));
         }
 
+        function handleSetting(event) {
+            const detail = event?.detail;
+
+            if (detail?.id !== MODULE_ID) {
+                return;
+            }
+
+            if (detail.key === 'pollMinutes' && ['2', '5', '10', '15', '30'].includes(String(detail.value))) {
+                settings.pollMinutes = Number(detail.value);
+                startPolling();
+            } else if (detail.key === 'showPreview') {
+                settings.showPreview = Boolean(detail.value);
+                applySettingsToPage();
+            } else {
+                return;
+            }
+
+            saveSettings();
+            announce();
+        }
+
         window.addEventListener('lectio-manager:discover', announce);
+        window.addEventListener('lectio-manager:set-setting', handleSetting);
         announce();
     })();
+
+    function loadSettings() {
+        try {
+            const parsed = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
+            const pollMinutes = [2, 5, 10, 15, 30].includes(Number(parsed.pollMinutes))
+                ? Number(parsed.pollMinutes)
+                : DEFAULT_SETTINGS.pollMinutes;
+
+            return {
+                pollMinutes,
+                showPreview: typeof parsed.showPreview === 'boolean'
+                    ? parsed.showPreview
+                    : DEFAULT_SETTINGS.showPreview
+            };
+        } catch (_) {
+            return { ...DEFAULT_SETTINGS };
+        }
+    }
+
+    function saveSettings() {
+        try {
+            localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+        } catch (_) {
+            // Continue with in-memory settings when storage is unavailable.
+        }
+    }
+
+    function applySettingsToPage() {
+        document.documentElement.classList.toggle(
+            'lectio-unread-hide-preview',
+            !settings.showPreview
+        );
+    }
 
     // ============================================================
     // CONFIG
@@ -60,9 +146,6 @@
      */
     const CACHE_KEY =
         'lectioUnreadMessages.cache.v3';
-
-    const POLL_MS =
-        10 * 60 * 1000;
 
     const RETURN_REFRESH_AGE =
         10 * 60 * 1000;
@@ -99,6 +182,7 @@
 
     function init() {
         injectStyles();
+        applySettingsToPage();
 
         /*
          * Discard stale cached state.
@@ -136,16 +220,21 @@
         /*
          * Normal background refresh.
          */
-        window.setInterval(
+        startPolling();
+    }
+
+    function startPolling() {
+        if (pollTimer !== null) {
+            window.clearInterval(pollTimer);
+        }
+
+        pollTimer = window.setInterval(
             () => {
-                if (
-                    document.visibilityState ===
-                    'visible'
-                ) {
+                if (document.visibilityState === 'visible') {
                     refreshUnreadMessages();
                 }
             },
-            POLL_MS
+            settings.pollMinutes * 60 * 1000
         );
     }
 
@@ -1568,6 +1657,9 @@
             'lectio-unread-message-styles';
 
         style.textContent = `
+            html.lectio-unread-hide-preview .${TOOLTIP_CLASS} {
+                display: none !important;
+            }
             .${HOST_CLASS} {
                 position: relative !important;
                 overflow: visible !important;

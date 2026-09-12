@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.5.1
+// @version      1.6.0
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules from one small gear panel.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
@@ -65,6 +65,7 @@
     let updatedLabelTimer = null;
     let currentView = 'all';
     let sortMode = 'category';
+    let openSettingsModuleId = null;
 
     const detected = new Map();
 
@@ -721,26 +722,36 @@
 
         const card = document.createElement('div');
         card.className = 'lectio-manager-card';
+        card.dataset.moduleId = module.id;
+        card.dataset.category = module.category;
 
         const main = document.createElement('div');
         main.className = 'lectio-manager-card-main';
 
-        const nameRow = document.createElement('div');
-        nameRow.className = 'lectio-manager-card-name';
-        nameRow.textContent = module.name;
+        const meta = document.createElement('div');
+        meta.className = 'lectio-manager-card-meta';
+
+        const category = document.createElement('span');
+        category.className = 'lectio-manager-card-category';
+        category.textContent = module.category;
+        meta.appendChild(category);
 
         if (module.audience.length) {
             const audience = document.createElement('span');
             audience.className = 'lectio-manager-card-audience';
             audience.textContent = module.audience.join(' · ');
-            nameRow.appendChild(audience);
+            meta.appendChild(audience);
         }
+
+        const nameRow = document.createElement('div');
+        nameRow.className = 'lectio-manager-card-name';
+        nameRow.textContent = module.name;
 
         const desc = document.createElement('div');
         desc.className = 'lectio-manager-card-desc';
         desc.textContent = module.description;
 
-        main.append(nameRow, desc);
+        main.append(meta, nameRow, desc);
 
         const status = document.createElement('div');
         status.className = 'lectio-manager-card-status';
@@ -759,6 +770,7 @@
                 settingsBtn.type = 'button';
                 settingsBtn.className = 'lectio-manager-settings-btn';
                 settingsBtn.textContent = 'Settings';
+                settingsBtn.setAttribute('aria-expanded', String(openSettingsModuleId === module.id));
                 settingsBtn.addEventListener('click', () => toggleSettingsPanel(card, module, registration));
                 actions.appendChild(settingsBtn);
             }
@@ -782,7 +794,10 @@
 
         const settingsContainer = document.createElement('div');
         settingsContainer.className = 'lectio-manager-settings';
-        settingsContainer.hidden = true;
+        settingsContainer.hidden = openSettingsModuleId !== module.id;
+        if (!settingsContainer.hidden && registration) {
+            renderSettingsControls(settingsContainer, module, registration);
+        }
         card.appendChild(settingsContainer);
 
         return card;
@@ -792,15 +807,30 @@
         const container = card.querySelector('.lectio-manager-settings');
         const wasHidden = container.hidden;
 
-        if (wasHidden) {
-            renderSettingsControls(container, module, registration);
+        for (const other of elements.list.querySelectorAll('.lectio-manager-settings:not([hidden])')) {
+            other.hidden = true;
+            other.closest('.lectio-manager-card')
+                ?.querySelector('.lectio-manager-settings-btn')
+                ?.setAttribute('aria-expanded', 'false');
         }
 
-        container.hidden = !wasHidden;
+        if (wasHidden) {
+            renderSettingsControls(container, module, registration);
+            openSettingsModuleId = module.id;
+            container.hidden = false;
+            card.querySelector('.lectio-manager-settings-btn')?.setAttribute('aria-expanded', 'true');
+        } else {
+            openSettingsModuleId = null;
+        }
     }
 
     function renderSettingsControls(container, module, registration) {
         container.innerHTML = '';
+
+        const heading = document.createElement('div');
+        heading.className = 'lectio-manager-settings-heading';
+        heading.textContent = 'Module settings';
+        container.appendChild(heading);
 
         for (const control of registration.settingsSchema) {
             if (!control || !isNonEmptyString(control.key) || !isNonEmptyString(control.type)) {
@@ -810,15 +840,29 @@
             const row = document.createElement('div');
             row.className = 'lectio-manager-setting-row';
 
+            const copy = document.createElement('div');
+            copy.className = 'lectio-manager-setting-copy';
+
             const label = document.createElement('label');
+            label.className = 'lectio-manager-setting-label';
             label.textContent = control.label || control.key;
-            row.appendChild(label);
+            copy.appendChild(label);
+
+            if (isNonEmptyString(control.description)) {
+                const description = document.createElement('span');
+                description.className = 'lectio-manager-setting-description';
+                description.textContent = control.description;
+                copy.appendChild(description);
+            }
+
+            row.appendChild(copy);
 
             const currentValue = registration.currentValues[control.key];
             let input;
 
             switch (control.type) {
                 case 'toggle':
+                    row.classList.add('is-toggle');
                     input = document.createElement('input');
                     input.type = 'checkbox';
                     input.checked = Boolean(currentValue);
@@ -838,12 +882,22 @@
                     break;
 
                 case 'range':
+                    row.classList.add('is-range');
                     input = document.createElement('input');
                     input.type = 'range';
                     input.min = control.min ?? 0;
                     input.max = control.max ?? 100;
                     input.step = control.step ?? 1;
                     input.value = currentValue ?? control.min ?? 0;
+                    {
+                        const value = document.createElement('output');
+                        value.className = 'lectio-manager-range-value';
+                        value.textContent = `${input.value}${control.suffix || ''}`;
+                        input.addEventListener('input', () => {
+                            value.textContent = `${input.value}${control.suffix || ''}`;
+                        });
+                        row.appendChild(value);
+                    }
                     input.addEventListener('change', () => emitSettingChange(module.id, control.key, input.value));
                     break;
 
@@ -855,14 +909,21 @@
                     break;
 
                 case 'button':
+                    row.classList.add('is-button');
                     input = document.createElement('button');
                     input.type = 'button';
-                    input.textContent = control.label || 'Run';
+                    input.textContent = control.buttonLabel || control.label || 'Run';
                     input.addEventListener('click', () => emitSettingChange(module.id, control.key, true));
                     break;
 
                 default:
                     continue;
+            }
+
+            if (input.tagName !== 'BUTTON') {
+                input.id = `lectio-manager-setting-${module.id}-${control.key}`
+                    .replace(/[^a-zA-Z0-9_-]/g, '-');
+                label.htmlFor = input.id;
             }
 
             row.appendChild(input);
@@ -1007,8 +1068,8 @@
                 position: absolute;
                 right: 0;
                 bottom: 54px;
-                width: min(340px, calc(100vw - 32px));
-                max-height: min(70vh, 520px);
+                width: min(390px, calc(100vw - 32px));
+                max-height: min(78vh, 640px);
                 display: flex;
                 flex-direction: column;
                 background: #ffffff;
@@ -1238,7 +1299,7 @@
             }
 
             .lectio-manager-view-heading {
-                padding: 8px 12px 2px;
+                padding: 10px 14px 4px;
                 font-size: 11px;
                 font-weight: 700;
                 text-transform: uppercase;
@@ -1294,7 +1355,7 @@
                 flex: 1;
                 min-height: 0;
                 overflow-y: auto;
-                padding: 6px 8px 10px;
+                padding: 6px 12px 14px;
             }
 
             .lectio-manager-loading {
@@ -1305,10 +1366,12 @@
             }
 
             .lectio-manager-category-heading {
-                margin: 6px 4px 2px;
+                margin: 12px 2px 5px;
                 font-size: 10px;
-                font-weight: 600;
-                color: #8a949c;
+                font-weight: 800;
+                color: #66767b;
+                letter-spacing: .08em;
+                text-transform: uppercase;
             }
 
             .lectio-manager-category-heading:first-child {
@@ -1316,16 +1379,51 @@
             }
 
             .lectio-manager-card {
-                padding: 8px 6px;
-                border-bottom: 1px solid #eef1f2;
+                position: relative;
+                padding: 11px 12px;
+                border: 1px solid #dde5e6;
+                border-radius: 10px;
+                background: #ffffff;
+                box-shadow: 0 1px 2px rgba(16,32,30,.04);
+                overflow: hidden;
             }
 
-            .lectio-manager-card:last-child {
-                border-bottom: none;
+            .lectio-manager-card + .lectio-manager-card {
+                margin-top: 7px;
+            }
+
+            .lectio-manager-card::before {
+                content: '';
+                position: absolute;
+                inset: 0 auto 0 0;
+                width: 3px;
+                background: #69a9a5;
+            }
+
+            .lectio-manager-card:hover {
+                border-color: #b9cbcc;
             }
 
             .lectio-manager-card-main {
-                margin-bottom: 6px;
+                margin-bottom: 9px;
+            }
+
+            .lectio-manager-card-meta {
+                display: flex;
+                align-items: center;
+                gap: 7px;
+                margin-bottom: 5px;
+            }
+
+            .lectio-manager-card-category {
+                padding: 2px 6px;
+                border-radius: 999px;
+                background: #e9f3f2;
+                color: #176766;
+                font-size: 9px;
+                font-weight: 800;
+                letter-spacing: .05em;
+                text-transform: uppercase;
             }
 
             .lectio-manager-card-name {
@@ -1337,18 +1435,18 @@
             }
 
             .lectio-manager-card-audience {
-                font-weight: 400;
-                font-size: 10px;
-                color: #5e6870;
+                font-weight: 600;
+                font-size: 9px;
+                color: #778187;
                 text-transform: uppercase;
-                letter-spacing: .02em;
+                letter-spacing: .04em;
             }
 
             .lectio-manager-card-desc {
-                margin-top: 2px;
+                margin-top: 3px;
                 font-size: 12px;
                 color: #394a57;
-                line-height: 1.35;
+                line-height: 1.4;
             }
 
             .lectio-manager-card-status {
@@ -1398,12 +1496,14 @@
             }
 
             .lectio-manager-settings {
-                margin-top: 8px;
-                padding-top: 8px;
-                border-top: 1px dashed #d6dde0;
+                margin: 10px -4px -3px;
+                padding: 10px;
+                border: 1px solid #dce9e8;
+                border-radius: 8px;
+                background: #f6f9f9;
                 display: flex;
                 flex-direction: column;
-                gap: 6px;
+                gap: 10px;
             }
 
             .lectio-manager-settings[hidden] {
@@ -1411,11 +1511,93 @@
             }
 
             .lectio-manager-setting-row {
-                display: flex;
+                display: grid;
+                grid-template-columns: minmax(0, 1fr) minmax(110px, 42%);
                 align-items: center;
-                justify-content: space-between;
-                gap: 8px;
+                gap: 10px;
                 font-size: 12px;
+            }
+
+            .lectio-manager-settings-heading {
+                font-size: 10px;
+                font-weight: 800;
+                color: #176766;
+                letter-spacing: .07em;
+                text-transform: uppercase;
+            }
+
+            .lectio-manager-setting-copy {
+                display: flex;
+                min-width: 0;
+                flex-direction: column;
+                gap: 2px;
+            }
+
+            .lectio-manager-setting-label {
+                color: #203431;
+                font-weight: 650;
+            }
+
+            .lectio-manager-setting-description {
+                color: #68767b;
+                font-size: 10px;
+                line-height: 1.3;
+            }
+
+            .lectio-manager-setting-row select,
+            .lectio-manager-setting-row input[type='text'] {
+                min-width: 0;
+                width: 100%;
+                box-sizing: border-box;
+                border: 1px solid #cbd7d9;
+                border-radius: 6px;
+                background: #ffffff;
+                color: #10201e;
+                padding: 5px 7px;
+                font: inherit;
+            }
+
+            .lectio-manager-setting-row input[type='checkbox'] {
+                justify-self: end;
+                width: 34px;
+                height: 18px;
+                accent-color: #0f6f6f;
+            }
+
+            .lectio-manager-setting-row.is-range {
+                grid-template-columns: minmax(0, 1fr) minmax(90px, 1fr) auto;
+            }
+
+            .lectio-manager-setting-row input[type='range'] {
+                grid-column: 2;
+                min-width: 0;
+                width: 100%;
+                accent-color: #0f6f6f;
+            }
+
+            .lectio-manager-range-value {
+                grid-column: 3;
+                grid-row: 1;
+                min-width: 35px;
+                color: #176766;
+                font-size: 10px;
+                font-weight: 700;
+                text-align: right;
+            }
+
+            .lectio-manager-setting-row.is-button {
+                grid-template-columns: minmax(0, 1fr) auto;
+            }
+
+            .lectio-manager-setting-row.is-button button {
+                border: 1px solid #0f6f6f;
+                border-radius: 6px;
+                background: #ffffff;
+                color: #0f6f6f;
+                padding: 5px 9px;
+                font: inherit;
+                font-weight: 700;
+                cursor: pointer;
             }
 
             @media (max-width: 420px) {

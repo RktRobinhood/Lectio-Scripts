@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio English Mode
 // @namespace    lectio-english-mode
-// @version      1.5.3
+// @version      1.6.0
 // @description  Context-aware English layer for Lectio with instant core UI translation, persistent cache and Google fallback.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-start
@@ -17,6 +17,11 @@
 (() => {
     'use strict';
 
+    const MODE_DA = 'da';
+    const MODE_EN = 'en';
+    const STORAGE_MODE = 'lectioEnglish.mode';
+    const LOG = '[Lectio English Mode]';
+
     /*
      * Lectio Manager handshake.
      * Lets the Manager show this module as installed without
@@ -25,29 +30,52 @@
     (function registerWithLectioManager() {
         const MODULE_ID = 'english-mode';
         const MODULE_NAME = 'Lectio English Mode';
-        const MODULE_VERSION = '1.5.3';
+        const MODULE_VERSION = '1.6.0';
 
         function announce() {
+            const storedMode = GM_getValue(STORAGE_MODE, MODE_DA);
+
             window.dispatchEvent(new CustomEvent('lectio-module:register', {
                 detail: {
                     id: MODULE_ID,
                     name: MODULE_NAME,
                     version: MODULE_VERSION,
-                    settingsSchema: [],
-                    currentValues: {}
+                    settingsSchema: [
+                        {
+                            key: 'language',
+                            type: 'select',
+                            label: 'Interface language',
+                            description: 'Reloads Lectio in the selected language.',
+                            options: [
+                                { value: MODE_DA, label: 'Dansk' },
+                                { value: MODE_EN, label: 'English' }
+                            ]
+                        }
+                    ],
+                    currentValues: {
+                        language: [MODE_DA, MODE_EN].includes(storedMode) ? storedMode : MODE_DA
+                    }
                 }
             }));
         }
 
+        function handleSetting(event) {
+            const detail = event?.detail;
+
+            if (detail?.id !== MODULE_ID || detail.key !== 'language' || ![MODE_DA, MODE_EN].includes(detail.value)) {
+                return;
+            }
+
+            GM_setValue(STORAGE_MODE, detail.value);
+            announce();
+            location.reload();
+        }
+
         window.addEventListener('lectio-manager:discover', announce);
+        window.addEventListener('lectio-manager:set-setting', handleSetting);
         announce();
     })();
-
-    const MODE_DA = 'da';
-    const MODE_EN = 'en';
-    const STORAGE_MODE = 'lectioEnglish.mode';
     const STORAGE_CACHE = 'lectioEnglish.learned.v5';
-    const LOG = '[Lectio English Mode]';
 
     const CFG = {
         translateReadOnlyContent: true,
