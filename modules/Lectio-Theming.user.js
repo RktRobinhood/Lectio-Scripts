@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Theming
 // @namespace    https://www.lectio.dk/
-// @version      0.9.0
+// @version      0.10.0
 // @description  Gives Lectio a soft, translucent glass shell with 26 built-in colour schemes (Catppuccin, Nord, Dracula, Cyberpunk and more), each with its own distinct background photo, and can derive a scheme from a website or image.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-start
@@ -16,7 +16,7 @@
 
     const MODULE_ID = 'lectio-theming';
     const MODULE_NAME = 'Lectio Theming';
-    const MODULE_VERSION = '0.9.0';
+    const MODULE_VERSION = '0.10.0';
     const STORAGE_KEY = 'lectioTheming.settings.v2';
     const STYLE_ID = 'lectio-theming-styles';
     const ROOT_CLASS = 'lectio-themed';
@@ -617,6 +617,14 @@
             html.${ROOT_CLASS} :where(.ls-toolbarMenuInnerContainer, .ls-std-toolbar-filled) {
                 background: color-mix(in srgb, var(--lectio-theme-surface-alt) 55%, transparent) !important;
                 color: var(--lectio-theme-text) !important;
+            }
+
+            html.${ROOT_CLASS} :where(.cke_top, .cke_bottom) {
+                background: color-mix(in srgb, var(--lectio-theme-surface-alt) 75%, transparent) !important;
+            }
+
+            html.${ROOT_CLASS} .cke_chrome {
+                border-color: color-mix(in srgb, var(--lectio-theme-muted) 25%, transparent) !important;
             }
 
             html.${ROOT_CLASS} .s2module-bg {
