@@ -22,6 +22,11 @@ Use these exact names so a new module's colors line up with every theme Lectio T
 
 Every use must supply the module's own current hard-coded value as the `var()` fallback, so the module is visually unchanged with Lectio Theming absent or disabled. Semantic status colors (success/warning/error badges meant to stay recognizable regardless of theme) are exempt — leave those hard-coded.
 
+Two pitfalls found while retrofitting the Manager, worth avoiding by construction in new modules:
+
+- **Don't theme a `<select>`'s background/text color.** A browser's open native `<option>` popup doesn't reliably inherit an author's `background`/`color` from the `<select>` across browsers and OS light/dark settings — a dark theme's light text can land on a still-light native popup and become illegible. Keep `<select>` (and `<input type="text">` next to it, for visual consistency) on a fixed, always-legible base and only theme its `border-color`.
+- **Text sitting on `--lectio-theme-accent` must not use `--lectio-theme-surface` for its color.** These are two independent theme colors with no guaranteed contrast relationship — a dark theme's dark surface can end up as dark-on-accent instead of the light-on-accent the design intended. Use a fixed `#ffffff` (or `--lectio-theme-bg`/`-text`, whichever this theme's own contrast logic actually pairs with accent — none of the shipped themes guarantee `-surface` does) for any text/icon that sits directly on an accent-colored background.
+
 ## Consequences
 
 New modules must adopt this seam from day one (see the "Adding a new module" checklist in [AGENTS.md](../../AGENTS.md)). Retrofitting it onto existing modules is being done incrementally, not required to land all at once — Lectio English Mode's DA/EN switch and Lectio Manager's panel have already been migrated as of this ADR's last update.
