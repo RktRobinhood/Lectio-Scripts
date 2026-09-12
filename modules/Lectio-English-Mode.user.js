@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio English Mode
 // @namespace    lectio-english-mode
-// @version      1.6.0
+// @version      1.7.0
 // @description  Context-aware English layer for Lectio with instant core UI translation, persistent cache and Google fallback.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-start
@@ -30,7 +30,7 @@
     (function registerWithLectioManager() {
         const MODULE_ID = 'english-mode';
         const MODULE_NAME = 'Lectio English Mode';
-        const MODULE_VERSION = '1.6.0';
+        const MODULE_VERSION = '1.7.0';
 
         function announce() {
             const storedMode = GM_getValue(STORAGE_MODE, MODE_DA);
@@ -3110,9 +3110,9 @@
                 display: flex;
                 align-items: center;
                 padding: 2px;
-                background: rgba(247,250,252,.97);
-                border: 1px solid rgba(55,90,120,.22);
-                border-radius: 4px;
+                background: color-mix(in srgb, var(--lectio-theme-surface, #f7fafc) 97%, transparent);
+                border: 1px solid color-mix(in srgb, var(--lectio-theme-accent, #375a78) 22%, transparent);
+                border-radius: var(--lectio-theme-radius, 4px);
                 box-shadow: 0 1px 3px rgba(0,0,0,.10);
                 font-family: Arial, Helvetica, sans-serif;
                 user-select: none;
@@ -3126,17 +3126,17 @@
                 border: 0;
                 border-radius: 3px;
                 background: transparent;
-                color: #35658c;
+                color: var(--lectio-theme-text, #35658c);
                 font: 700 10px/19px Arial, Helvetica, sans-serif;
                 cursor: pointer;
             }
 
             #lectio-english-switch button:hover {
-                background: rgba(53,101,140,.10);
+                background: color-mix(in srgb, var(--lectio-theme-accent, #35658c) 10%, transparent);
             }
 
             #lectio-english-switch button.active {
-                background: #35658c;
+                background: var(--lectio-theme-accent, #35658c);
                 color: #fff;
             }
 
@@ -3144,7 +3144,7 @@
                 width: 1px;
                 height: 12px;
                 margin: 0 1px;
-                background: rgba(0,0,0,.16);
+                background: color-mix(in srgb, var(--lectio-theme-text, #000) 16%, transparent);
             }
 
             #lectio-english-toast {
@@ -3155,8 +3155,8 @@
                 max-width: 360px;
                 padding: 9px 12px;
                 border-radius: 5px;
-                background: rgba(35,45,55,.94);
-                color: #fff;
+                background: color-mix(in srgb, var(--lectio-theme-surface-alt, #232d37) 94%, transparent);
+                color: var(--lectio-theme-text, #fff);
                 font: 12px/1.35 Arial, Helvetica, sans-serif;
                 box-shadow: 0 2px 12px rgba(0,0,0,.22);
             }

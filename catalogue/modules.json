@@ -9,7 +9,7 @@
       "category": "Interface",
       "audience": ["student", "teacher"],
       "status": "stable",
-      "version": "1.6.0",
+      "version": "1.7.0",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-English-Mode.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues"
     },
@@ -42,7 +42,7 @@
       "category": "Interface",
       "audience": ["student", "teacher"],
       "status": "experimental",
-      "version": "0.8.0",
+      "version": "0.9.0",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Theming.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues"
     }

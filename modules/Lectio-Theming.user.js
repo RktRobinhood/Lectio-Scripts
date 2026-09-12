@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Theming
 // @namespace    https://www.lectio.dk/
-// @version      0.8.0
+// @version      0.9.0
 // @description  Gives Lectio a soft, translucent glass shell with 26 built-in colour schemes (Catppuccin, Nord, Dracula, Cyberpunk and more), each with its own distinct background photo, and can derive a scheme from a website or image.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-start
@@ -16,7 +16,7 @@
 
     const MODULE_ID = 'lectio-theming';
     const MODULE_NAME = 'Lectio Theming';
-    const MODULE_VERSION = '0.8.0';
+    const MODULE_VERSION = '0.9.0';
     const STORAGE_KEY = 'lectioTheming.settings.v2';
     const STYLE_ID = 'lectio-theming-styles';
     const ROOT_CLASS = 'lectio-themed';
@@ -33,6 +33,17 @@
     // <body>, outside this shell) is never touched, without this module
     // needing to know that other module exists.
     const CONTENT_ROOT_SELECTOR = '#masterContent, #content, #m_Content, .ls-master-container, .ls-content-container';
+    // Shared theming seam (see ADR-0006): any other module may read these
+    // same custom properties, with its own fallback in var(--name, fallback),
+    // to follow the active theme without depending on this module being
+    // installed. Listed once so applyTheme() can also clear all of them
+    // cleanly when the theme is switched off.
+    const THEME_VARIABLE_NAMES = [
+        '--lectio-theme-bg', '--lectio-theme-surface', '--lectio-theme-surface-alt',
+        '--lectio-theme-text', '--lectio-theme-muted', '--lectio-theme-accent',
+        '--lectio-theme-accent-alt', '--lectio-theme-blend', '--lectio-theme-danger',
+        '--lectio-theme-bg-image', '--lectio-theme-radius', '--lectio-theme-space'
+    ];
 
     // Named themes carry their own authentic background/surface/text values,
     // so they keep their real character (a dark theme is meant to be dark).
@@ -405,26 +416,42 @@
         root.dataset.lectioThemeDensity = settings.density;
 
         currentPalette = resolvePalette(settings.preset, settings.mode, settings.customHues);
-        root.dataset.lectioThemePattern = currentPalette.pattern;
-        root.style.colorScheme = currentPalette.mode === 'dark' ? 'dark' : 'light';
 
-        const variables = {
-            '--lectio-theme-bg': currentPalette.background,
-            '--lectio-theme-surface': currentPalette.surface,
-            '--lectio-theme-surface-alt': currentPalette.surfaceAlt,
-            '--lectio-theme-text': currentPalette.text,
-            '--lectio-theme-muted': currentPalette.muted,
-            '--lectio-theme-accent': currentPalette.accent,
-            '--lectio-theme-accent-alt': currentPalette.accentAlt,
-            '--lectio-theme-blend': currentPalette.blend,
-            '--lectio-theme-danger': currentPalette.danger,
-            '--lectio-theme-bg-image': `url('${ASSET_BASE_URL}/${currentPalette.image}')`,
-            '--lectio-theme-radius': `${settings.radius}px`,
-            '--lectio-theme-space': settings.density === 'compact' ? '6px' : '10px'
-        };
+        // Other modules are encouraged (see ADR-0006) to read these same
+        // --lectio-theme-* custom properties, with their own hard-coded
+        // fallback in the var() call, so they pick up the active theme
+        // without depending on this module being installed or present.
+        // That seam only works cleanly if we clear these when the theme is
+        // switched off, so a sibling module's fallback kicks back in
+        // instead of it being left showing a stale, no-longer-active theme.
+        if (settings.enabled) {
+            root.dataset.lectioThemePattern = currentPalette.pattern;
+            root.style.colorScheme = currentPalette.mode === 'dark' ? 'dark' : 'light';
 
-        for (const [key, value] of Object.entries(variables)) {
-            root.style.setProperty(key, value);
+            const variables = {
+                '--lectio-theme-bg': currentPalette.background,
+                '--lectio-theme-surface': currentPalette.surface,
+                '--lectio-theme-surface-alt': currentPalette.surfaceAlt,
+                '--lectio-theme-text': currentPalette.text,
+                '--lectio-theme-muted': currentPalette.muted,
+                '--lectio-theme-accent': currentPalette.accent,
+                '--lectio-theme-accent-alt': currentPalette.accentAlt,
+                '--lectio-theme-blend': currentPalette.blend,
+                '--lectio-theme-danger': currentPalette.danger,
+                '--lectio-theme-bg-image': `url('${ASSET_BASE_URL}/${currentPalette.image}')`,
+                '--lectio-theme-radius': `${settings.radius}px`,
+                '--lectio-theme-space': settings.density === 'compact' ? '6px' : '10px'
+            };
+
+            for (const [key, value] of Object.entries(variables)) {
+                root.style.setProperty(key, value);
+            }
+        } else {
+            delete root.dataset.lectioThemePattern;
+            root.style.colorScheme = '';
+            for (const key of THEME_VARIABLE_NAMES) {
+                root.style.removeProperty(key);
+            }
         }
 
         injectStyles();
