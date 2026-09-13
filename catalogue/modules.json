@@ -31,7 +31,7 @@
       "category": "Messages",
       "audience": ["student", "teacher"],
       "status": "stable",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Unread-Message-Notifications.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues"
     },

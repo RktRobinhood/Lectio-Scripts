@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Unread Message Notifications
 // @namespace    https://www.lectio.dk/lectio/223/
-// @version      0.3.0
+// @version      0.4.0
 // @description  Shows one unread-message badge using Lectio's own unread count. Includes direct and group-addressed messages.
 // @match        https://www.lectio.dk/lectio/223/*
 // @grant        none
@@ -32,7 +32,7 @@
     (function registerWithLectioManager() {
         const MODULE_ID = 'message-notifications';
         const MODULE_NAME = 'Lectio - Unread Message Notifications';
-        const MODULE_VERSION = '0.3.0';
+        const MODULE_VERSION = '0.4.0';
 
         function announce() {
             window.dispatchEvent(new CustomEvent('lectio-module:register', {
@@ -1680,10 +1680,16 @@
                 align-items: center;
                 justify-content: center;
 
-                background: #cae6ff;
+                background: var(--lectio-theme-accent, #cae6ff);
+                /* Fixed dark navy, not a theme variable: several shipped
+                   themes have pastel/light accents (Dracula's light
+                   purple, Nord's light cyan, Rose Pine's light iris) where
+                   white text would fail, and this original dark-on-light
+                   design reads acceptably across the accent range these
+                   themes actually use. */
                 color: #001e2f;
 
-                border: 1px solid #c1c7ce;
+                border: 1px solid var(--lectio-theme-muted, #c1c7ce);
 
                 border-radius:
                     0.38rem
@@ -1730,7 +1736,7 @@
 
                 border-top:
                     .28rem solid
-                    #cae6ff;
+                    var(--lectio-theme-accent, #cae6ff);
 
                 border-right:
                     .28rem solid
@@ -1806,14 +1812,14 @@
                 gap: .48rem;
 
                 background:
-                    #f5f8fb;
+                    var(--lectio-theme-surface, #f5f8fb);
 
                 color:
-                    #001e2f;
+                    var(--lectio-theme-text, #001e2f);
 
                 border:
                     1px solid
-                    #c1c7ce;
+                    var(--lectio-theme-muted, #c1c7ce);
 
                 border-radius:
                     .5rem;
@@ -1866,7 +1872,7 @@
 
                 border-bottom:
                     1px solid
-                    #d3dae0;
+                    var(--lectio-theme-muted, #d3dae0);
 
                 font-weight:
                     700;
@@ -1928,7 +1934,7 @@
                     nowrap;
 
                 color:
-                    #394a57;
+                    var(--lectio-theme-muted, #394a57);
             }
 
             .lectio-unread-tooltip-fallback {
@@ -1938,7 +1944,7 @@
                     .2rem;
 
                 color:
-                    #5e6870;
+                    var(--lectio-theme-muted, #5e6870);
 
                 font-size:
                     .76rem;
@@ -1955,10 +1961,10 @@
 
                 border-top:
                     1px solid
-                    #d3dae0;
+                    var(--lectio-theme-muted, #d3dae0);
 
                 color:
-                    #5e6870;
+                    var(--lectio-theme-muted, #5e6870);
 
                 font-size:
                     .72rem;
