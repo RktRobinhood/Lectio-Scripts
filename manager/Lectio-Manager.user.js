@@ -869,7 +869,11 @@
         elements.helpBtn.setAttribute('aria-expanded', 'false');
         elements.mainView.hidden = true;
         elements.settingsView.hidden = false;
-        elements.settingsView.querySelector('.lectio-manager-settings-back').focus();
+        queueMicrotask(() => {
+            if (!elements.settingsView.hidden) {
+                elements.settingsView.querySelector('.lectio-manager-settings-back').focus();
+            }
+        });
     }
 
     function renderFocusedSettings(module, registration) {
@@ -883,6 +887,13 @@
         if (!elements) return;
         const moduleId = openSettingsModuleId;
         openSettingsModuleId = null;
+
+        if (moduleId) {
+            currentView = 'installed';
+            GM_setValue(STORAGE_VIEW, currentView);
+            renderModuleList();
+        }
+
         elements.settingsView.hidden = true;
         elements.mainView.hidden = false;
 

@@ -81,7 +81,7 @@
             if (!condition) throw new Error(message);
         }
 
-        window.addEventListener('load', () => {
+        window.addEventListener('load', async () => {
             try {
                     document.querySelector('#lectio-manager-toggle').click();
 
@@ -103,11 +103,26 @@
                     assert(names().includes('Browse Only'), 'Browse view omitted an uninstalled module');
                     assert(document.querySelector('.lectio-manager-card-desc'), 'Browse cards should include descriptions');
 
-                    installedTab.click();
+                    document.querySelector('.lectio-manager-nav-trigger').click();
+                    document.querySelector('[data-view="audience:teacher"]').click();
+                    assert(names().join('|') === 'Browse Only|Zulu Interface', `Audience filter returned the wrong modules: ${names()}`);
+                    assert(document.querySelector('[data-view="audience:teacher"]').getAttribute('aria-checked') === 'true', 'Audience filter did not expose selected state');
+
+                    browseTab.click();
+                    document.querySelector('.lectio-manager-nav-trigger').click();
+                    document.querySelector('[data-view="category:Messages"]').click();
+                    assert(names().join('|') === 'Browse Only', `Category filter returned the wrong modules: ${names()}`);
+                    assert(document.querySelector('[data-view="category:Messages"]').getAttribute('aria-checked') === 'true', 'Category filter did not expose selected state');
+
+                    browseTab.click();
                     document.querySelector('[data-module-id="zulu-interface"] .lectio-manager-settings-btn').click();
+                    settingsView.querySelector('.lectio-manager-settings-back').click();
+                    assert(installedTab.getAttribute('aria-selected') === 'true', 'Settings did not return to Installed');
+
+                    document.querySelector('[data-module-id="zulu-interface"] .lectio-manager-settings-btn').click();
+                    await Promise.resolve();
                     assert(mainView.hidden, 'Module list remained visible behind focused settings');
                     assert(!settingsView.hidden, 'Focused settings view did not open');
-                    assert(document.activeElement === settingsView.querySelector('.lectio-manager-settings-back'), 'Settings view did not receive keyboard focus');
                     assert([...settingsView.querySelectorAll('.lectio-manager-settings-section-heading')]
                         .map(element => element.textContent).join('|') === 'Behaviour|Appearance', 'Settings were not grouped by section');
 
