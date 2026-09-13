@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Schedule Summary
 // @namespace    https://www.lectio.dk/
-// @version      0.1.0
+// @version      0.1.1
 // @description  Collapses the schedule's week information into a compact, previewable summary strip.
 // @match        https://www.lectio.dk/lectio/*/SkemaNy.aspx*
 // @grant        none
@@ -15,7 +15,7 @@
 
     const MODULE_ID = 'schedule-summary';
     const MODULE_NAME = 'Lectio - Schedule Summary';
-    const MODULE_VERSION = '0.1.0';
+    const MODULE_VERSION = '0.1.1';
     const STYLE_ID = 'lectio-schedule-summary-styles';
     const ENHANCED_ATTRIBUTE = 'data-lectio-schedule-summary';
     const lifecycle = new AbortController();
@@ -45,6 +45,7 @@
         return english
             ? {
                 summary: 'Week information',
+                compactSummary: 'Info',
                 show: 'Show',
                 hide: 'Hide',
                 oneDay: '1 day',
@@ -53,6 +54,7 @@
             }
             : {
                 summary: 'Ugeinformation',
+                compactSummary: 'Info',
                 show: 'Vis',
                 hide: 'Skjul',
                 oneDay: '1 dag',
@@ -140,36 +142,37 @@
             .lectio-schedule-summary__cell {
                 position: relative;
                 padding: 0 !important;
-                background: var(--lectio-theme-surface-alt, #eef1f2);
-                color: var(--lectio-theme-text, #10201e);
+                background: color-mix(in srgb, var(--lectio-theme-surface-alt, #eef1f2) 42%, transparent);
+                color: var(--lectio-theme-muted, #5e6870);
             }
 
             .lectio-schedule-summary__toggle {
                 align-items: center;
-                background: transparent;
-                border: 1px solid var(--lectio-theme-muted, #d6dde0);
-                border-radius: max(4px, var(--lectio-theme-radius, 10px));
-                color: var(--lectio-theme-text, #10201e);
+                background: color-mix(in srgb, var(--lectio-theme-surface-alt, #eef1f2) 22%, transparent);
+                border: 1px solid color-mix(in srgb, var(--lectio-theme-muted, #d6dde0) 48%, transparent);
+                border-radius: max(3px, calc(var(--lectio-theme-radius, 10px) / 2));
+                color: var(--lectio-theme-muted, #5e6870);
                 cursor: pointer;
                 display: flex;
-                font: 600 12px/1.2 Roboto, Arial, sans-serif;
-                gap: 7px;
+                font: 400 10.5px/1.1 Roboto, Arial, sans-serif;
+                gap: 4px;
                 justify-content: center;
-                min-height: 30px;
-                padding: 5px 12px;
+                min-height: 22px;
+                padding: 2px 8px;
                 width: 100%;
             }
 
             .lectio-schedule-summary__toggle:hover,
             .lectio-schedule-summary__toggle:focus-visible {
-                background: var(--lectio-theme-surface, #ffffff);
-                border-color: var(--lectio-theme-accent, #0f6f6f);
+                background: color-mix(in srgb, var(--lectio-theme-surface, #ffffff) 58%, transparent);
+                border-color: color-mix(in srgb, var(--lectio-theme-accent, #0f6f6f) 38%, var(--lectio-theme-muted, #d6dde0));
+                color: var(--lectio-theme-text, #10201e);
                 outline: none;
             }
 
             .lectio-schedule-summary__chevron {
-                color: var(--lectio-theme-accent, #0f6f6f);
-                font-size: 15px;
+                color: var(--lectio-theme-muted, #5e6870);
+                font-size: 10px;
                 line-height: 1;
             }
 
@@ -258,7 +261,8 @@
         toggle.setAttribute('aria-controls', informationRowId);
         toggle.setAttribute('aria-describedby', tooltip.id);
         toggle.setAttribute('aria-expanded', 'false');
-        label.textContent = `${localizedLabels.summary} · ${dayCount} · ${localizedLabels.show}`;
+        toggle.setAttribute('aria-label', `${localizedLabels.show} ${localizedLabels.summary.toLowerCase()}`);
+        label.textContent = `${localizedLabels.compactSummary} · ${dayCount}`;
         chevron.className = 'lectio-schedule-summary__chevron';
         chevron.setAttribute('aria-hidden', 'true');
         chevron.textContent = '▾';
@@ -275,11 +279,12 @@
             const nextExpanded = !expanded;
 
             toggle.setAttribute('aria-expanded', String(nextExpanded));
+            toggle.setAttribute(
+                'aria-label',
+                `${nextExpanded ? localizedLabels.hide : localizedLabels.show} ${localizedLabels.summary.toLowerCase()}`
+            );
             informationRow.hidden = !nextExpanded;
             summaryRow.classList.toggle('is-expanded', nextExpanded);
-            label.textContent = nextExpanded
-                ? `${localizedLabels.summary} · ${localizedLabels.hide}`
-                : `${localizedLabels.summary} · ${dayCount} · ${localizedLabels.show}`;
             chevron.textContent = nextExpanded ? '▴' : '▾';
         }, { signal: lifecycle.signal });
     }

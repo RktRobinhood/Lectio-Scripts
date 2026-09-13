@@ -57,6 +57,12 @@
                 if (!tooltip.querySelector('a[href="#activity-2"]')) throw new Error('tooltip omits original links');
                 if (!tooltip.querySelector('.note-icon')) throw new Error('tooltip omits original icons');
                 if (window.registeredModule?.id !== 'schedule-summary') throw new Error('module did not register with the Manager');
+                if (!toggle.textContent.includes('Info · 2 dage')) throw new Error('summary label is not concise');
+                if (/\bVis\b/.test(toggle.textContent)) throw new Error('summary label contains redundant action text');
+
+                const toggleStyle = getComputedStyle(toggle);
+                if (parseFloat(toggleStyle.minHeight) > 24) throw new Error('summary control is too tall');
+                if (!['400', 'normal'].includes(toggleStyle.fontWeight)) throw new Error('summary control is too bold');
 
                 toggle.focus();
                 if (getComputedStyle(tooltip).display === 'none') throw new Error('tooltip is not visible from the summary control');
