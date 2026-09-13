@@ -66,6 +66,10 @@
 
                 toggle.focus();
                 if (getComputedStyle(tooltip).display === 'none') throw new Error('tooltip is not visible from the summary control');
+                const originalInformationCell = informationRow.querySelector('td:nth-child(2)');
+                const tooltipFontSize = parseFloat(getComputedStyle(tooltip).fontSize);
+                const originalFontSize = parseFloat(getComputedStyle(originalInformationCell).fontSize);
+                if (tooltipFontSize > originalFontSize * 0.85) throw new Error('tooltip content was not scaled down by about 20%');
                 toggle.blur();
 
                 toggle.click();

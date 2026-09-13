@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Schedule Summary
 // @namespace    https://www.lectio.dk/
-// @version      0.1.1
+// @version      0.1.2
 // @description  Collapses the schedule's week information into a compact, previewable summary strip.
 // @match        https://www.lectio.dk/lectio/*/SkemaNy.aspx*
 // @grant        none
@@ -15,7 +15,7 @@
 
     const MODULE_ID = 'schedule-summary';
     const MODULE_NAME = 'Lectio - Schedule Summary';
-    const MODULE_VERSION = '0.1.1';
+    const MODULE_VERSION = '0.1.2';
     const STYLE_ID = 'lectio-schedule-summary-styles';
     const ENHANCED_ATTRIBUTE = 'data-lectio-schedule-summary';
     const lifecycle = new AbortController();
@@ -183,9 +183,11 @@
                 box-shadow: 0 10px 28px color-mix(in srgb, var(--lectio-theme-muted, #5e6870) 28%, transparent);
                 color: var(--lectio-theme-text, #10201e);
                 display: none;
-                gap: 12px;
+                font-size: 80%;
+                gap: 10px;
                 left: 0;
-                padding: 12px;
+                line-height: 1.2;
+                padding: 10px;
                 position: absolute;
                 right: 0;
                 text-align: left;
@@ -210,7 +212,7 @@
 
             .lectio-schedule-summary__tooltip strong {
                 color: var(--lectio-theme-accent, #0f6f6f);
-                margin-bottom: 4px;
+                margin-bottom: 3px;
             }
 
             .lectio-schedule-summary__tooltip-content {
