@@ -25,7 +25,7 @@ A module's answer to Discovery — it reports its id, name, version, and (option
 _Avoid_: handshake reply, check-in.
 
 **Settings Schema**:
-The set of generic controls (toggles, dropdowns, ranges, text fields, buttons) a module declares so the Manager can render an options panel for it, without the Manager ever knowing what those options mean or do.
+The set of generic controls (toggles, dropdowns, ranges, text fields, buttons) a module declares so the Manager can render an options panel for it, without the Manager ever knowing what those options mean or do. A control may include a `section` label so related settings are grouped in the focused settings view; schemas without sections remain valid.
 _Avoid_: config, preferences, options panel (these describe the rendered result, not the mechanism).
 
 **School**:

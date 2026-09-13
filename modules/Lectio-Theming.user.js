@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Theming
 // @namespace    https://www.lectio.dk/
-// @version      0.11.0
+// @version      0.12.0
 // @description  Gives Lectio a soft, translucent glass shell with 26 built-in colour schemes (Catppuccin, Nord, Dracula, Cyberpunk and more), each with its own distinct background photo, and can derive a scheme from a website or image.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-start
@@ -16,7 +16,7 @@
 
     const MODULE_ID = 'lectio-theming';
     const MODULE_NAME = 'Lectio Theming';
-    const MODULE_VERSION = '0.11.0';
+    const MODULE_VERSION = '0.12.0';
     const STORAGE_KEY = 'lectioTheming.settings.v2';
     const STYLE_ID = 'lectio-theming-styles';
     const ROOT_CLASS = 'lectio-themed';
@@ -230,16 +230,16 @@
                 version: MODULE_VERSION,
                 settingsSchema: [
                     {
-                        key: 'enabled', type: 'toggle', label: 'Theme enabled',
+                        key: 'enabled', type: 'toggle', label: 'Theme enabled', section: 'Theme',
                         description: 'Switch the visual layer on or off.'
                     },
                     {
-                        key: 'preset', type: 'select', label: 'Theme',
+                        key: 'preset', type: 'select', label: 'Theme', section: 'Theme',
                         description: 'Pick a built-in colour scheme, or Imported palette for your own colours.',
                         options: PRESET_OPTIONS
                     },
                     {
-                        key: 'mode', type: 'select', label: 'Light or dark (imported palette)',
+                        key: 'mode', type: 'select', label: 'Light or dark (imported palette)', section: 'Custom palette',
                         description: 'Only affects the imported palette below — built-in themes keep their own light or dark look.',
                         options: [
                             { value: 'light', label: 'Light' },
@@ -247,27 +247,27 @@
                         ]
                     },
                     {
-                        key: 'sourceUrl', type: 'text', label: 'Palette source',
+                        key: 'sourceUrl', type: 'text', label: 'Palette source', section: 'Custom palette',
                         description: 'Paste an https image or website URL.'
                     },
                     {
-                        key: 'applySource', type: 'button', label: 'Import colours',
+                        key: 'applySource', type: 'button', label: 'Import colours', section: 'Custom palette',
                         description: 'Sample the image or colours used by the website.', buttonLabel: 'Import'
                     },
                     {
-                        key: 'chooseImage', type: 'button', label: 'Local image',
+                        key: 'chooseImage', type: 'button', label: 'Local image', section: 'Custom palette',
                         description: 'Choose an image from this device. It never leaves the browser.', buttonLabel: 'Choose image'
                     },
                     {
-                        key: 'radius', type: 'range', label: 'Corner radius',
+                        key: 'radius', type: 'range', label: 'Corner radius', section: 'Appearance',
                         description: 'Round panels and controls.', min: 4, max: 20, step: 1, suffix: 'px'
                     },
                     {
-                        key: 'blur', type: 'toggle', label: 'Glass blur',
+                        key: 'blur', type: 'toggle', label: 'Glass blur', section: 'Appearance',
                         description: 'Use translucent, blurred navigation surfaces.'
                     },
                     {
-                        key: 'density', type: 'select', label: 'Spacing',
+                        key: 'density', type: 'select', label: 'Spacing', section: 'Appearance',
                         description: 'Choose compact or roomier controls.',
                         options: [
                             { value: 'compact', label: 'Compact' },
@@ -275,7 +275,7 @@
                         ]
                     },
                     {
-                        key: 'resetTheme', type: 'button', label: 'Reset theme',
+                        key: 'resetTheme', type: 'button', label: 'Reset theme', section: 'Reset',
                         description: 'Restore the Catppuccin Latte defaults.', buttonLabel: 'Reset'
                     }
                 ],

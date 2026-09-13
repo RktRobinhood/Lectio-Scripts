@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.8.0
+// @version      1.9.0
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules from one small gear panel.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
@@ -63,7 +63,7 @@
     let refreshing = false;
     let elements = null;
     let updatedLabelTimer = null;
-    let currentView = 'all';
+    let currentView = 'installed';
     let sortMode = 'category';
     let openSettingsModuleId = null;
 
@@ -87,7 +87,7 @@
 
         catalogue = loadCachedCatalogue();
         lastRefresh = Number(GM_getValue(STORAGE_LAST_REFRESH, 0)) || 0;
-        currentView = normalizeView(GM_getValue(STORAGE_VIEW, 'all'));
+        currentView = normalizeView(GM_getValue(STORAGE_VIEW, 'installed'));
         sortMode = normalizeSortMode(GM_getValue(STORAGE_SORT_MODE, 'category'));
 
         buildUI();
@@ -309,8 +309,7 @@
 
     function getViewLabel(view) {
         if (view === 'installed') {
-            const count = catalogue ? catalogue.modules.filter((module) => detected.has(module.id)).length : 0;
-            return `Installed (${count})`;
+            return 'Installed';
         }
 
         if (view.startsWith(AUDIENCE_VIEW_PREFIX)) {
@@ -380,23 +379,47 @@
                 <div class="lectio-manager-help-panel" hidden>
                     To disable, update, or remove a script: click the Tampermonkey icon in your browser toolbar, then choose <strong>Dashboard</strong>. Every installed script is managed from there - the Manager itself can only install and describe modules.
                 </div>
-                <div class="lectio-manager-refreshed-row">
-                    <span class="lectio-manager-refreshed-label"></span>
+                <div id="lectio-manager-main-view" class="lectio-manager-main-view">
+                    <div class="lectio-manager-tip" hidden>
+                        <span class="lectio-manager-tip-text">Get automatic updates: open Tampermonkey &rarr; Settings &rarr; enable "Check for updates".</span>
+                        <button type="button" class="lectio-manager-tip-dismiss" aria-label="Dismiss tip">&times;</button>
+                    </div>
+                    <div class="lectio-manager-tabs" role="tablist" aria-label="Modules">
+                        <button type="button" class="lectio-manager-tab" data-primary-view="installed" role="tab" aria-controls="lectio-manager-main-view" aria-selected="true">
+                            Installed <span class="lectio-manager-installed-count"></span>
+                        </button>
+                        <button type="button" class="lectio-manager-tab" data-primary-view="all" role="tab" aria-controls="lectio-manager-main-view" aria-selected="false">Browse</button>
+                    </div>
+                    <div class="lectio-manager-nav">
+                        <button type="button" class="lectio-manager-nav-trigger" aria-haspopup="true" aria-expanded="false">
+                            <span class="lectio-manager-nav-current">All modules</span>
+                            ${chevronSvg()}
+                        </button>
+                        <div class="lectio-manager-nav-menu" role="menu" hidden></div>
+                    </div>
+                    <div class="lectio-manager-error" hidden></div>
+                    <div class="lectio-manager-list-toolbar">
+                        <div class="lectio-manager-view-heading"></div>
+                        <div class="lectio-manager-sort" aria-label="Sort modules">
+                            <button type="button" data-sort="category">Category</button>
+                            <button type="button" data-sort="name">A&ndash;Z</button>
+                        </div>
+                    </div>
+                    <div class="lectio-manager-list"></div>
                 </div>
-                <div class="lectio-manager-tip" hidden>
-                    <span class="lectio-manager-tip-text">Get automatic updates: open Tampermonkey &rarr; Settings &rarr; enable "Check for updates".</span>
-                    <button type="button" class="lectio-manager-tip-dismiss" aria-label="Dismiss tip">&times;</button>
+                <div class="lectio-manager-settings-view" hidden>
+                    <div class="lectio-manager-settings-view-header">
+                        <button type="button" class="lectio-manager-settings-back">&larr; Installed</button>
+                        <div class="lectio-manager-settings-title-row">
+                            <div>
+                                <span class="lectio-manager-settings-category"></span>
+                                <strong class="lectio-manager-settings-title"></strong>
+                            </div>
+                            <span class="lectio-manager-settings-version"></span>
+                        </div>
+                    </div>
+                    <div class="lectio-manager-settings-body"></div>
                 </div>
-                <div class="lectio-manager-nav">
-                    <button type="button" class="lectio-manager-nav-trigger" aria-haspopup="true" aria-expanded="false">
-                        <span class="lectio-manager-nav-current">All modules</span>
-                        ${chevronSvg()}
-                    </button>
-                    <div class="lectio-manager-nav-menu" role="menu" hidden></div>
-                </div>
-                <div class="lectio-manager-error" hidden></div>
-                <div class="lectio-manager-view-heading"></div>
-                <div class="lectio-manager-list"></div>
                 <div class="lectio-manager-footer">
                     <a class="lectio-manager-footer-link" href="${ISSUES_URL}" target="_blank" rel="noopener noreferrer">Report a bug or idea</a>
                 </div>
@@ -417,6 +440,8 @@
         const navCurrent = root.querySelector('.lectio-manager-nav-current');
         const tipBanner = root.querySelector('.lectio-manager-tip');
         const tipDismissBtn = root.querySelector('.lectio-manager-tip-dismiss');
+        const mainView = root.querySelector('.lectio-manager-main-view');
+        const settingsView = root.querySelector('.lectio-manager-settings-view');
 
         helpBtn.addEventListener('click', () => {
             const willShow = helpPanel.hidden;
@@ -459,18 +484,29 @@
                 GM_setValue(STORAGE_VIEW, currentView);
                 closeNavMenu();
                 renderModuleList();
-                return;
-            }
-
-            const sortItem = event.target.closest('[data-sort]');
-
-            if (sortItem) {
-                sortMode = normalizeSortMode(sortItem.dataset.sort);
-                GM_setValue(STORAGE_SORT_MODE, sortMode);
-                closeNavMenu();
-                renderModuleList();
             }
         });
+
+        root.querySelector('.lectio-manager-tabs').addEventListener('click', (event) => {
+            const tab = event.target.closest('[data-primary-view]');
+            if (!tab) return;
+
+            currentView = normalizeView(tab.dataset.primaryView);
+            GM_setValue(STORAGE_VIEW, currentView);
+            closeNavMenu();
+            renderModuleList();
+        });
+
+        root.querySelector('.lectio-manager-sort').addEventListener('click', (event) => {
+            const sortItem = event.target.closest('[data-sort]');
+            if (!sortItem) return;
+
+            sortMode = normalizeSortMode(sortItem.dataset.sort);
+            GM_setValue(STORAGE_SORT_MODE, sortMode);
+            renderModuleList();
+        });
+
+        root.querySelector('.lectio-manager-settings-back').addEventListener('click', showMainView);
 
         document.addEventListener('click', (event) => {
             if (!elements) {
@@ -498,6 +534,11 @@
                 return;
             }
 
+            if (!elements.settingsView.hidden) {
+                showMainView();
+                return;
+            }
+
             closePanel();
         });
 
@@ -508,9 +549,20 @@
             navTrigger,
             navMenu,
             navCurrent,
+            nav: root.querySelector('.lectio-manager-nav'),
+            tabs: [...root.querySelectorAll('.lectio-manager-tab')],
+            installedCount: root.querySelector('.lectio-manager-installed-count'),
+            sortButtons: [...root.querySelectorAll('.lectio-manager-sort [data-sort]')],
+            mainView,
+            settingsView,
+            settingsBody: root.querySelector('.lectio-manager-settings-body'),
+            settingsTitle: root.querySelector('.lectio-manager-settings-title'),
+            settingsCategory: root.querySelector('.lectio-manager-settings-category'),
+            settingsVersion: root.querySelector('.lectio-manager-settings-version'),
+            helpBtn,
+            helpPanel,
             list: root.querySelector('.lectio-manager-list'),
             viewHeading: root.querySelector('.lectio-manager-view-heading'),
-            refreshedLabel: root.querySelector('.lectio-manager-refreshed-label'),
             errorBox: root.querySelector('.lectio-manager-error')
         };
     }
@@ -522,6 +574,7 @@
 
         elements.panel.setAttribute('hidden', '');
         closeNavMenu();
+        showMainView({ restoreFocus: false });
     }
 
     function toggleNavMenu() {
@@ -556,6 +609,7 @@
         }
 
         renderNavMenu();
+        renderPrimaryTabs();
 
         const { list, viewHeading } = elements;
         list.innerHTML = '';
@@ -574,6 +628,12 @@
         viewHeading.textContent = modules.length
             ? `${getViewLabel(currentView)} · ${modules.length}`
             : getViewLabel(currentView);
+
+        for (const button of elements.sortButtons) {
+            const active = button.dataset.sort === sortMode;
+            button.classList.toggle('is-active', active);
+            button.setAttribute('aria-pressed', String(active));
+        }
 
         if (!modules.length) {
             const empty = document.createElement('div');
@@ -598,6 +658,32 @@
 
             list.appendChild(buildModuleCard(module));
         }
+
+        if (openSettingsModuleId) {
+            const module = catalogue.modules.find((entry) => entry.id === openSettingsModuleId);
+            const registration = detected.get(openSettingsModuleId);
+            if (module && registration) {
+                renderFocusedSettings(module, registration);
+            } else {
+                showMainView();
+            }
+        }
+    }
+
+    function renderPrimaryTabs() {
+        const installedCount = catalogue
+            ? catalogue.modules.filter((module) => detected.has(module.id)).length
+            : 0;
+        const primaryView = currentView === 'installed' ? 'installed' : 'all';
+
+        elements.installedCount.textContent = String(installedCount);
+        for (const tab of elements.tabs) {
+            const active = tab.dataset.primaryView === primaryView;
+            tab.classList.toggle('is-active', active);
+            tab.setAttribute('aria-selected', String(active));
+        }
+
+        elements.nav.hidden = primaryView === 'installed';
     }
 
     function getFilteredSortedModules() {
@@ -645,16 +731,11 @@
             ? [...new Set(catalogue.modules.map((module) => module.category))].sort((a, b) => a.localeCompare(b))
             : [];
 
-        const installedCount = catalogue
-            ? catalogue.modules.filter((module) => detected.has(module.id)).length
-            : 0;
-
         navMenu.innerHTML = '';
 
         const topGroup = document.createElement('div');
         topGroup.className = 'lectio-manager-nav-group';
         topGroup.appendChild(buildNavMenuItem('all', 'All modules'));
-        topGroup.appendChild(buildNavMenuItem('installed', `Installed (${installedCount})`));
         navMenu.appendChild(topGroup);
 
         const audienceGroup = document.createElement('div');
@@ -675,13 +756,6 @@
 
             navMenu.appendChild(categoryGroup);
         }
-
-        const sortGroup = document.createElement('div');
-        sortGroup.className = 'lectio-manager-nav-group';
-        sortGroup.appendChild(buildNavGroupLabel('Sort'));
-        sortGroup.appendChild(buildSortMenuItem('category', 'Category'));
-        sortGroup.appendChild(buildSortMenuItem('name', 'Name (A-Z)'));
-        navMenu.appendChild(sortGroup);
 
         navCurrent.textContent = getViewLabel(currentView);
     }
@@ -705,23 +779,13 @@
         return item;
     }
 
-    function buildSortMenuItem(mode, label) {
-        const item = document.createElement('button');
-        item.type = 'button';
-        item.className = 'lectio-manager-nav-item';
-        item.dataset.sort = mode;
-        item.setAttribute('role', 'menuitemradio');
-        item.setAttribute('aria-checked', String(mode === sortMode));
-        item.classList.toggle('is-active', mode === sortMode);
-        item.textContent = label;
-        return item;
-    }
-
     function buildModuleCard(module) {
         const registration = detected.get(module.id);
+        const compact = currentView === 'installed';
 
         const card = document.createElement('div');
         card.className = 'lectio-manager-card';
+        card.classList.toggle('is-compact', compact);
         card.dataset.moduleId = module.id;
         card.dataset.category = module.category;
 
@@ -736,7 +800,7 @@
         category.textContent = module.category;
         meta.appendChild(category);
 
-        if (module.audience.length) {
+        if (!compact && module.audience.length) {
             const audience = document.createElement('span');
             audience.className = 'lectio-manager-card-audience';
             audience.textContent = module.audience.join(' · ');
@@ -751,7 +815,10 @@
         desc.className = 'lectio-manager-card-desc';
         desc.textContent = module.description;
 
-        main.append(meta, nameRow, desc);
+        main.append(meta, nameRow);
+        if (!compact) {
+            main.appendChild(desc);
+        }
 
         const status = document.createElement('div');
         status.className = 'lectio-manager-card-status';
@@ -770,8 +837,7 @@
                 settingsBtn.type = 'button';
                 settingsBtn.className = 'lectio-manager-settings-btn';
                 settingsBtn.textContent = 'Settings';
-                settingsBtn.setAttribute('aria-expanded', String(openSettingsModuleId === module.id));
-                settingsBtn.addEventListener('click', () => toggleSettingsPanel(card, module, registration));
+                settingsBtn.addEventListener('click', () => showSettingsView(module, registration));
                 actions.appendChild(settingsBtn);
             }
         } else {
@@ -792,49 +858,69 @@
         status.appendChild(actions);
         card.append(main, status);
 
-        const settingsContainer = document.createElement('div');
-        settingsContainer.className = 'lectio-manager-settings';
-        settingsContainer.hidden = openSettingsModuleId !== module.id;
-        if (!settingsContainer.hidden && registration) {
-            renderSettingsControls(settingsContainer, module, registration);
-        }
-        card.appendChild(settingsContainer);
-
         return card;
     }
 
-    function toggleSettingsPanel(card, module, registration) {
-        const container = card.querySelector('.lectio-manager-settings');
-        const wasHidden = container.hidden;
+    function showSettingsView(module, registration) {
+        openSettingsModuleId = module.id;
+        renderFocusedSettings(module, registration);
+        closeNavMenu();
+        elements.helpPanel.hidden = true;
+        elements.helpBtn.setAttribute('aria-expanded', 'false');
+        elements.mainView.hidden = true;
+        elements.settingsView.hidden = false;
+        elements.settingsView.querySelector('.lectio-manager-settings-back').focus();
+    }
 
-        for (const other of elements.list.querySelectorAll('.lectio-manager-settings:not([hidden])')) {
-            other.hidden = true;
-            other.closest('.lectio-manager-card')
-                ?.querySelector('.lectio-manager-settings-btn')
-                ?.setAttribute('aria-expanded', 'false');
-        }
+    function renderFocusedSettings(module, registration) {
+        elements.settingsTitle.textContent = module.name;
+        elements.settingsCategory.textContent = module.category;
+        elements.settingsVersion.textContent = `v${registration.version || module.version}`;
+        renderSettingsControls(elements.settingsBody, module, registration);
+    }
 
-        if (wasHidden) {
-            renderSettingsControls(container, module, registration);
-            openSettingsModuleId = module.id;
-            container.hidden = false;
-            card.querySelector('.lectio-manager-settings-btn')?.setAttribute('aria-expanded', 'true');
-        } else {
-            openSettingsModuleId = null;
+    function showMainView({ restoreFocus = true } = {}) {
+        if (!elements) return;
+        const moduleId = openSettingsModuleId;
+        openSettingsModuleId = null;
+        elements.settingsView.hidden = true;
+        elements.mainView.hidden = false;
+
+        if (restoreFocus && moduleId) {
+            elements.list
+                .querySelector(`[data-module-id="${CSS.escape(moduleId)}"] .lectio-manager-settings-btn`)
+                ?.focus();
         }
     }
 
     function renderSettingsControls(container, module, registration) {
         container.innerHTML = '';
-
-        const heading = document.createElement('div');
-        heading.className = 'lectio-manager-settings-heading';
-        heading.textContent = 'Module settings';
-        container.appendChild(heading);
+        const sections = new Map();
 
         for (const control of registration.settingsSchema) {
             if (!control || !isNonEmptyString(control.key) || !isNonEmptyString(control.type)) {
                 continue;
+            }
+
+            const sectionName = isNonEmptyString(control.section) ? control.section.trim() : '';
+            let section = sections.get(sectionName);
+
+            if (!section) {
+                section = document.createElement('section');
+                section.className = 'lectio-manager-settings-section';
+
+                if (sectionName) {
+                    const heading = document.createElement('h3');
+                    heading.className = 'lectio-manager-settings-section-heading';
+                    heading.textContent = sectionName;
+                    section.appendChild(heading);
+                }
+
+                const rows = document.createElement('div');
+                rows.className = 'lectio-manager-settings-section-rows';
+                section.appendChild(rows);
+                sections.set(sectionName, section);
+                container.appendChild(section);
             }
 
             const row = document.createElement('div');
@@ -927,7 +1013,7 @@
             }
 
             row.appendChild(input);
-            container.appendChild(row);
+            section.querySelector('.lectio-manager-settings-section-rows').appendChild(row);
         }
     }
 
@@ -940,25 +1026,24 @@
             return;
         }
 
-        const label = elements.refreshedLabel;
-
         if (!lastRefresh) {
-            label.textContent = 'Not refreshed yet';
-            label.title = '';
+            elements.refreshBtn.title = 'Refresh catalogue — not refreshed yet';
+            elements.refreshBtn.setAttribute('aria-label', 'Refresh catalogue — not refreshed yet');
             return;
         }
-
-        label.title = new Date(lastRefresh).toLocaleString();
 
         window.clearTimeout(updatedLabelTimer);
 
         if (justUpdated) {
-            label.textContent = 'Updated just now';
+            elements.refreshBtn.title = 'Catalogue updated just now';
+            elements.refreshBtn.setAttribute('aria-label', 'Catalogue updated just now');
             updatedLabelTimer = window.setTimeout(() => {
-                label.textContent = `Last refreshed: ${formatTime(lastRefresh)}`;
+                updateRefreshedLabel({ justUpdated: false });
             }, 5000);
         } else {
-            label.textContent = `Last refreshed: ${formatTime(lastRefresh)}`;
+            const status = `Last refreshed: ${formatTime(lastRefresh)}`;
+            elements.refreshBtn.title = `Refresh catalogue — ${status}`;
+            elements.refreshBtn.setAttribute('aria-label', `Refresh catalogue — ${status}`);
         }
     }
 
@@ -1195,16 +1280,60 @@
                 to { transform: rotate(360deg); }
             }
 
-            .lectio-manager-refreshed-row {
+            .lectio-manager-main-view,
+            .lectio-manager-settings-view {
+                display: flex;
+                flex: 1;
+                min-height: 0;
+                flex-direction: column;
+            }
+
+            .lectio-manager-main-view[hidden],
+            .lectio-manager-settings-view[hidden] {
+                display: none !important;
+            }
+
+            .lectio-manager-tabs {
+                display: flex;
+                gap: 2px;
                 padding: 6px 12px 0;
-                font-size: 11px;
+                border-bottom: 1px solid var(--lectio-theme-muted, #eef1f2);
+            }
+
+            .lectio-manager-tab {
+                flex: 1;
+                border: none;
+                border-bottom: 2px solid transparent;
+                background: transparent;
                 color: var(--lectio-theme-muted, #5e6870);
+                cursor: pointer;
+                font: inherit;
+                font-size: 12px;
+                font-weight: 650;
+                padding: 7px 10px 6px;
+            }
+
+            .lectio-manager-tab:hover {
+                color: var(--lectio-theme-text, #10201e);
+            }
+
+            .lectio-manager-tab.is-active {
+                border-bottom-color: var(--lectio-theme-accent, #0f6f6f);
+                color: var(--lectio-theme-accent, #0f6f6f);
+            }
+
+            .lectio-manager-installed-count {
+                color: var(--lectio-theme-muted, #5e6870);
+                font-size: 10px;
             }
 
             .lectio-manager-nav {
                 position: relative;
-                padding: 6px 12px;
-                border-bottom: 1px solid var(--lectio-theme-muted, #eef1f2);
+                padding: 6px 12px 0;
+            }
+
+            .lectio-manager-nav[hidden] {
+                display: none !important;
             }
 
             .lectio-manager-nav-trigger {
@@ -1309,13 +1438,47 @@
                 font-weight: 700;
             }
 
+            .lectio-manager-list-toolbar {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                justify-content: space-between;
+                padding: 8px 12px 4px;
+            }
+
             .lectio-manager-view-heading {
-                padding: 10px 14px 4px;
                 font-size: 11px;
                 font-weight: 700;
                 text-transform: uppercase;
                 letter-spacing: .03em;
                 color: var(--lectio-theme-muted, #5e6870);
+            }
+
+            .lectio-manager-sort {
+                display: flex;
+                overflow: hidden;
+                border: 1px solid var(--lectio-theme-muted, #d6dde0);
+                border-radius: 6px;
+            }
+
+            .lectio-manager-sort button {
+                border: none;
+                background: var(--lectio-theme-surface, #ffffff);
+                color: var(--lectio-theme-muted, #5e6870);
+                cursor: pointer;
+                font: inherit;
+                font-size: 10px;
+                padding: 3px 7px;
+            }
+
+            .lectio-manager-sort button + button {
+                border-left: 1px solid var(--lectio-theme-muted, #d6dde0);
+            }
+
+            .lectio-manager-sort button.is-active {
+                background: var(--lectio-theme-surface-alt, #eef3f6);
+                color: var(--lectio-theme-accent, #0f6f6f);
+                font-weight: 700;
             }
 
             .lectio-manager-tip {
@@ -1419,6 +1582,14 @@
                 margin-bottom: 9px;
             }
 
+            .lectio-manager-card.is-compact {
+                padding-block: 8px;
+            }
+
+            .lectio-manager-card.is-compact .lectio-manager-card-main {
+                margin-bottom: 6px;
+            }
+
             .lectio-manager-card-meta {
                 display: flex;
                 align-items: center;
@@ -1506,19 +1677,86 @@
                 background: var(--lectio-theme-surface-alt, #e8f3f3);
             }
 
-            .lectio-manager-settings {
-                margin: 10px -4px -3px;
-                padding: 10px;
-                border: 1px solid var(--lectio-theme-muted, #dce9e8);
-                border-radius: 8px;
-                background: var(--lectio-theme-surface-alt, #f6f9f9);
+            .lectio-manager-settings-view-header {
+                padding: 8px 12px 10px;
+                border-bottom: 1px solid var(--lectio-theme-muted, #eef1f2);
+            }
+
+            .lectio-manager-settings-back {
+                border: none;
+                background: transparent;
+                color: var(--lectio-theme-accent, #0f6f6f);
+                cursor: pointer;
+                font: inherit;
+                font-size: 11px;
+                font-weight: 650;
+                padding: 2px 0 7px;
+            }
+
+            .lectio-manager-settings-title-row {
                 display: flex;
-                flex-direction: column;
+                align-items: center;
+                justify-content: space-between;
                 gap: 10px;
             }
 
-            .lectio-manager-settings[hidden] {
-                display: none !important;
+            .lectio-manager-settings-title-row > div {
+                display: flex;
+                min-width: 0;
+                flex-direction: column;
+                gap: 2px;
+            }
+
+            .lectio-manager-settings-category {
+                color: var(--lectio-theme-accent, #0f6f6f);
+                font-size: 9px;
+                font-weight: 800;
+                letter-spacing: .05em;
+                text-transform: uppercase;
+            }
+
+            .lectio-manager-settings-title {
+                color: var(--lectio-theme-text, #10201e);
+                font-size: 14px;
+            }
+
+            .lectio-manager-settings-version {
+                color: var(--lectio-theme-muted, #5e6870);
+                font-size: 10px;
+            }
+
+            .lectio-manager-settings-body {
+                display: flex;
+                min-height: 0;
+                flex: 1;
+                flex-direction: column;
+                gap: 9px;
+                overflow-y: auto;
+                padding: 10px 12px 14px;
+            }
+
+            .lectio-manager-settings-section {
+                border: 1px solid var(--lectio-theme-muted, #dce9e8);
+                border-radius: 8px;
+                background: var(--lectio-theme-surface-alt, #f6f9f9);
+                overflow: hidden;
+            }
+
+            .lectio-manager-settings-section-heading {
+                margin: 0;
+                padding: 8px 10px 0;
+                color: var(--lectio-theme-accent, #176766);
+                font-size: 10px;
+                font-weight: 800;
+                letter-spacing: .07em;
+                text-transform: uppercase;
+            }
+
+            .lectio-manager-settings-section-rows {
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
+                padding: 9px 10px 10px;
             }
 
             .lectio-manager-setting-row {
@@ -1527,14 +1765,6 @@
                 align-items: center;
                 gap: 10px;
                 font-size: 12px;
-            }
-
-            .lectio-manager-settings-heading {
-                font-size: 10px;
-                font-weight: 800;
-                color: var(--lectio-theme-accent, #176766);
-                letter-spacing: .07em;
-                text-transform: uppercase;
             }
 
             .lectio-manager-setting-copy {

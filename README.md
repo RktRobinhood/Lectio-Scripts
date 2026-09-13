@@ -36,7 +36,8 @@ They run locally in your browser while you use Lectio. Install only the modules 
 - lets you **install** a module with one click, using Tampermonkey's own install screen,
 - shows whether a module is currently **detected as running**,
 - caches the catalogue locally and refreshes it automatically at most once every 24 hours, with a manual refresh button whenever you want the latest list,
-- has a single **navigation menu** (tap the row under "Last refreshed") for moving between All modules, Installed, an audience (Student / Teacher), or a category — plus a Category/Name sort — so the panel stays navigable as the module library grows,
+- opens on a compact **Installed** tab, with a separate **Browse** tab for discovering every available module and filtering by audience or category,
+- sorts either tab by Category or Name immediately, without interrupting navigation,
 - has one **wrench button** in the header that opens Tampermonkey's own dashboard directly, for disabling, updating, or removing any script — since that dashboard already lists everything installed, there's no need for a separate button per module,
 - has a **Report a bug or idea** link at the bottom of the panel, straight to this repository's GitHub Issue templates.
 
@@ -88,7 +89,7 @@ You can install one, several, or all of them, either through the Manager or by c
 
 Each module keeps its own version and updates independently of the Manager and of every other module.
 
-Installed modules can expose their own settings in the Manager. Open Lectio Tools, find an installed module, and choose **Settings**. The Manager only renders these controls; each independent module owns and applies its values.
+Installed modules can expose their own settings in the Manager. Open Lectio Tools, find an installed module, and choose **Settings** to open its focused, sectioned settings view. The Manager only renders these controls; each independent module owns and applies its values.
 
 For Lectio Theming, pick a **Theme** from 26 built-in colour schemes (Catppuccin, Nord, Dracula, Gruvbox, Solarized, Tokyo Night, Rosé Pine, Everforest, One Dark, Monokai Pro, Ayu, Kanagawa, Nightfox, Oxocarbon, Material Ocean, GitHub, Cyberpunk Neon, Synthwave '84, and more) — each keeps its own authentic light or dark look and its own distinct background photo (see [assets/theming/CREDITS.md](assets/theming/CREDITS.md) for sources). To use your own colours instead, choose **Imported palette**, then paste an HTTPS image or website URL into **Palette source** and choose **Import**, or use **Choose image** for a local file that never leaves the browser; the **Light or dark** setting only affects this imported palette. Direct image URLs give the most predictable result; website imports use colours found in the page and up to six linked stylesheets.
 

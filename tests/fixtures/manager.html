@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio Manager fixture</title>
+</head>
+<body>
+    <script>
+        const catalogue = {
+            schemaVersion: 1,
+            generatedAt: '2026-09-13T00:00:00.000Z',
+            modules: [
+                {
+                    id: 'zulu-interface',
+                    name: 'Zulu Interface',
+                    description: 'Installed module sorted first by category.',
+                    category: 'Interface',
+                    audience: ['student', 'teacher'],
+                    status: 'stable',
+                    version: '1.0.0',
+                    installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Zulu.user.js'
+                },
+                {
+                    id: 'alpha-timetable',
+                    name: 'Alpha Timetable',
+                    description: 'Installed module sorted first by name.',
+                    category: 'Timetable',
+                    audience: ['student'],
+                    status: 'stable',
+                    version: '1.0.0',
+                    installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Alpha.user.js'
+                },
+                {
+                    id: 'browse-only',
+                    name: 'Browse Only',
+                    description: 'Module that is not installed.',
+                    category: 'Messages',
+                    audience: ['teacher'],
+                    status: 'stable',
+                    version: '1.0.0',
+                    installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Browse.user.js'
+                }
+            ]
+        };
+
+        const storage = new Map([
+            ['lectioManager.catalogue.v1', JSON.stringify(catalogue)],
+            ['lectioManager.lastRefresh.v1', Date.now()],
+            ['lectioManager.updateTipDismissed.v1', true]
+        ]);
+
+        window.GM_getValue = (key, fallback) => storage.has(key) ? storage.get(key) : fallback;
+        window.GM_setValue = (key, value) => storage.set(key, value);
+        window.GM_xmlhttpRequest = () => {};
+
+        window.addEventListener('lectio-manager:discover', () => {
+            for (const module of catalogue.modules.slice(0, 2)) {
+                window.dispatchEvent(new CustomEvent('lectio-module:register', {
+                    detail: {
+                        id: module.id,
+                        name: module.name,
+                        version: module.version,
+                        settingsSchema: module.id === 'zulu-interface' ? [
+                            { key: 'enabled', type: 'toggle', label: 'Enabled', section: 'Behaviour' },
+                            { key: 'density', type: 'select', label: 'Spacing', section: 'Appearance', options: ['compact', 'comfortable'] }
+                        ] : [],
+                        currentValues: { enabled: true, density: 'compact' }
+                    }
+                }));
+            }
+        });
+    </script>
+    <script src="../../manager/Lectio-Manager.user.js"></script>
+    <script>
+        function names() {
+            return [...document.querySelectorAll('.lectio-manager-card-name')]
+                .map(element => element.textContent.trim());
+        }
+
+        function assert(condition, message) {
+            if (!condition) throw new Error(message);
+        }
+
+        window.addEventListener('load', () => {
+            try {
+                    document.querySelector('#lectio-manager-toggle').click();
+
+                    const mainView = document.querySelector('.lectio-manager-main-view');
+                    const settingsView = document.querySelector('.lectio-manager-settings-view');
+                    const installedTab = document.querySelector('[data-primary-view="installed"]');
+                    const browseTab = document.querySelector('[data-primary-view="all"]');
+
+                    assert(installedTab.getAttribute('aria-selected') === 'true', 'Installed is not the primary view');
+                    assert(names().join('|') === 'Zulu Interface|Alpha Timetable', `Unexpected installed order: ${names()}`);
+                    assert(!document.querySelector('.lectio-manager-card-desc'), 'Installed cards should be compact');
+
+                    document.querySelector('[data-sort="name"]').click();
+                    assert(names().join('|') === 'Alpha Timetable|Zulu Interface', `Name sort did not update immediately: ${names()}`);
+                    assert(document.querySelector('[data-sort="name"]'), 'Sort controls disappeared after sorting');
+
+                    browseTab.click();
+                    assert(browseTab.getAttribute('aria-selected') === 'true', 'Browse tab did not activate');
+                    assert(names().includes('Browse Only'), 'Browse view omitted an uninstalled module');
+                    assert(document.querySelector('.lectio-manager-card-desc'), 'Browse cards should include descriptions');
+
+                    installedTab.click();
+                    document.querySelector('[data-module-id="zulu-interface"] .lectio-manager-settings-btn').click();
+                    assert(mainView.hidden, 'Module list remained visible behind focused settings');
+                    assert(!settingsView.hidden, 'Focused settings view did not open');
+                    assert(document.activeElement === settingsView.querySelector('.lectio-manager-settings-back'), 'Settings view did not receive keyboard focus');
+                    assert([...settingsView.querySelectorAll('.lectio-manager-settings-section-heading')]
+                        .map(element => element.textContent).join('|') === 'Behaviour|Appearance', 'Settings were not grouped by section');
+
+                    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+                    assert(!mainView.hidden && settingsView.hidden, 'Escape did not restore the module list');
+
+                    document.querySelector('[data-module-id="zulu-interface"] .lectio-manager-settings-btn').click();
+                    settingsView.querySelector('.lectio-manager-settings-back').click();
+                    assert(!mainView.hidden && settingsView.hidden, 'Back did not restore the module list');
+
+                document.documentElement.dataset.testResult = 'pass';
+            } catch (error) {
+                document.documentElement.dataset.testResult = `fail: ${error.message}`;
+            }
+        });
+    </script>
+</body>
+</html>
