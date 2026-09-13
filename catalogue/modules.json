@@ -25,6 +25,17 @@
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues"
     },
     {
+      "id": "schedule-summary",
+      "name": "Schedule Summary",
+      "description": "Collapses the schedule's week information into a compact strip with a hover preview and click-to-expand control.",
+      "category": "Timetable",
+      "audience": ["student", "teacher"],
+      "status": "experimental",
+      "version": "0.1.0",
+      "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Schedule-Summary.user.js",
+      "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues"
+    },
+    {
       "id": "message-notifications",
       "name": "Unread Message Notifications",
       "description": "Shows an unread-message badge beside Beskeder / Messages. Currently limited to Lectio school 223.",

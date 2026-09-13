@@ -68,6 +68,7 @@ All modules are designed for Lectio and are intended to work across Lectio insta
 |---|---|---|
 | **[English Mode](modules/Lectio-English-Mode.user.js)** | Adds a **DA / EN** switch and translates the Lectio interface into context-aware English. | Students and staff |
 | **[Chairs Up](modules/Lectio-Chairs-Up.user.js)** | Marks a lesson when it is the **last booking of the day in that room**. | Teachers |
+| **[Schedule Summary](modules/Lectio-Schedule-Summary.user.js)** | Collapses the schedule's tall **week-information row** into a compact strip; hover to preview it or click to expand it. | Students and staff |
 | **[Unread Message Notifications](modules/Lectio-Unread-Message-Notifications.user.js)** | Shows an unread-message badge beside **Beskeder / Messages**. Currently limited to Lectio school `223`. | Students and staff at that school |
 | **[Lectio Theming](modules/Lectio-Theming.user.js)** | Applies a soft, translucent glass shell with **26 built-in colour schemes** (Catppuccin, Nord, Dracula, Cyberpunk and more), each with its own distinct background photo, or derive your own from an **image or website URL**. | Students and staff |
 
@@ -152,6 +153,7 @@ Current raw files:
 - [Lectio Manager — Raw](https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/manager/Lectio-Manager.user.js)
 - [English Mode — Raw](https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-English-Mode.user.js)
 - [Chairs Up — Raw](https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Chairs-Up.user.js)
+- [Schedule Summary — Raw](https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Schedule-Summary.user.js)
 - [Unread Message Notifications — Raw](https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Unread-Message-Notifications.user.js)
 - [Lectio Theming — Raw](https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Theming.user.js)
 
@@ -510,6 +512,7 @@ Lectio-Scripts/
 ├── modules/
 │   ├── Lectio-English-Mode.user.js
 │   ├── Lectio-Chairs-Up.user.js
+│   ├── Lectio-Schedule-Summary.user.js
 │   └── Lectio-Unread-Message-Notifications.user.js
 ├── assets/
 ├── .github/                         Issue templates

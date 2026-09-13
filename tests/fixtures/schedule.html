@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio schedule fixture</title>
+</head>
+<body>
+    <table id="s_m_Content_Content_SkemaNyMedNavigation_skema_skematabel">
+        <tbody>
+            <tr class="s2dayHeader">
+                <td></td>
+                <td>Mandag (14/9)</td>
+                <td>Tirsdag (15/9)</td>
+            </tr>
+            <tr id="week-information">
+                <td class="s2infoHeader s2skemabrikcontainer"></td>
+                <td class="s2infoHeader s2skemabrikcontainer">
+                    <a href="#activity-1">•2i: IA in Bio/Physics/sport</a><br>
+                    <a href="#activity-2">•Danmarkstur 3g</a><br>
+                    <a href="#information-1">07:55-08:00 Information</a>
+                </td>
+                <td class="s2infoHeader s2skemabrikcontainer">
+                    <a href="#activity-3">•2hf: KS-projekt</a><br>
+                    <a href="#information-2">07:55-08:00 Information</a>
+                </td>
+            </tr>
+            <tr>
+                <td><div class="s2module-info">1. modul<br>8:15 - 9:25</div></td>
+                <td><div class="s2skemabrikcontainer"><a class="s2skemabrik s2brik">1i TOK/1</a></div></td>
+                <td><div class="s2skemabrikcontainer"></div></td>
+            </tr>
+        </tbody>
+    </table>
+
+    <script>
+        window.registeredModule = null;
+        window.addEventListener('lectio-module:register', (event) => {
+            window.registeredModule = event.detail;
+        });
+    </script>
+    <script src="../../modules/Lectio-Schedule-Summary.user.js"></script>
+    <script>
+        window.addEventListener('load', () => {
+            const result = document.createElement('pre');
+            result.id = 'test-result';
+
+            try {
+                const informationRow = document.querySelector('#week-information');
+                const toggle = document.querySelector('.lectio-schedule-summary__toggle');
+                const tooltip = document.querySelector('[role="tooltip"]');
+
+                if (!toggle) throw new Error('summary toggle was not added');
+                if (!informationRow.hidden) throw new Error('information row is not collapsed initially');
+                if (toggle.getAttribute('aria-expanded') !== 'false') throw new Error('collapsed state is not announced');
+                if (!tooltip.textContent.includes('Mandag (14/9)')) throw new Error('tooltip omits the weekday');
+                if (!tooltip.textContent.includes('Danmarkstur 3g')) throw new Error('tooltip omits information content');
+                if (window.registeredModule?.id !== 'schedule-summary') throw new Error('module did not register with the Manager');
+
+                toggle.click();
+                if (informationRow.hidden) throw new Error('click did not expand the information row');
+                if (toggle.getAttribute('aria-expanded') !== 'true') throw new Error('expanded state is not announced');
+
+                toggle.click();
+                if (!informationRow.hidden) throw new Error('second click did not collapse the information row');
+
+                result.dataset.testResult = 'pass';
+                result.textContent = 'PASS';
+            } catch (error) {
+                result.dataset.testResult = 'fail';
+                result.textContent = `FAIL: ${error.message}`;
+            }
+
+            document.body.appendChild(result);
+        });
+    </script>
+</body>
+</html>
