@@ -62,10 +62,10 @@
     }
 
     function normalizedText(element) {
-        const copy = element.cloneNode(true);
-        copy.querySelectorAll('br').forEach(br => br.replaceWith('\n'));
+        const clone = element.cloneNode(true);
+        clone.querySelectorAll('br').forEach(br => br.replaceWith('\n'));
 
-        return (copy.textContent || '')
+        return (clone.textContent || '')
             .split('\n')
             .map(line => line.replace(/\s+/g, ' ').trim())
             .filter(Boolean)
@@ -86,14 +86,26 @@
         return table?.querySelector('tr.s2dayHeader') || null;
     }
 
-    function ensureId(element, suffix) {
-        if (!element.id) {
-            element.id = `lectio-schedule-summary-${suffix}`;
+    function ensureInformationRowId(informationRow) {
+        if (!informationRow.id) {
+            informationRow.id = 'lectio-schedule-summary-information';
         }
-        return element.id;
+        return informationRow.id;
     }
 
-    function buildTooltip(informationRow, dayHeaderRow, copy) {
+    function cloneCellContents(cell) {
+        const content = document.createElement('div');
+        content.className = 'lectio-schedule-summary__tooltip-content';
+
+        [...cell.childNodes].forEach(node => {
+            content.appendChild(node.cloneNode(true));
+        });
+        content.querySelectorAll('[id]').forEach(element => element.removeAttribute('id'));
+
+        return content;
+    }
+
+    function buildTooltip(informationRow, dayHeaderRow, localizedLabels) {
         const tooltip = document.createElement('div');
         tooltip.className = 'lectio-schedule-summary__tooltip';
         tooltip.id = 'lectio-schedule-summary-tooltip';
@@ -108,11 +120,10 @@
 
             const section = document.createElement('section');
             const heading = document.createElement('strong');
-            const content = document.createElement('span');
-            const dayName = normalizedText(dayCells[index]) || copy.fallbackDay(index);
+            const content = cloneCellContents(cell);
+            const dayName = normalizedText(dayCells[index]) || localizedLabels.fallbackDay(index);
 
             heading.textContent = dayName;
-            content.textContent = text;
             section.append(heading, content);
             tooltip.appendChild(section);
         });
@@ -189,8 +200,8 @@
                 min-width: 0;
             }
 
-            .lectio-schedule-summary__tooltip strong,
-            .lectio-schedule-summary__tooltip span {
+            .lectio-schedule-summary__tooltip section > strong,
+            .lectio-schedule-summary__tooltip-content {
                 display: block;
             }
 
@@ -199,10 +210,14 @@
                 margin-bottom: 4px;
             }
 
-            .lectio-schedule-summary__tooltip span {
+            .lectio-schedule-summary__tooltip-content {
                 color: var(--lectio-theme-text, #10201e);
                 font-weight: 400;
                 white-space: pre-line;
+            }
+
+            .lectio-schedule-summary__tooltip-content a {
+                color: var(--lectio-theme-accent, #0f6f6f);
             }
 
             @media (max-width: 700px) {
@@ -219,21 +234,21 @@
         const informationRow = findInformationRow();
         if (!informationRow || informationRow.hasAttribute(ENHANCED_ATTRIBUTE)) return;
 
-        const copy = labels();
+        const localizedLabels = labels();
         const dayHeaderRow = findDayHeaderRow(informationRow);
         const populatedDays = [...informationRow.cells]
             .filter(cell => normalizedText(cell)).length;
         const dayCount = populatedDays === 1
-            ? copy.oneDay
-            : copy.manyDays(populatedDays);
+            ? localizedLabels.oneDay
+            : localizedLabels.manyDays(populatedDays);
 
         const summaryRow = document.createElement('tr');
         const summaryCell = document.createElement('td');
         const toggle = document.createElement('button');
         const label = document.createElement('span');
         const chevron = document.createElement('span');
-        const tooltip = buildTooltip(informationRow, dayHeaderRow, copy);
-        const informationRowId = ensureId(informationRow, 'information');
+        const tooltip = buildTooltip(informationRow, dayHeaderRow, localizedLabels);
+        const informationRowId = ensureInformationRowId(informationRow);
 
         summaryRow.className = 'lectio-schedule-summary__row';
         summaryCell.className = 'lectio-schedule-summary__cell';
@@ -243,7 +258,7 @@
         toggle.setAttribute('aria-controls', informationRowId);
         toggle.setAttribute('aria-describedby', tooltip.id);
         toggle.setAttribute('aria-expanded', 'false');
-        label.textContent = `${copy.summary} · ${dayCount} · ${copy.show}`;
+        label.textContent = `${localizedLabels.summary} · ${dayCount} · ${localizedLabels.show}`;
         chevron.className = 'lectio-schedule-summary__chevron';
         chevron.setAttribute('aria-hidden', 'true');
         chevron.textContent = '▾';
@@ -263,8 +278,8 @@
             informationRow.hidden = !nextExpanded;
             summaryRow.classList.toggle('is-expanded', nextExpanded);
             label.textContent = nextExpanded
-                ? `${copy.summary} · ${copy.hide}`
-                : `${copy.summary} · ${dayCount} · ${copy.show}`;
+                ? `${localizedLabels.summary} · ${localizedLabels.hide}`
+                : `${localizedLabels.summary} · ${dayCount} · ${localizedLabels.show}`;
             chevron.textContent = nextExpanded ? '▴' : '▾';
         }, { signal: lifecycle.signal });
     }

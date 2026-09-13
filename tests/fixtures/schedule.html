@@ -16,7 +16,7 @@
                 <td class="s2infoHeader s2skemabrikcontainer"></td>
                 <td class="s2infoHeader s2skemabrikcontainer">
                     <a href="#activity-1">•2i: IA in Bio/Physics/sport</a><br>
-                    <a href="#activity-2">•Danmarkstur 3g</a><br>
+                    <a href="#activity-2">•Danmarkstur 3g <span class="note-icon" aria-label="Note">□</span></a><br>
                     <a href="#information-1">07:55-08:00 Information</a>
                 </td>
                 <td class="s2infoHeader s2skemabrikcontainer">
@@ -54,7 +54,13 @@
                 if (toggle.getAttribute('aria-expanded') !== 'false') throw new Error('collapsed state is not announced');
                 if (!tooltip.textContent.includes('Mandag (14/9)')) throw new Error('tooltip omits the weekday');
                 if (!tooltip.textContent.includes('Danmarkstur 3g')) throw new Error('tooltip omits information content');
+                if (!tooltip.querySelector('a[href="#activity-2"]')) throw new Error('tooltip omits original links');
+                if (!tooltip.querySelector('.note-icon')) throw new Error('tooltip omits original icons');
                 if (window.registeredModule?.id !== 'schedule-summary') throw new Error('module did not register with the Manager');
+
+                toggle.focus();
+                if (getComputedStyle(tooltip).display === 'none') throw new Error('tooltip is not visible from the summary control');
+                toggle.blur();
 
                 toggle.click();
                 if (informationRow.hidden) throw new Error('click did not expand the information row');
