@@ -106,15 +106,17 @@
                     document.querySelector('.lectio-manager-nav-trigger').click();
                     document.querySelector('[data-view="audience:teacher"]').click();
                     assert(names().join('|') === 'Browse Only|Zulu Interface', `Audience filter returned the wrong modules: ${names()}`);
+                    assert(!document.querySelector('.lectio-manager-nav-menu').hidden, 'Filter menu closed after changing the Audience filter');
+                    assert(document.querySelector('.lectio-manager-nav-trigger').getAttribute('aria-expanded') === 'true', 'Filter trigger did not remain expanded after changing the Audience filter');
                     assert(document.querySelector('[data-view="audience:teacher"]').getAttribute('aria-checked') === 'true', 'Audience filter did not expose selected state');
-
-                    browseTab.click();
-                    document.querySelector('.lectio-manager-nav-trigger').click();
                     document.querySelector('[data-view="category:Messages"]').click();
                     assert(names().join('|') === 'Browse Only', `Category filter returned the wrong modules: ${names()}`);
+                    assert(!document.querySelector('.lectio-manager-nav-menu').hidden, 'Filter menu closed after changing the Category filter');
+                    assert(document.querySelector('.lectio-manager-nav-current').textContent === 'Messages', 'Active filter label did not update while the menu remained open');
                     assert(document.querySelector('[data-view="category:Messages"]').getAttribute('aria-checked') === 'true', 'Category filter did not expose selected state');
 
                     browseTab.click();
+                    assert(document.querySelector('.lectio-manager-nav-menu').hidden, 'Switching primary tabs did not close the filter menu');
                     document.querySelector('[data-module-id="zulu-interface"] .lectio-manager-settings-btn').click();
                     settingsView.querySelector('.lectio-manager-settings-back').click();
                     assert(installedTab.getAttribute('aria-selected') === 'true', 'Settings did not return to Installed');

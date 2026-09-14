@@ -480,9 +480,9 @@
             const viewItem = event.target.closest('[data-view]');
 
             if (viewItem) {
+                event.stopPropagation();
                 currentView = normalizeView(viewItem.dataset.view);
                 GM_setValue(STORAGE_VIEW, currentView);
-                closeNavMenu();
                 renderModuleList();
             }
         });
