@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Theming
 // @namespace    https://www.lectio.dk/
-// @version      0.12.0
+// @version      0.13.0
 // @description  Gives Lectio a soft, translucent glass shell with 26 built-in colour schemes (Catppuccin, Nord, Dracula, Cyberpunk and more), each with its own distinct background photo, and can derive a scheme from a website or image.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-start
@@ -16,7 +16,7 @@
 
     const MODULE_ID = 'lectio-theming';
     const MODULE_NAME = 'Lectio Theming';
-    const MODULE_VERSION = '0.12.0';
+    const MODULE_VERSION = '0.13.0';
     const STORAGE_KEY = 'lectioTheming.settings.v2';
     const STYLE_ID = 'lectio-theming-styles';
     const ROOT_CLASS = 'lectio-themed';
@@ -221,6 +221,8 @@
 
     window.addEventListener('lectio-manager:discover', announce);
     window.addEventListener('lectio-manager:set-setting', handleSetting);
+    window.addEventListener('lectio-manager:preview-setting', handleSettingPreview);
+    window.addEventListener('lectio-manager:clear-setting-preview', handleSettingPreviewClear);
 
     function announce() {
         window.dispatchEvent(new CustomEvent('lectio-module:register', {
@@ -235,7 +237,8 @@
                     },
                     {
                         key: 'preset', type: 'select', label: 'Theme', section: 'Theme',
-                        description: 'Pick a built-in colour scheme, or Imported palette for your own colours.',
+                        description: 'Hover to preview a built-in colour scheme, then choose it to keep it.',
+                        previewOnHover: true,
                         options: PRESET_OPTIONS
                     },
                     {
@@ -343,6 +346,20 @@
         announce();
     }
 
+    function handleSettingPreview(event) {
+        const detail = event?.detail;
+        if (detail?.id !== MODULE_ID || detail.key !== 'preset' || !PRESET_KEYS.includes(detail.value)) {
+            return;
+        }
+        applyTheme({ preset: detail.value });
+    }
+
+    function handleSettingPreviewClear(event) {
+        const detail = event?.detail;
+        if (detail?.id !== MODULE_ID || detail.key !== 'preset') return;
+        applyTheme();
+    }
+
     function loadSettings() {
         try {
             const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
@@ -409,13 +426,14 @@
         };
     }
 
-    function applyTheme() {
+    function applyTheme(overrides = {}) {
         const root = document.documentElement;
-        root.classList.toggle(ROOT_CLASS, settings.enabled);
-        root.classList.toggle('lectio-theme-blur', settings.blur);
-        root.dataset.lectioThemeDensity = settings.density;
+        const effectiveSettings = { ...settings, ...overrides };
+        root.classList.toggle(ROOT_CLASS, effectiveSettings.enabled);
+        root.classList.toggle('lectio-theme-blur', effectiveSettings.blur);
+        root.dataset.lectioThemeDensity = effectiveSettings.density;
 
-        currentPalette = resolvePalette(settings.preset, settings.mode, settings.customHues);
+        currentPalette = resolvePalette(effectiveSettings.preset, effectiveSettings.mode, effectiveSettings.customHues);
 
         // Other modules are encouraged (see ADR-0006) to read these same
         // --lectio-theme-* custom properties, with their own hard-coded
@@ -424,7 +442,7 @@
         // That seam only works cleanly if we clear these when the theme is
         // switched off, so a sibling module's fallback kicks back in
         // instead of it being left showing a stale, no-longer-active theme.
-        if (settings.enabled) {
+        if (effectiveSettings.enabled) {
             root.dataset.lectioThemePattern = currentPalette.pattern;
             root.style.colorScheme = currentPalette.mode === 'dark' ? 'dark' : 'light';
 
@@ -439,8 +457,8 @@
                 '--lectio-theme-blend': currentPalette.blend,
                 '--lectio-theme-danger': currentPalette.danger,
                 '--lectio-theme-bg-image': `url('${ASSET_BASE_URL}/${currentPalette.image}')`,
-                '--lectio-theme-radius': `${settings.radius}px`,
-                '--lectio-theme-space': settings.density === 'compact' ? '6px' : '10px'
+                '--lectio-theme-radius': `${effectiveSettings.radius}px`,
+                '--lectio-theme-space': effectiveSettings.density === 'compact' ? '6px' : '10px'
             };
 
             for (const [key, value] of Object.entries(variables)) {

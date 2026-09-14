@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Unread Message Notifications
 // @namespace    https://www.lectio.dk/lectio/223/
-// @version      0.4.0
+// @version      0.5.0
 // @description  Shows one unread-message badge using Lectio's own unread count. Includes direct and group-addressed messages.
 // @match        https://www.lectio.dk/lectio/223/*
 // @grant        none
@@ -16,7 +16,8 @@
     const SETTINGS_KEY = 'lectioUnreadMessages.settings.v1';
     const DEFAULT_SETTINGS = {
         pollMinutes: 10,
-        showPreview: true
+        showPreview: true,
+        bubbleScale: 100
     };
     let settings = loadSettings();
     let pollTimer = null;
@@ -32,7 +33,7 @@
     (function registerWithLectioManager() {
         const MODULE_ID = 'message-notifications';
         const MODULE_NAME = 'Lectio - Unread Message Notifications';
-        const MODULE_VERSION = '0.4.0';
+        const MODULE_VERSION = '0.5.0';
 
         function announce() {
             window.dispatchEvent(new CustomEvent('lectio-module:register', {
@@ -59,11 +60,22 @@
                             type: 'toggle',
                             label: 'Message preview',
                             description: 'Show recent unread messages when hovering the badge.'
+                        },
+                        {
+                            key: 'bubbleScale',
+                            type: 'range',
+                            label: 'Bubble size',
+                            description: 'Scale the unread-message bubble to suit your screen.',
+                            min: 75,
+                            max: 175,
+                            step: 5,
+                            suffix: '%'
                         }
                     ],
                     currentValues: {
                         pollMinutes: String(settings.pollMinutes),
-                        showPreview: settings.showPreview
+                        showPreview: settings.showPreview,
+                        bubbleScale: settings.bubbleScale
                     }
                 }
             }));
@@ -81,6 +93,11 @@
                 startPolling();
             } else if (detail.key === 'showPreview') {
                 settings.showPreview = Boolean(detail.value);
+                applySettingsToPage();
+            } else if (detail.key === 'bubbleScale') {
+                const bubbleScale = normalizeBubbleScale(detail.value, null);
+                if (bubbleScale === null) return;
+                settings.bubbleScale = bubbleScale;
                 applySettingsToPage();
             } else {
                 return;
@@ -106,7 +123,8 @@
                 pollMinutes,
                 showPreview: typeof parsed.showPreview === 'boolean'
                     ? parsed.showPreview
-                    : DEFAULT_SETTINGS.showPreview
+                    : DEFAULT_SETTINGS.showPreview,
+                bubbleScale: normalizeBubbleScale(parsed.bubbleScale, DEFAULT_SETTINGS.bubbleScale)
             };
         } catch (_) {
             return { ...DEFAULT_SETTINGS };
@@ -126,6 +144,57 @@
             'lectio-unread-hide-preview',
             !settings.showPreview
         );
+        document.documentElement.style.setProperty(
+            '--lectio-unread-badge-scale',
+            String(settings.bubbleScale / 100)
+        );
+        updateBadgeContrast();
+    }
+
+    function normalizeBubbleScale(value, fallback) {
+        if (value === null || value === '' || !Number.isFinite(Number(value))) return fallback;
+        return Math.min(175, Math.max(75, Math.round(Number(value) / 5) * 5));
+    }
+
+    function updateBadgeContrast() {
+        const root = document.documentElement;
+        const background = getComputedStyle(root).getPropertyValue('--lectio-theme-accent').trim() || '#cae6ff';
+        const rgb = parseCssColour(background);
+        if (!rgb) return;
+        const darkText = [0, 30, 47];
+        const lightText = [255, 255, 255];
+        const darkRatio = contrastRatio(rgb, darkText);
+        const lightRatio = contrastRatio(rgb, lightText);
+        const colour = Math.max(darkRatio, lightRatio) < 4.5
+            ? '#000000'
+            : darkRatio >= lightRatio ? '#001e2f' : '#ffffff';
+        if (root.style.getPropertyValue('--lectio-unread-badge-text') !== colour) {
+            root.style.setProperty('--lectio-unread-badge-text', colour);
+        }
+    }
+
+    function parseCssColour(value) {
+        const hex = value.match(/^#([0-9a-f]{6})$/i);
+        if (hex) {
+            return [0, 2, 4].map((offset) => Number.parseInt(hex[1].slice(offset, offset + 2), 16));
+        }
+        const rgb = value.match(/^rgba?\(\s*(\d+(?:\.\d+)?)\s*,?\s*(\d+(?:\.\d+)?)\s*,?\s*(\d+(?:\.\d+)?)/i);
+        return rgb ? rgb.slice(1, 4).map(Number) : null;
+    }
+
+    function contrastRatio(first, second) {
+        const luminance = (colour) => {
+            const channels = colour.map((channel) => {
+                const normalized = channel / 255;
+                return normalized <= 0.03928
+                    ? normalized / 12.92
+                    : ((normalized + 0.055) / 1.055) ** 2.4;
+            });
+            return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+        };
+        const lighter = Math.max(luminance(first), luminance(second));
+        const darker = Math.min(luminance(first), luminance(second));
+        return (lighter + 0.05) / (darker + 0.05);
     }
 
     // ============================================================
@@ -198,6 +267,7 @@
         syncBadge(false);
 
         installNavigationObserver();
+        installThemeObserver();
 
         window.addEventListener(
             'storage',
@@ -1423,6 +1493,14 @@
         );
     }
 
+    function installThemeObserver() {
+        const observer = new MutationObserver(updateBadgeContrast);
+        observer.observe(document.documentElement, {
+            attributes: true,
+            attributeFilter: ['class', 'style']
+        });
+    }
+
     // ============================================================
     // CROSS-TAB / VISIBILITY
     // ============================================================
@@ -1681,13 +1759,9 @@
                 justify-content: center;
 
                 background: var(--lectio-theme-accent, #cae6ff);
-                /* Fixed dark navy, not a theme variable: several shipped
-                   themes have pastel/light accents (Dracula's light
-                   purple, Nord's light cyan, Rose Pine's light iris) where
-                   white text would fail, and this original dark-on-light
-                   design reads acceptably across the accent range these
-                   themes actually use. */
-                color: #001e2f;
+                /* Computed by the module from the active accent so every
+                   theme gets a WCAG-readable light or dark count colour. */
+                color: var(--lectio-unread-badge-text, #001e2f);
 
                 border: 1px solid var(--lectio-theme-muted, #c1c7ce);
 
@@ -1717,6 +1791,8 @@
 
                 transform-origin:
                     50% 70%;
+
+                scale: var(--lectio-unread-badge-scale, 1);
             }
 
             .${BADGE_CLASS}[hidden] {

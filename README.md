@@ -91,7 +91,9 @@ Each module keeps its own version and updates independently of the Manager and o
 
 Installed modules can expose their own settings in the Manager. Open Lectio Tools, find an installed module, and choose **Settings** to open its focused, sectioned settings view. The Manager only renders these controls; each independent module owns and applies its values.
 
-For Lectio Theming, pick a **Theme** from 26 built-in colour schemes (Catppuccin, Nord, Dracula, Gruvbox, Solarized, Tokyo Night, Rosé Pine, Everforest, One Dark, Monokai Pro, Ayu, Kanagawa, Nightfox, Oxocarbon, Material Ocean, GitHub, Cyberpunk Neon, Synthwave '84, and more) — each keeps its own authentic light or dark look and its own distinct background photo (see [assets/theming/CREDITS.md](assets/theming/CREDITS.md) for sources). To use your own colours instead, choose **Imported palette**, then paste an HTTPS image or website URL into **Palette source** and choose **Import**, or use **Choose image** for a local file that never leaves the browser; the **Light or dark** setting only affects this imported palette. Direct image URLs give the most predictable result; website imports use colours found in the page and up to six linked stylesheets.
+For Lectio Theming, open the **Theme** dropdown and hover any option to preview it temporarily; choose one to keep it. The 26 built-in colour schemes (Catppuccin, Nord, Dracula, Gruvbox, Solarized, Tokyo Night, Rosé Pine, Everforest, One Dark, Monokai Pro, Ayu, Kanagawa, Nightfox, Oxocarbon, Material Ocean, GitHub, Cyberpunk Neon, Synthwave '84, and more) each keep their own authentic light or dark look and distinct background photo (see [assets/theming/CREDITS.md](assets/theming/CREDITS.md) for sources). To use your own colours instead, choose **Imported palette**, then paste an HTTPS image or website URL into **Palette source** and choose **Import**, or use **Choose image** for a local file that never leaves the browser; the **Light or dark** setting only affects this imported palette. Direct image URLs give the most predictable result; website imports use colours found in the page and up to six linked stylesheets.
+
+Unread Message Notifications includes a **Bubble size** setting from 75% to 175%. Its count text automatically switches between light and dark text as themes change so the badge remains readable.
 
 ### Manual: copy-paste a single module
 
@@ -225,6 +227,8 @@ These are two separate, independent things:
 > Every file in `manager/` and `modules/` includes an `@updateURL`/`@downloadURL` in its header, so Tampermonkey can check for updates **no matter how you installed it** — through the Manager, via GitHub Raw, or by copy-paste (as long as you copied the header too). This only works if Tampermonkey's own update checking is turned on: **Tampermonkey Dashboard → Settings → Update**, and confirm an interval is set (Tampermonkey checks in the background on that schedule; it does not update instantly the moment a new version is published here). The Manager shows a one-time dismissible reminder about this the first time you open its panel.
 >
 > There's no way around that manual step: Tampermonkey gives userscripts no API to read or change its own settings, and no reliable cross-browser way to deep-link straight to its Settings tab (only the general dashboard, which the **Manage** button already opens).
+
+When the Catalogue lists a newer version than an installed module reports, the Manager marks that module **Update available** and shows an **Update** link. The link opens the module's approved GitHub Raw userscript URL, where Tampermonkey can show its normal update/reinstall confirmation page.
 
 ### Install several modules
 

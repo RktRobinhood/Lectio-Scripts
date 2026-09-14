@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.9.1
+// @version      1.10.0
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules from one small gear panel.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
@@ -44,6 +44,8 @@
     const DISCOVER_EVENT = 'lectio-manager:discover';
     const REGISTER_EVENT = 'lectio-module:register';
     const SET_SETTING_EVENT = 'lectio-manager:set-setting';
+    const PREVIEW_SETTING_EVENT = 'lectio-manager:preview-setting';
+    const CLEAR_SETTING_PREVIEW_EVENT = 'lectio-manager:clear-setting-preview';
 
     const STORAGE_CATALOGUE = 'lectioManager.catalogue.v1';
     const STORAGE_LAST_REFRESH = 'lectioManager.lastRefresh.v1';
@@ -359,6 +361,18 @@
         }));
     }
 
+    function emitSettingPreview(moduleId, key, value) {
+        window.dispatchEvent(new CustomEvent(PREVIEW_SETTING_EVENT, {
+            detail: { id: moduleId, key, value }
+        }));
+    }
+
+    function clearSettingPreview(moduleId, key) {
+        window.dispatchEvent(new CustomEvent(CLEAR_SETTING_PREVIEW_EVENT, {
+            detail: { id: moduleId, key }
+        }));
+    }
+
     // ============================================================
     // UI: BUILD
     // ============================================================
@@ -377,7 +391,7 @@
                     <button type="button" class="lectio-manager-close" title="Close" aria-label="Close">${closeSvg()}</button>
                 </div>
                 <div class="lectio-manager-help-panel" hidden>
-                    To disable, update, or remove a script: click the Tampermonkey icon in your browser toolbar, then choose <strong>Dashboard</strong>. Every installed script is managed from there - the Manager itself can only install and describe modules.
+                    The Manager shows available module updates and opens Tampermonkey's normal confirmation page. To disable, manually check, or remove a script, click the Tampermonkey icon in your browser toolbar and choose <strong>Dashboard</strong>.
                 </div>
                 <div id="lectio-manager-main-view" class="lectio-manager-main-view">
                     <div class="lectio-manager-tip" hidden>
@@ -522,6 +536,12 @@
             if (!elements.panel.hasAttribute('hidden') && !elements.root.contains(event.target)) {
                 closePanel();
             }
+
+            for (const previewSelect of document.querySelectorAll('.lectio-manager-preview-select.is-open')) {
+                if (!previewSelect.contains(event.target)) {
+                    closePreviewSelect(previewSelect);
+                }
+            }
         });
 
         document.addEventListener('keydown', (event) => {
@@ -572,6 +592,7 @@
             return;
         }
 
+        closeAllPreviewSelects();
         elements.panel.setAttribute('hidden', '');
         closeNavMenu();
         showMainView({ restoreFocus: false });
@@ -827,10 +848,26 @@
         actions.className = 'lectio-manager-card-actions';
 
         if (registration) {
+            const hasUpdate = isVersionNewer(module.version, registration.version);
             const installed = document.createElement('span');
-            installed.className = 'lectio-manager-status-installed';
-            installed.textContent = `Installed v${registration.version || module.version}`;
+            installed.className = hasUpdate
+                ? 'lectio-manager-status-update'
+                : 'lectio-manager-status-installed';
+            installed.textContent = hasUpdate
+                ? `Update available: v${module.version} (installed v${registration.version})`
+                : `Installed v${registration.version || module.version}`;
             status.appendChild(installed);
+
+            if (hasUpdate) {
+                const updateLink = document.createElement('a');
+                updateLink.className = 'lectio-manager-update-btn';
+                updateLink.href = module.installUrl;
+                updateLink.target = '_blank';
+                updateLink.rel = 'noopener noreferrer';
+                updateLink.textContent = 'Update';
+                updateLink.title = 'Open Tampermonkey\'s update/install page';
+                actions.appendChild(updateLink);
+            }
 
             if (registration.settingsSchema.length) {
                 const settingsBtn = document.createElement('button');
@@ -885,6 +922,7 @@
 
     function showMainView({ restoreFocus = true } = {}) {
         if (!elements) return;
+        closeAllPreviewSelects();
         const moduleId = openSettingsModuleId;
         openSettingsModuleId = null;
 
@@ -967,15 +1005,20 @@
                     break;
 
                 case 'select':
-                    input = document.createElement('select');
-                    for (const option of control.options || []) {
-                        const opt = document.createElement('option');
-                        opt.value = option.value ?? option;
-                        opt.textContent = option.label ?? option;
-                        input.appendChild(opt);
+                    if (control.previewOnHover === true) {
+                        row.classList.add('is-preview-select');
+                        input = buildPreviewSelect(module, control, currentValue);
+                    } else {
+                        input = document.createElement('select');
+                        for (const option of control.options || []) {
+                            const opt = document.createElement('option');
+                            opt.value = option.value ?? option;
+                            opt.textContent = option.label ?? option;
+                            input.appendChild(opt);
+                        }
+                        input.value = currentValue ?? '';
+                        input.addEventListener('change', () => emitSettingChange(module.id, control.key, input.value));
                     }
-                    input.value = currentValue ?? '';
-                    input.addEventListener('change', () => emitSettingChange(module.id, control.key, input.value));
                     break;
 
                 case 'range':
@@ -1017,15 +1060,142 @@
                     continue;
             }
 
-            if (input.tagName !== 'BUTTON') {
+            if (input.matches('input, select, textarea')) {
                 input.id = `lectio-manager-setting-${module.id}-${control.key}`
                     .replace(/[^a-zA-Z0-9_-]/g, '-');
                 label.htmlFor = input.id;
+            } else if (input.classList.contains('lectio-manager-preview-select')) {
+                label.id = `lectio-manager-setting-label-${module.id}-${control.key}`
+                    .replace(/[^a-zA-Z0-9_-]/g, '-');
+                input.querySelector('.lectio-manager-preview-select-trigger')
+                    .setAttribute('aria-labelledby', label.id);
             }
 
             row.appendChild(input);
             section.querySelector('.lectio-manager-settings-section-rows').appendChild(row);
         }
+    }
+
+    function buildPreviewSelect(module, control, currentValue) {
+        const options = (control.options || []).map((option) => ({
+            value: String(option.value ?? option),
+            label: String(option.label ?? option)
+        }));
+        const selected = options.find((option) => option.value === String(currentValue ?? '')) || options[0];
+        const wrapper = document.createElement('div');
+        wrapper.className = 'lectio-manager-preview-select';
+        wrapper.dataset.moduleId = module.id;
+        wrapper.dataset.settingKey = control.key;
+
+        const trigger = document.createElement('button');
+        trigger.type = 'button';
+        trigger.className = 'lectio-manager-preview-select-trigger';
+        trigger.setAttribute('role', 'combobox');
+        trigger.setAttribute('aria-haspopup', 'listbox');
+        trigger.setAttribute('aria-expanded', 'false');
+        trigger.textContent = selected?.label || 'Choose';
+
+        const menu = document.createElement('div');
+        menu.className = 'lectio-manager-preview-select-menu';
+        menu.setAttribute('role', 'listbox');
+        menu.hidden = true;
+
+        for (const option of options) {
+            const item = document.createElement('button');
+            item.type = 'button';
+            item.className = 'lectio-manager-preview-select-option';
+            item.dataset.previewValue = option.value;
+            item.setAttribute('role', 'option');
+            item.setAttribute('aria-selected', String(option.value === selected?.value));
+            item.textContent = option.label;
+            const preview = () => emitSettingPreview(module.id, control.key, option.value);
+            const clearPreview = () => clearSettingPreview(module.id, control.key);
+            item.addEventListener('mouseenter', preview);
+            item.addEventListener('mouseleave', clearPreview);
+            item.addEventListener('focus', preview);
+            item.addEventListener('blur', clearPreview);
+            item.addEventListener('click', (event) => {
+                event.stopPropagation();
+                trigger.textContent = option.label;
+                for (const sibling of menu.querySelectorAll('[role="option"]')) {
+                    sibling.setAttribute('aria-selected', String(sibling === item));
+                }
+                emitSettingChange(module.id, control.key, option.value);
+                closePreviewSelect(wrapper, { restore: false });
+                clearSettingPreview(module.id, control.key);
+            });
+            menu.appendChild(item);
+        }
+
+        trigger.addEventListener('click', (event) => {
+            event.stopPropagation();
+            if (wrapper.classList.contains('is-open')) {
+                closePreviewSelect(wrapper);
+            } else {
+                for (const other of document.querySelectorAll('.lectio-manager-preview-select.is-open')) {
+                    closePreviewSelect(other);
+                }
+                wrapper.classList.add('is-open');
+                menu.hidden = false;
+                trigger.setAttribute('aria-expanded', 'true');
+            }
+        });
+
+        trigger.addEventListener('keydown', (event) => {
+            if (!['ArrowDown', 'ArrowUp'].includes(event.key)) return;
+            event.preventDefault();
+            if (!wrapper.classList.contains('is-open')) trigger.click();
+            const items = [...menu.querySelectorAll('[role="option"]')];
+            const selectedIndex = Math.max(0, items.findIndex((item) => item.getAttribute('aria-selected') === 'true'));
+            items[event.key === 'ArrowUp' ? Math.max(0, selectedIndex - 1) : Math.min(items.length - 1, selectedIndex + 1)]?.focus();
+        });
+
+        menu.addEventListener('keydown', (event) => {
+            const items = [...menu.querySelectorAll('[role="option"]')];
+            const index = items.indexOf(document.activeElement);
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                event.stopPropagation();
+                closePreviewSelect(wrapper);
+                trigger.focus();
+            } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                event.preventDefault();
+                const offset = event.key === 'ArrowDown' ? 1 : -1;
+                items[Math.max(0, Math.min(items.length - 1, index + offset))]?.focus();
+            }
+        });
+
+        wrapper.append(trigger, menu);
+        return wrapper;
+    }
+
+    function closePreviewSelect(wrapper, { restore = true } = {}) {
+        if (!wrapper?.classList.contains('is-open')) return;
+        wrapper.classList.remove('is-open');
+        wrapper.querySelector('.lectio-manager-preview-select-menu').hidden = true;
+        wrapper.querySelector('.lectio-manager-preview-select-trigger').setAttribute('aria-expanded', 'false');
+        if (restore) {
+            clearSettingPreview(wrapper.dataset.moduleId, wrapper.dataset.settingKey);
+        }
+    }
+
+    function closeAllPreviewSelects() {
+        for (const previewSelect of document.querySelectorAll('.lectio-manager-preview-select.is-open')) {
+            closePreviewSelect(previewSelect);
+        }
+    }
+
+    function isVersionNewer(candidate, installed) {
+        if (!isNonEmptyString(candidate) || !isNonEmptyString(installed)) return false;
+        const parse = (value) => value.replace(/^v/i, '').split(/[.-]/).slice(0, 3).map((part) => Number(part));
+        const next = parse(candidate);
+        const current = parse(installed);
+        if (next.some((part) => !Number.isInteger(part)) || current.some((part) => !Number.isInteger(part))) return false;
+        for (let index = 0; index < 3; index += 1) {
+            const difference = (next[index] || 0) - (current[index] || 0);
+            if (difference !== 0) return difference > 0;
+        }
+        return false;
     }
 
     // ============================================================
@@ -1649,6 +1819,7 @@
             }
 
             .lectio-manager-status-installed,
+            .lectio-manager-status-update,
             .lectio-manager-status-missing {
                 flex: 1;
             }
@@ -1657,6 +1828,12 @@
                 font-size: 11px;
                 font-weight: 600;
                 color: #0f6f4f;
+            }
+
+            .lectio-manager-status-update {
+                font-size: 11px;
+                font-weight: 700;
+                color: #9a4f00;
             }
 
             .lectio-manager-status-missing {
@@ -1670,6 +1847,7 @@
             }
 
             .lectio-manager-install-btn,
+            .lectio-manager-update-btn,
             .lectio-manager-settings-btn {
                 border: 1px solid var(--lectio-theme-accent, #0f6f6f);
                 color: var(--lectio-theme-accent, #0f6f6f);
@@ -1684,6 +1862,7 @@
             }
 
             .lectio-manager-install-btn:hover,
+            .lectio-manager-update-btn:hover,
             .lectio-manager-settings-btn:hover {
                 background: var(--lectio-theme-surface-alt, #e8f3f3);
             }
@@ -1750,7 +1929,7 @@
                 border: 1px solid var(--lectio-theme-muted, #dce9e8);
                 border-radius: 8px;
                 background: var(--lectio-theme-surface-alt, #f6f9f9);
-                overflow: hidden;
+                overflow: visible;
             }
 
             .lectio-manager-settings-section-heading {
@@ -1813,6 +1992,77 @@
                 color: #10201e;
                 padding: 5px 7px;
                 font: inherit;
+            }
+
+            .lectio-manager-setting-row.is-preview-select {
+                align-items: start;
+            }
+
+            .lectio-manager-preview-select {
+                position: relative;
+                min-width: 0;
+                width: 100%;
+            }
+
+            .lectio-manager-preview-select-trigger {
+                width: 100%;
+                border: 1px solid var(--lectio-theme-accent, #cbd7d9);
+                border-radius: 6px;
+                background: #ffffff;
+                color: #10201e;
+                padding: 5px 24px 5px 7px;
+                font: inherit;
+                text-align: left;
+                cursor: pointer;
+            }
+
+            .lectio-manager-preview-select-trigger::after {
+                content: '⌄';
+                position: absolute;
+                right: 8px;
+                color: #5e6870;
+            }
+
+            .lectio-manager-preview-select-menu {
+                position: absolute;
+                top: calc(100% + 3px);
+                left: 0;
+                right: 0;
+                z-index: 20;
+                max-height: 220px;
+                overflow-y: auto;
+                padding: 4px;
+                border: 1px solid var(--lectio-theme-accent, #cbd7d9);
+                border-radius: 6px;
+                background: #ffffff;
+                box-shadow: 0 8px 18px rgba(0,0,0,.18);
+            }
+
+            .lectio-manager-preview-select-menu[hidden] {
+                display: none !important;
+            }
+
+            .lectio-manager-preview-select-option {
+                display: block;
+                width: 100%;
+                border: none;
+                border-radius: 4px;
+                background: transparent;
+                color: #10201e;
+                padding: 5px 7px;
+                font: inherit;
+                text-align: left;
+                cursor: pointer;
+            }
+
+            .lectio-manager-preview-select-option:hover,
+            .lectio-manager-preview-select-option:focus-visible {
+                outline: none;
+                background: #e8f3f3;
+            }
+
+            .lectio-manager-preview-select-option[aria-selected='true'] {
+                font-weight: 700;
             }
 
             .lectio-manager-setting-row input[type='checkbox'] {

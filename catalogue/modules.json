@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-09-13T21:00:00Z",
+  "generatedAt": "2026-09-14T12:00:00Z",
   "modules": [
     {
       "id": "english-mode",
@@ -42,7 +42,7 @@
       "category": "Messages",
       "audience": ["student", "teacher"],
       "status": "stable",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Unread-Message-Notifications.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues"
     },
@@ -53,7 +53,7 @@
       "category": "Interface",
       "audience": ["student", "teacher"],
       "status": "experimental",
-      "version": "0.12.0",
+      "version": "0.13.0",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Theming.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues"
     }

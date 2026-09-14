@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio module settings fixture</title>
+    <script>
+        localStorage.setItem('lectioUnreadMessages.cache.v3', JSON.stringify({
+            checkedAt: Date.now(),
+            unreadCount: 3,
+            messages: []
+        }));
+        window.registrations = new Map();
+        window.addEventListener('lectio-module:register', (event) => {
+            window.registrations.set(event.detail.id, event.detail);
+        });
+    </script>
+</head>
+<body>
+    <nav><a href="/lectio/223/beskeder2.aspx">Beskeder</a></nav>
+    <main id="masterContent">Lectio content</main>
+    <script src="../../modules/Lectio-Theming.user.js"></script>
+    <script src="../../modules/Lectio-Unread-Message-Notifications.user.js"></script>
+    <script>
+        function assert(condition, message) {
+            if (!condition) throw new Error(message);
+        }
+
+        window.addEventListener('load', async () => {
+            try {
+                const theming = window.registrations.get('lectio-theming');
+                const messages = window.registrations.get('message-notifications');
+                assert(theming.settingsSchema.find(control => control.key === 'preset')?.previewOnHover, 'Theme setting did not request hover previews');
+                assert(messages.settingsSchema.some(control => control.key === 'bubbleScale'), 'Bubble scale setting was not registered');
+
+                const savedThemeBefore = localStorage.getItem('lectioTheming.settings.v2');
+                window.dispatchEvent(new CustomEvent('lectio-manager:preview-setting', {
+                    detail: { id: 'lectio-theming', key: 'preset', value: 'dracula' }
+                }));
+                assert(document.documentElement.style.getPropertyValue('--lectio-theme-bg') === '#282a36', 'Theme hover preview was not applied');
+                assert(localStorage.getItem('lectioTheming.settings.v2') === savedThemeBefore, 'Theme hover preview was persisted');
+
+                window.dispatchEvent(new CustomEvent('lectio-manager:clear-setting-preview', {
+                    detail: { id: 'lectio-theming', key: 'preset' }
+                }));
+                assert(document.documentElement.style.getPropertyValue('--lectio-theme-bg') === '#eff1f5', 'Clearing preview did not restore the saved theme');
+
+                window.dispatchEvent(new CustomEvent('lectio-manager:set-setting', {
+                    detail: { id: 'message-notifications', key: 'bubbleScale', value: '150' }
+                }));
+                assert(document.documentElement.style.getPropertyValue('--lectio-unread-badge-scale') === '1.5', 'Bubble scale did not apply immediately');
+                assert(getComputedStyle(document.querySelector('.lectio-unread-badge')).scale === '1.5', 'Bubble did not render at the selected scale');
+                assert(JSON.parse(localStorage.getItem('lectioUnreadMessages.settings.v1')).bubbleScale === 150, 'Bubble scale did not persist');
+
+                document.documentElement.style.setProperty('--lectio-theme-accent', '#111111');
+                await new Promise(resolve => setTimeout(resolve, 0));
+                assert(document.documentElement.style.getPropertyValue('--lectio-unread-badge-text') === '#ffffff', 'Dark badge background did not receive light text');
+                assert(getComputedStyle(document.querySelector('.lectio-unread-badge')).color === 'rgb(255, 255, 255)', 'Badge did not render the computed light text colour');
+
+                document.documentElement.style.setProperty('--lectio-theme-accent', '#f8d5e5');
+                await new Promise(resolve => setTimeout(resolve, 0));
+                assert(document.documentElement.style.getPropertyValue('--lectio-unread-badge-text') === '#001e2f', 'Light badge background did not receive dark text');
+
+                document.documentElement.dataset.testResult = 'pass';
+            } catch (error) {
+                document.documentElement.dataset.testResult = `fail: ${error.message}`;
+            }
+        });
+    </script>
+</body>
+</html>

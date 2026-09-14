@@ -17,7 +17,7 @@
                     category: 'Interface',
                     audience: ['student', 'teacher'],
                     status: 'stable',
-                    version: '1.0.0',
+                    version: '1.1.0',
                     installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Zulu.user.js'
                 },
                 {
@@ -52,6 +52,16 @@
         window.GM_getValue = (key, fallback) => storage.has(key) ? storage.get(key) : fallback;
         window.GM_setValue = (key, value) => storage.set(key, value);
         window.GM_xmlhttpRequest = () => {};
+        window.settingEvents = [];
+        window.addEventListener('lectio-manager:preview-setting', (event) => {
+            window.settingEvents.push(`preview:${event.detail.key}:${event.detail.value}`);
+        });
+        window.addEventListener('lectio-manager:clear-setting-preview', (event) => {
+            window.settingEvents.push(`clear:${event.detail.key}`);
+        });
+        window.addEventListener('lectio-manager:set-setting', (event) => {
+            window.settingEvents.push(`set:${event.detail.key}:${event.detail.value}`);
+        });
 
         window.addEventListener('lectio-manager:discover', () => {
             for (const module of catalogue.modules.slice(0, 2)) {
@@ -59,10 +69,10 @@
                     detail: {
                         id: module.id,
                         name: module.name,
-                        version: module.version,
+                        version: module.id === 'zulu-interface' ? '1.0.0' : module.version,
                         settingsSchema: module.id === 'zulu-interface' ? [
                             { key: 'enabled', type: 'toggle', label: 'Enabled', section: 'Behaviour' },
-                            { key: 'density', type: 'select', label: 'Spacing', section: 'Appearance', options: ['compact', 'comfortable'] }
+                            { key: 'density', type: 'select', label: 'Spacing', section: 'Appearance', previewOnHover: true, options: ['compact', 'comfortable'] }
                         ] : [],
                         currentValues: { enabled: true, density: 'compact' }
                     }
@@ -93,6 +103,10 @@
                     assert(installedTab.getAttribute('aria-selected') === 'true', 'Installed is not the primary view');
                     assert(names().join('|') === 'Zulu Interface|Alpha Timetable', `Unexpected installed order: ${names()}`);
                     assert(!document.querySelector('.lectio-manager-card-desc'), 'Installed cards should be compact');
+                    assert(document.querySelector('[data-module-id="zulu-interface"] .lectio-manager-status-update')?.textContent.includes('v1.1.0'), 'Newer catalogue version was not shown');
+                    const updateLink = document.querySelector('[data-module-id="zulu-interface"] .lectio-manager-update-btn');
+                    assert(updateLink?.textContent === 'Update', 'Update action was not shown');
+                    assert(updateLink.href.endsWith('/modules/Zulu.user.js'), 'Update action did not use the approved install URL');
 
                     document.querySelector('[data-sort="name"]').click();
                     assert(names().join('|') === 'Alpha Timetable|Zulu Interface', `Name sort did not update immediately: ${names()}`);
@@ -127,6 +141,22 @@
                     assert(!settingsView.hidden, 'Focused settings view did not open');
                     assert([...settingsView.querySelectorAll('.lectio-manager-settings-section-heading')]
                         .map(element => element.textContent).join('|') === 'Behaviour|Appearance', 'Settings were not grouped by section');
+
+                    const previewTrigger = settingsView.querySelector('.lectio-manager-preview-select-trigger');
+                    previewTrigger.click();
+                    const comfortableOption = settingsView.querySelector('[data-preview-value="comfortable"]');
+                    comfortableOption.dispatchEvent(new MouseEvent('mouseenter'));
+                    assert(window.settingEvents.includes('preview:density:comfortable'), 'Hovering a preview option did not emit a temporary preview');
+                    comfortableOption.dispatchEvent(new MouseEvent('mouseleave'));
+                    assert(window.settingEvents.includes('clear:density'), 'Leaving a preview option did not restore the saved setting');
+                    comfortableOption.click();
+                    assert(window.settingEvents.includes('set:density:comfortable'), 'Choosing a preview option did not persist it');
+
+                    previewTrigger.click();
+                    settingsView.querySelector('.lectio-manager-preview-select-menu')
+                        .dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+                    assert(!settingsView.hidden, 'Closing the preview dropdown with Escape also closed settings');
+                    assert(previewTrigger.getAttribute('aria-expanded') === 'false', 'Escape did not close the preview dropdown');
 
                     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
                     assert(!mainView.hidden && settingsView.hidden, 'Escape did not restore the module list');
