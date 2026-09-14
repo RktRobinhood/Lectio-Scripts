@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Theming
 // @namespace    https://www.lectio.dk/
-// @version      0.13.0
+// @version      0.13.1
 // @description  Gives Lectio a soft, translucent glass shell with 26 built-in colour schemes (Catppuccin, Nord, Dracula, Cyberpunk and more), each with its own distinct background photo, and can derive a scheme from a website or image.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-start
@@ -16,7 +16,7 @@
 
     const MODULE_ID = 'lectio-theming';
     const MODULE_NAME = 'Lectio Theming';
-    const MODULE_VERSION = '0.13.0';
+    const MODULE_VERSION = '0.13.1';
     const STORAGE_KEY = 'lectioTheming.settings.v2';
     const STYLE_ID = 'lectio-theming-styles';
     const ROOT_CLASS = 'lectio-themed';
@@ -33,6 +33,8 @@
     // <body>, outside this shell) is never touched, without this module
     // needing to know that other module exists.
     const CONTENT_ROOT_SELECTOR = '#masterContent, #content, #m_Content, .ls-master-container, .ls-content-container';
+    const CHOICE_CONTROL_SELECTOR = 'input[type="checkbox"], input[type="radio"]';
+    const DIALOG_CLOSE_SELECTOR = '.ui-dialog .ui-dialog-titlebar-close';
     // Shared theming seam (see ADR-0006): any other module may read these
     // same custom properties, with its own fallback in var(--name, fallback),
     // to follow the active theme without depending on this module being
@@ -609,7 +611,14 @@
                 color: color-mix(in srgb, var(--lectio-theme-accent) 75%, var(--lectio-theme-text)) !important;
             }
 
-            html.${ROOT_CLASS} :is(${CONTENT_ROOT_SELECTOR}) :where(input, select, textarea, button, .button, .ls-button) {
+            html.${ROOT_CLASS} :is(${CONTENT_ROOT_SELECTOR}) :where(
+                input:not([type="checkbox"]):not([type="radio"]):not([type="image"]),
+                select,
+                textarea,
+                button,
+                .button,
+                .ls-button
+            ) {
                 border: 1px solid color-mix(in srgb, var(--lectio-theme-muted) 28%, transparent) !important;
                 border-radius: max(6px, calc(var(--lectio-theme-radius) - 4px)) !important;
                 background: color-mix(in srgb, var(--lectio-theme-surface-alt) 65%, transparent) !important;
@@ -625,6 +634,76 @@
             html.${ROOT_CLASS} :is(${CONTENT_ROOT_SELECTOR}) :where(input, select, textarea):focus {
                 outline: 2px solid color-mix(in srgb, var(--lectio-theme-accent) 55%, transparent) !important;
                 outline-offset: 1px;
+            }
+
+            /* Keep native choice controls native-sized and stateful. The
+               generic text-control padding above made these look like empty
+               rounded text fields, especially inside Lectio dialogs. */
+            html.${ROOT_CLASS} :is(${CONTENT_ROOT_SELECTOR}) :where(${CHOICE_CONTROL_SELECTOR}) {
+                appearance: auto !important;
+                accent-color: var(--lectio-theme-accent);
+                box-sizing: border-box !important;
+                width: 1rem !important;
+                height: 1rem !important;
+                min-width: 1rem !important;
+                min-height: 1rem !important;
+                margin: 3px 4px 3px 0;
+                padding: 0 !important;
+                vertical-align: -2px;
+                background: initial !important;
+                box-shadow: none !important;
+            }
+
+            html.${ROOT_CLASS} :is(${CONTENT_ROOT_SELECTOR}) :where(${CHOICE_CONTROL_SELECTOR}):hover:not(:disabled) {
+                filter: brightness(1.08);
+            }
+
+            html.${ROOT_CLASS} :is(${CONTENT_ROOT_SELECTOR}) :where(${CHOICE_CONTROL_SELECTOR}):focus-visible {
+                outline: 2px solid color-mix(in srgb, var(--lectio-theme-accent) 70%, transparent) !important;
+                outline-offset: 2px;
+            }
+
+            html.${ROOT_CLASS} :is(${CONTENT_ROOT_SELECTOR}) :where(${CHOICE_CONTROL_SELECTOR}):disabled {
+                cursor: not-allowed;
+                opacity: .55;
+            }
+
+            /* Lectio's current jQuery UI close icon is a background image.
+               The generic button background above hides it, so draw a
+               theme-aware glyph without replacing the element or its events. */
+            html.${ROOT_CLASS} :is(${CONTENT_ROOT_SELECTOR}) :is(${DIALOG_CLOSE_SELECTOR}) {
+                box-sizing: border-box !important;
+                display: inline-grid !important;
+                place-items: center;
+                width: 1.875rem !important;
+                height: 1.875rem !important;
+                min-width: 1.875rem !important;
+                min-height: 1.875rem !important;
+                padding: 0 !important;
+                border: 1px solid color-mix(in srgb, var(--lectio-theme-muted) 35%, transparent) !important;
+                border-radius: max(6px, calc(var(--lectio-theme-radius) - 5px)) !important;
+                background: var(--lectio-theme-surface-alt) !important;
+                color: var(--lectio-theme-text) !important;
+                font-size: 0 !important;
+                line-height: 1 !important;
+                text-decoration: none !important;
+                cursor: pointer;
+            }
+
+            html.${ROOT_CLASS} :is(${CONTENT_ROOT_SELECTOR}) :is(${DIALOG_CLOSE_SELECTOR})::before {
+                content: "×";
+                color: currentColor;
+                font: 700 1.35rem/1 Arial, sans-serif;
+            }
+
+            html.${ROOT_CLASS} :is(${CONTENT_ROOT_SELECTOR}) :is(${DIALOG_CLOSE_SELECTOR}):hover {
+                border-color: var(--lectio-theme-accent) !important;
+                background: color-mix(in srgb, var(--lectio-theme-accent) 16%, var(--lectio-theme-surface-alt)) !important;
+            }
+
+            html.${ROOT_CLASS} :is(${CONTENT_ROOT_SELECTOR}) :is(${DIALOG_CLOSE_SELECTOR}):focus-visible {
+                outline: 2px solid color-mix(in srgb, var(--lectio-theme-accent) 70%, transparent) !important;
+                outline-offset: 2px;
             }
 
             html.${ROOT_CLASS} :where(.ls-paper, .lc-display-fragment) {

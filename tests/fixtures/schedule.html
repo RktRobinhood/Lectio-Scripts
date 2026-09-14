@@ -5,6 +5,8 @@
     <title>Lectio schedule fixture</title>
 </head>
 <body>
+    <main id="masterContent">
+    <label><input id="show-available-teams" type="checkbox"> Vis ledige hold</label>
     <table id="s_m_Content_Content_SkemaNyMedNavigation_skema_skematabel">
         <tbody>
             <tr class="s2dayHeader">
@@ -31,6 +33,7 @@
             </tr>
         </tbody>
     </table>
+    </main>
 
     <script>
         window.registeredModule = null;
@@ -38,6 +41,7 @@
             window.registeredModule = event.detail;
         });
     </script>
+    <script src="../../modules/Lectio-Theming.user.js"></script>
     <script src="../../modules/Lectio-Schedule-Summary.user.js"></script>
     <script>
         window.addEventListener('load', () => {
@@ -51,6 +55,8 @@
                 const tooltip = document.querySelector('[role="tooltip"]');
                 const registration = window.registeredModule;
                 const styleText = document.querySelector('#lectio-schedule-summary-styles').textContent;
+                const availableTeamsCheckbox = document.getElementById('show-available-teams');
+                const availableTeamsStyle = getComputedStyle(availableTeamsCheckbox);
 
                 if (!toggle) throw new Error('summary toggle was not added');
                 if (!tooltip.textContent.includes('Mandag (14/9)')) throw new Error('tooltip omits the weekday');
@@ -70,6 +76,18 @@
                 if (!styleText.includes('[data-hover-preview="true"]:not(.is-expanded):hover')) {
                     throw new Error('pointer hover is not gated by the hover-preview setting');
                 }
+                if (parseFloat(availableTeamsStyle.width) > 20 || parseFloat(availableTeamsStyle.height) > 20) {
+                    throw new Error('schedule checkbox was stretched by theming');
+                }
+                if (availableTeamsStyle.paddingLeft !== '0px' || availableTeamsStyle.accentColor !== 'rgb(30, 102, 245)') {
+                    throw new Error('schedule checkbox lost its native themed appearance');
+                }
+                availableTeamsCheckbox.focus();
+                if (document.activeElement !== availableTeamsCheckbox || parseFloat(getComputedStyle(availableTeamsCheckbox).outlineWidth) < 2) {
+                    throw new Error('schedule checkbox keyboard focus was not visible');
+                }
+                availableTeamsCheckbox.click();
+                if (!availableTeamsCheckbox.checked) throw new Error('schedule checkbox interaction changed');
 
                 if (new URLSearchParams(location.search).get('phase') === 'persist') {
                     if (registration.currentValues.stripSize !== 'comfortable') throw new Error('strip size did not survive reload');

@@ -17,13 +17,37 @@
 </head>
 <body>
     <nav><a href="/lectio/223/beskeder2.aspx">Beskeder</a></nav>
-    <main id="masterContent">Lectio content</main>
+    <main id="masterContent">
+        <section id="groups-dialog" class="ui-dialog ui-widget" role="dialog" aria-labelledby="groups-title">
+            <header class="ui-dialog-titlebar">
+                <h2 id="groups-title">Grupper</h2>
+                <button class="ui-dialog-titlebar-close" aria-label="Luk"></button>
+            </header>
+            <label><input id="include-absent" type="checkbox"> Medtag fraværende</label>
+            <label><input id="fixed-groups" type="checkbox" checked> Faste grupper</label>
+            <label><input id="locked-groups" type="checkbox" disabled> Låste grupper</label>
+        </section>
+        <section id="schedule-preferences">
+            <label><input id="show-available" type="checkbox"> Vis ledige hold</label>
+            <button id="non-dialog-close" aria-label="Close">Dismiss notice</button>
+        </section>
+    </main>
     <script src="../../modules/Lectio-Theming.user.js"></script>
     <script src="../../modules/Lectio-Unread-Message-Notifications.user.js"></script>
     <script>
-        function assert(condition, message) {
-            if (!condition) throw new Error(message);
-        }
+                function assert(condition, message) {
+                    if (!condition) throw new Error(message);
+                }
+
+                function contrastRatio(firstHex, secondHex) {
+                    const luminance = (hex) => {
+                        const channels = [1, 3, 5].map(index => parseInt(hex.slice(index, index + 2), 16) / 255)
+                            .map(channel => channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4);
+                        return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+                    };
+                    const values = [luminance(firstHex), luminance(secondHex)];
+                    return (Math.max(...values) + 0.05) / (Math.min(...values) + 0.05);
+                }
 
         window.addEventListener('load', async () => {
             try {
@@ -32,12 +56,66 @@
                 assert(theming.settingsSchema.find(control => control.key === 'preset')?.previewOnHover, 'Theme setting did not request hover previews');
                 assert(messages.settingsSchema.some(control => control.key === 'bubbleScale'), 'Bubble scale setting was not registered');
 
+                const absentCheckbox = document.getElementById('include-absent');
+                const checkedCheckbox = document.getElementById('fixed-groups');
+                const disabledCheckbox = document.getElementById('locked-groups');
+                const schedulePreferencesCheckbox = document.getElementById('show-available');
+                const dialogClose = document.querySelector('.ui-dialog-titlebar-close');
+                const nonDialogClose = document.getElementById('non-dialog-close');
+                const assertRecognizableCheckbox = (checkbox, context) => {
+                    const style = getComputedStyle(checkbox);
+                    assert(parseFloat(style.width) <= 20 && parseFloat(style.height) <= 20, `${context} checkbox was stretched`);
+                    assert(style.paddingLeft === '0px' && style.paddingTop === '0px', `${context} checkbox received text-input padding`);
+                    assert(style.accentColor === 'rgb(30, 102, 245)', `${context} checkbox did not use the light theme accent`);
+                };
+                const assertRecognizableClose = (control, context) => {
+                    const style = getComputedStyle(control);
+                    const icon = getComputedStyle(control, '::before');
+                    assert(parseFloat(style.minWidth) >= 28 && parseFloat(style.minHeight) >= 28, `${context} close target was too small`);
+                    assert(icon.content.includes('×'), `${context} close control did not display an X`);
+                    assert(icon.color === style.color && icon.color !== 'rgba(0, 0, 0, 0)', `${context} close icon did not inherit readable theme text`);
+                };
+
+                assertRecognizableCheckbox(absentCheckbox, 'Groups dialog');
+                assertRecognizableCheckbox(checkedCheckbox, 'Checked Groups dialog');
+                assertRecognizableCheckbox(disabledCheckbox, 'Disabled Groups dialog');
+                assertRecognizableCheckbox(schedulePreferencesCheckbox, 'Schedule preferences');
+                assert(absentCheckbox.checked === false && checkedCheckbox.checked === true && disabledCheckbox.disabled, 'Checkbox states changed');
+                assert(parseFloat(getComputedStyle(disabledCheckbox).opacity) < 1, 'Disabled checkbox was not visually distinct');
+                assertRecognizableClose(dialogClose, 'Groups dialog');
+                assert(contrastRatio(
+                    document.documentElement.style.getPropertyValue('--lectio-theme-text'),
+                    document.documentElement.style.getPropertyValue('--lectio-theme-surface-alt')
+                ) >= 4.5, 'Close icon lacked light-theme contrast');
+                assert(!getComputedStyle(nonDialogClose, '::before').content.includes('×'), 'A non-dialog close-labelled control was restyled');
+                assert(parseFloat(getComputedStyle(nonDialogClose).fontSize) > 0, 'A non-dialog control had its label hidden');
+
+                absentCheckbox.focus();
+                assert(document.activeElement === absentCheckbox, 'Checkbox could not receive keyboard focus');
+                assert(parseFloat(getComputedStyle(absentCheckbox).outlineWidth) >= 2, 'Checkbox focus state was not visible');
+                dialogClose.focus();
+                assert(document.activeElement === dialogClose, 'Close control could not receive keyboard focus');
+                assert(parseFloat(getComputedStyle(dialogClose).outlineWidth) >= 2, 'Close-control focus state was not visible');
+
+                let closeClicks = 0;
+                dialogClose.addEventListener('click', () => { closeClicks += 1; });
+                dialogClose.click();
+                assert(closeClicks === 1, 'Close control mouse behavior changed');
+                absentCheckbox.click();
+                assert(absentCheckbox.checked, 'Checkbox mouse behavior changed');
+
                 const savedThemeBefore = localStorage.getItem('lectioTheming.settings.v2');
                 window.dispatchEvent(new CustomEvent('lectio-manager:preview-setting', {
                     detail: { id: 'lectio-theming', key: 'preset', value: 'dracula' }
                 }));
                 assert(document.documentElement.style.getPropertyValue('--lectio-theme-bg') === '#282a36', 'Theme hover preview was not applied');
                 assert(localStorage.getItem('lectioTheming.settings.v2') === savedThemeBefore, 'Theme hover preview was persisted');
+                assert(getComputedStyle(absentCheckbox).accentColor === 'rgb(189, 147, 249)', 'Checkbox did not remain recognizable in a dark theme');
+                assert(getComputedStyle(dialogClose, '::before').color === getComputedStyle(dialogClose).color, 'Close icon did not remain readable in a dark theme');
+                assert(contrastRatio(
+                    document.documentElement.style.getPropertyValue('--lectio-theme-text'),
+                    document.documentElement.style.getPropertyValue('--lectio-theme-surface-alt')
+                ) >= 4.5, 'Close icon lacked dark-theme contrast');
 
                 window.dispatchEvent(new CustomEvent('lectio-manager:clear-setting-preview', {
                     detail: { id: 'lectio-theming', key: 'preset' }
