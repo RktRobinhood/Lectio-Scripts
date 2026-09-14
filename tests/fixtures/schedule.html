@@ -46,47 +46,102 @@
 
             try {
                 const informationRow = document.querySelector('#week-information');
+                const summaryRow = document.querySelector('.lectio-schedule-summary__row');
                 const toggle = document.querySelector('.lectio-schedule-summary__toggle');
                 const tooltip = document.querySelector('[role="tooltip"]');
+                const registration = window.registeredModule;
+                const styleText = document.querySelector('#lectio-schedule-summary-styles').textContent;
 
                 if (!toggle) throw new Error('summary toggle was not added');
-                if (!informationRow.hidden) throw new Error('information row is not collapsed initially');
-                if (toggle.getAttribute('aria-expanded') !== 'false') throw new Error('collapsed state is not announced');
                 if (!tooltip.textContent.includes('Mandag (14/9)')) throw new Error('tooltip omits the weekday');
                 if (!tooltip.textContent.includes('Danmarkstur 3g')) throw new Error('tooltip omits information content');
                 if (!tooltip.querySelector('a[href="#activity-2"]')) throw new Error('tooltip omits original links');
                 if (!tooltip.querySelector('.note-icon')) throw new Error('tooltip omits original icons');
-                if (window.registeredModule?.id !== 'schedule-summary') throw new Error('module did not register with the Manager');
+                if (registration?.id !== 'schedule-summary') throw new Error('module did not register with the Manager');
                 if (!toggle.textContent.includes('Info · 2 dage')) throw new Error('summary label is not concise');
                 if (/\bVis\b/.test(toggle.textContent)) throw new Error('summary label contains redundant action text');
 
-                const toggleStyle = getComputedStyle(toggle);
-                if (parseFloat(toggleStyle.minHeight) > 24) throw new Error('summary control is too tall');
-                if (!['400', 'normal'].includes(toggleStyle.fontWeight)) throw new Error('summary control is too bold');
+                const schemaByKey = Object.fromEntries(registration.settingsSchema.map(control => [control.key, control]));
+                if (schemaByKey.stripSize?.type !== 'select') throw new Error('strip-size setting is missing');
+                if (schemaByKey.stripSize.options?.length !== 3) throw new Error('strip-size presets are incomplete');
+                if (schemaByKey.hoverPreview?.type !== 'toggle') throw new Error('hover-preview setting is missing');
+                if (schemaByKey.initialState?.type !== 'select') throw new Error('initial-state setting is missing');
+                if (!styleText.includes('@media (pointer: coarse)')) throw new Error('touch target sizing is missing');
+                if (!styleText.includes('[data-hover-preview="true"]:not(.is-expanded):hover')) {
+                    throw new Error('pointer hover is not gated by the hover-preview setting');
+                }
+
+                if (new URLSearchParams(location.search).get('phase') === 'persist') {
+                    if (registration.currentValues.stripSize !== 'comfortable') throw new Error('strip size did not survive reload');
+                    if (registration.currentValues.hoverPreview !== false) throw new Error('hover preview did not survive reload');
+                    if (registration.currentValues.initialState !== 'expanded') throw new Error('initial state did not survive reload');
+                    if (summaryRow.dataset.stripSize !== 'comfortable') throw new Error('persisted strip size was not applied');
+                    if (summaryRow.dataset.hoverPreview !== 'false') throw new Error('persisted hover behavior was not applied');
+                    if (informationRow.hidden) throw new Error('expanded initial state was not restored');
+                    if (toggle.getAttribute('aria-expanded') !== 'true') throw new Error('restored expanded state is not announced');
+
+                    toggle.click();
+                    if (!informationRow.hidden) throw new Error('click-to-collapse stopped working with hover preview disabled');
+                    if (toggle.getAttribute('aria-expanded') !== 'false') throw new Error('collapsed state is not announced');
+
+                    toggle.click();
+                    if (informationRow.hidden) throw new Error('click-to-expand stopped working with hover preview disabled');
+                    if (toggle.getAttribute('aria-expanded') !== 'true') throw new Error('expanded state is not announced');
+
+                    result.dataset.testResult = 'pass';
+                    result.textContent = 'PASS';
+                    document.body.appendChild(result);
+                    return;
+                }
+
+                if (!informationRow.hidden) throw new Error('information row is not collapsed initially');
+                if (toggle.getAttribute('aria-expanded') !== 'false') throw new Error('collapsed state is not announced');
+                if (registration.currentValues.stripSize !== 'compact') throw new Error('compact is not the default strip size');
+                if (registration.currentValues.hoverPreview !== true) throw new Error('hover preview is not enabled by default');
+                if (registration.currentValues.initialState !== 'collapsed') throw new Error('collapsed is not the default initial state');
+
+                const compactHeight = parseFloat(getComputedStyle(toggle).minHeight);
+                if (compactHeight > 24) throw new Error('default summary control is too tall');
+                if (!['400', 'normal'].includes(getComputedStyle(toggle).fontWeight)) throw new Error('summary control is too bold');
+
+                const setSetting = (key, value) => window.dispatchEvent(new CustomEvent(
+                    'lectio-manager:set-setting',
+                    { detail: { id: 'schedule-summary', key, value } }
+                ));
+
+                setSetting('stripSize', 'slim');
+                const slimHeight = parseFloat(getComputedStyle(toggle).minHeight);
+                if (summaryRow.dataset.stripSize !== 'slim') throw new Error('slim strip size was not applied immediately');
+                if (slimHeight >= compactHeight) throw new Error('slim strip is not smaller than compact');
+
+                setSetting('stripSize', 'comfortable');
+                const comfortableHeight = parseFloat(getComputedStyle(toggle).minHeight);
+                if (summaryRow.dataset.stripSize !== 'comfortable') throw new Error('comfortable strip size was not applied immediately');
+                if (comfortableHeight <= compactHeight) throw new Error('comfortable strip is not larger than compact');
+
+                setSetting('hoverPreview', false);
+                if (summaryRow.dataset.hoverPreview !== 'false') throw new Error('hover preview was not disabled immediately');
 
                 toggle.focus();
-                if (getComputedStyle(tooltip).display === 'none') throw new Error('tooltip is not visible from the summary control');
+                if (getComputedStyle(tooltip).display === 'none') throw new Error('keyboard preview was lost when hover preview was disabled');
                 const originalInformationCell = informationRow.querySelector('td:nth-child(2)');
                 const tooltipFontSize = parseFloat(getComputedStyle(tooltip).fontSize);
                 const originalFontSize = parseFloat(getComputedStyle(originalInformationCell).fontSize);
                 if (tooltipFontSize > originalFontSize * 0.85) throw new Error('tooltip content was not scaled down by about 20%');
                 toggle.blur();
 
-                toggle.click();
-                if (informationRow.hidden) throw new Error('click did not expand the information row');
-                if (toggle.getAttribute('aria-expanded') !== 'true') throw new Error('expanded state is not announced');
-
-                toggle.click();
-                if (!informationRow.hidden) throw new Error('second click did not collapse the information row');
+                setSetting('initialState', 'expanded');
+                if (informationRow.hidden) throw new Error('expanded initial state was not applied immediately');
+                if (toggle.getAttribute('aria-expanded') !== 'true') throw new Error('immediate expanded state is not announced');
 
                 result.dataset.testResult = 'pass';
                 result.textContent = 'PASS';
+                document.body.appendChild(result);
             } catch (error) {
                 result.dataset.testResult = 'fail';
                 result.textContent = `FAIL: ${error.message}`;
+                document.body.appendChild(result);
             }
-
-            document.body.appendChild(result);
         });
     </script>
 </body>

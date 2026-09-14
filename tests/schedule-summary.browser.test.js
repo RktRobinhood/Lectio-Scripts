@@ -14,18 +14,24 @@ const chromePath = process.env.CHROME_PATH ||
 test('schedule information can be previewed and expanded from a compact summary', async () => {
     const profileDirectory = await mkdtemp(join(tmpdir(), 'lectio-schedule-summary-'));
     const fixtureUrl = pathToFileURL(resolve(__dirname, 'fixtures', 'schedule.html')).href;
-
-    try {
+    const runFixture = async (url) => {
         const { stdout } = await execFileAsync(chromePath, [
             '--headless=new',
             '--disable-gpu',
             '--allow-file-access-from-files',
             `--user-data-dir=${profileDirectory}`,
             '--dump-dom',
-            fixtureUrl
+            url
         ]);
+        return stdout;
+    };
 
-        assert.match(stdout, /data-test-result="pass"/, stdout);
+    try {
+        const defaultOutput = await runFixture(fixtureUrl);
+        assert.match(defaultOutput, /data-test-result="pass"/, defaultOutput);
+
+        const persistedOutput = await runFixture(`${fixtureUrl}?phase=persist`);
+        assert.match(persistedOutput, /data-test-result="pass"/, persistedOutput);
     } finally {
         await rm(profileDirectory, { recursive: true, force: true });
     }
