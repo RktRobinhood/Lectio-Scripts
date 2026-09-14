@@ -52,12 +52,12 @@
                 assert(JSON.parse(localStorage.getItem('lectioUnreadMessages.settings.v1')).bubbleScale === 150, 'Bubble scale did not persist');
 
                 document.documentElement.style.setProperty('--lectio-theme-accent', '#111111');
-                await new Promise(resolve => setTimeout(resolve, 0));
+                await Promise.resolve();
                 assert(document.documentElement.style.getPropertyValue('--lectio-unread-badge-text') === '#ffffff', 'Dark badge background did not receive light text');
                 assert(getComputedStyle(document.querySelector('.lectio-unread-badge')).color === 'rgb(255, 255, 255)', 'Badge did not render the computed light text colour');
 
                 document.documentElement.style.setProperty('--lectio-theme-accent', '#f8d5e5');
-                await new Promise(resolve => setTimeout(resolve, 0));
+                await Promise.resolve();
                 assert(document.documentElement.style.getPropertyValue('--lectio-unread-badge-text') === '#001e2f', 'Light badge background did not receive dark text');
 
                 document.documentElement.dataset.testResult = 'pass';
