@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.11.0
+// @version      1.12.0
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules from one small gear panel.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
@@ -52,6 +52,7 @@
     const STORAGE_VIEW = 'lectioManager.view.v1';
     const STORAGE_SORT_MODE = 'lectioManager.sortMode.v1';
     const STORAGE_UPDATE_TIP_DISMISSED = 'lectioManager.updateTipDismissed.v1';
+    const STORAGE_INSTALLED = 'lectioManager.installed.v1';
 
     const ISSUES_URL = 'https://github.com/RktRobinhood/Lectio-Scripts/issues/new/choose';
 
@@ -69,7 +70,13 @@
     let sortMode = 'category';
     let openSettingsModuleId = null;
 
+    // Modules that registered on THIS page load. A module only registers where its
+    // own @match lets it run, so this is "active here", not "installed".
     const detected = new Map();
+
+    // Modules seen at least once on any Lectio page, persisted across page loads.
+    // This is what Installed/Available are counted from.
+    const installed = new Map();
 
     // ============================================================
     // BOOT
@@ -91,6 +98,7 @@
         lastRefresh = Number(GM_getValue(STORAGE_LAST_REFRESH, 0)) || 0;
         currentView = normalizeView(GM_getValue(STORAGE_VIEW, 'installed'));
         sortMode = normalizeSortMode(GM_getValue(STORAGE_SORT_MODE, 'category'));
+        loadInstalledRegistry();
 
         buildUI();
         renderModuleList();
@@ -327,6 +335,85 @@
     }
 
     // ============================================================
+    // INSTALLED REGISTRY
+    // ============================================================
+
+    function loadInstalledRegistry() {
+        const raw = GM_getValue(STORAGE_INSTALLED, '');
+
+        if (!raw) {
+            return;
+        }
+
+        try {
+            const parsed = JSON.parse(raw);
+
+            if (!parsed || typeof parsed !== 'object') {
+                return;
+            }
+
+            for (const [id, entry] of Object.entries(parsed)) {
+                if (!isNonEmptyString(id) || !entry || typeof entry !== 'object') {
+                    continue;
+                }
+
+                installed.set(id, {
+                    id,
+                    name: isNonEmptyString(entry.name) ? entry.name : id,
+                    version: isNonEmptyString(entry.version) ? entry.version : '',
+                    lastSeenAt: Number(entry.lastSeenAt) || 0
+                });
+            }
+        } catch (_) {
+            console.warn(LOG, 'Ignoring malformed installed registry');
+        }
+    }
+
+    function saveInstalledRegistry() {
+        const plain = {};
+
+        for (const [id, entry] of installed) {
+            plain[id] = { name: entry.name, version: entry.version, lastSeenAt: entry.lastSeenAt };
+        }
+
+        GM_setValue(STORAGE_INSTALLED, JSON.stringify(plain));
+    }
+
+    function rememberInstalled(registration) {
+        installed.set(registration.id, {
+            id: registration.id,
+            name: registration.name,
+            version: registration.version,
+            lastSeenAt: Date.now()
+        });
+
+        saveInstalledRegistry();
+    }
+
+    function forgetInstalled(moduleId) {
+        if (!installed.delete(moduleId)) {
+            return;
+        }
+
+        detected.delete(moduleId);
+        saveInstalledRegistry();
+        renderModuleList();
+    }
+
+    // A module is installed if it has ever registered, not merely if it is running
+    // on the page in front of us: Schedule Summary only matches SkemaNy.aspx, and
+    // Unread Message Notifications only matches one school.
+    function isInstalled(moduleId) {
+        return detected.has(moduleId) || installed.has(moduleId);
+    }
+
+    // The record to show on a card: the live registration when the module is running
+    // here, otherwise what we last persisted about it.
+    function getModuleRecord(moduleId) {
+        return detected.get(moduleId) || installed.get(moduleId) || null;
+    }
+
+    // ============================================================
     // MODULE HANDSHAKE
     // ============================================================
 
@@ -352,6 +439,7 @@
             seenAt: Date.now()
         });
 
+        rememberInstalled(detected.get(detail.id));
         renderModuleList();
     }
 
@@ -696,10 +784,10 @@
 
     function renderPrimaryTabs() {
         const installedCount = catalogue
-            ? catalogue.modules.filter((module) => detected.has(module.id)).length
+            ? catalogue.modules.filter((module) => isInstalled(module.id)).length
             : 0;
         const availableCount = catalogue
-            ? catalogue.modules.filter((module) => !detected.has(module.id)).length
+            ? catalogue.modules.filter((module) => !isInstalled(module.id)).length
             : 0;
         const primaryView = currentView === 'installed' ? 'installed' : 'all';
 
@@ -722,7 +810,7 @@
         let filtered;
 
         if (currentView === 'installed') {
-            filtered = catalogue.modules.filter((module) => detected.has(module.id));
+            filtered = catalogue.modules.filter((module) => isInstalled(module.id));
         } else if (currentView.startsWith(AUDIENCE_VIEW_PREFIX)) {
             const audience = currentView.slice(AUDIENCE_VIEW_PREFIX.length);
             filtered = getAvailableModules().filter((module) => !module.audience.length || module.audience.includes(audience));
@@ -745,7 +833,7 @@
     }
 
     function getAvailableModules() {
-        return catalogue.modules.filter((module) => !detected.has(module.id));
+        return catalogue.modules.filter((module) => !isInstalled(module.id));
     }
 
     function getEmptyStateText(view) {
@@ -824,7 +912,10 @@
     }
 
     function buildModuleCard(module) {
-        const registration = detected.get(module.id);
+        // `live` is the module running on this page; `record` is what we know about it
+        // as an installed module, which survives pages where it does not run.
+        const live = detected.get(module.id);
+        const record = getModuleRecord(module.id);
         const compact = currentView === 'installed';
 
         const card = document.createElement('div');
@@ -870,16 +961,24 @@
         const actions = document.createElement('div');
         actions.className = 'lectio-manager-card-actions';
 
-        if (registration) {
-            const hasUpdate = isVersionNewer(module.version, registration.version);
-            const installed = document.createElement('span');
-            installed.className = hasUpdate
+        if (record) {
+            const hasUpdate = isVersionNewer(module.version, record.version);
+            const installedLabel = document.createElement('span');
+            installedLabel.className = hasUpdate
                 ? 'lectio-manager-status-update'
                 : 'lectio-manager-status-installed';
-            installed.textContent = hasUpdate
-                ? `Update available: v${module.version} (installed v${registration.version})`
-                : `Installed v${registration.version || module.version}`;
-            status.appendChild(installed);
+            installedLabel.textContent = hasUpdate
+                ? `Update available: v${module.version} (installed v${record.version})`
+                : `Installed v${record.version || module.version}`;
+            status.appendChild(installedLabel);
+
+            if (!live) {
+                const idle = document.createElement('span');
+                idle.className = 'lectio-manager-status-idle';
+                idle.textContent = 'Not active on this page';
+                idle.title = `${module.name} is installed but does not run on this Lectio page, so its settings cannot be changed from here.`;
+                status.appendChild(idle);
+            }
 
             if (hasUpdate) {
                 const updateLink = document.createElement('a');
@@ -892,13 +991,23 @@
                 actions.appendChild(updateLink);
             }
 
-            if (registration.settingsSchema.length) {
+            if (live && live.settingsSchema.length) {
                 const settingsBtn = document.createElement('button');
                 settingsBtn.type = 'button';
                 settingsBtn.className = 'lectio-manager-settings-btn';
                 settingsBtn.textContent = 'Settings';
-                settingsBtn.addEventListener('click', () => showSettingsView(module, registration));
+                settingsBtn.addEventListener('click', () => showSettingsView(module, live));
                 actions.appendChild(settingsBtn);
+            }
+
+            if (!live) {
+                const forgetBtn = document.createElement('button');
+                forgetBtn.type = 'button';
+                forgetBtn.className = 'lectio-manager-forget-btn';
+                forgetBtn.textContent = 'Remove';
+                forgetBtn.title = 'Remove from Installed — use this only if you have uninstalled the module in Tampermonkey.';
+                forgetBtn.addEventListener('click', () => forgetInstalled(module.id));
+                actions.appendChild(forgetBtn);
             }
         } else {
             const notDetected = document.createElement('span');
@@ -1865,13 +1974,26 @@
                 color: var(--lectio-theme-muted, #5e6870);
             }
 
+            .lectio-manager-status-idle {
+                font-size: 10px;
+                font-style: italic;
+                color: var(--lectio-theme-muted, #5e6870);
+                white-space: nowrap;
+            }
+
             .lectio-manager-card-actions {
                 display: flex;
                 gap: 6px;
             }
 
+            .lectio-manager-forget-btn {
+                border-color: var(--lectio-theme-muted, #5e6870);
+                color: var(--lectio-theme-muted, #5e6870);
+            }
+
             .lectio-manager-install-btn,
             .lectio-manager-update-btn,
+            .lectio-manager-forget-btn,
             .lectio-manager-settings-btn {
                 border: 1px solid var(--lectio-theme-accent, #0f6f6f);
                 color: var(--lectio-theme-accent, #0f6f6f);
@@ -1887,6 +2009,7 @@
 
             .lectio-manager-install-btn:hover,
             .lectio-manager-update-btn:hover,
+            .lectio-manager-forget-btn:hover,
             .lectio-manager-settings-btn:hover {
                 background: var(--lectio-theme-surface-alt, #e8f3f3);
             }

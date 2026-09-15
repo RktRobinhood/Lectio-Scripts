@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio Manager installed-persistence fixture</title>
+</head>
+<body>
+    <script>
+        // Mirrors the real repo: Schedule Summary only matches SkemaNy.aspx and Unread
+        // Message Notifications only matches one school, so on most Lectio pages an
+        // installed module never registers. It must still count as installed.
+        const catalogue = {
+            schemaVersion: 1,
+            generatedAt: '2026-09-15T00:00:00.000Z',
+            modules: [
+                {
+                    id: 'always-on',
+                    name: 'Always On',
+                    description: 'Installed and running on this page.',
+                    category: 'Interface',
+                    audience: ['student', 'teacher'],
+                    status: 'stable',
+                    version: '1.0.0',
+                    installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/AlwaysOn.user.js'
+                },
+                {
+                    id: 'page-scoped',
+                    name: 'Page Scoped',
+                    description: 'Installed, but does not run on this page.',
+                    category: 'Timetable',
+                    audience: ['student'],
+                    status: 'stable',
+                    version: '1.2.0',
+                    installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/PageScoped.user.js'
+                },
+                {
+                    id: 'never-installed',
+                    name: 'Never Installed',
+                    description: 'Genuinely not installed.',
+                    category: 'Messages',
+                    audience: ['teacher'],
+                    status: 'stable',
+                    version: '1.0.0',
+                    installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Never.user.js'
+                }
+            ]
+        };
+
+        // page-scoped registered on an earlier page load and was persisted then.
+        const storage = new Map([
+            ['lectioManager.catalogue.v1', JSON.stringify(catalogue)],
+            ['lectioManager.lastRefresh.v1', Date.now()],
+            ['lectioManager.updateTipDismissed.v1', true],
+            ['lectioManager.installed.v1', JSON.stringify({
+                'page-scoped': { name: 'Page Scoped', version: '1.1.0', lastSeenAt: Date.now() - 60000 }
+            })]
+        ]);
+
+        window.GM_getValue = (key, fallback) => storage.has(key) ? storage.get(key) : fallback;
+        window.GM_setValue = (key, value) => storage.set(key, value);
+        window.GM_xmlhttpRequest = () => {};
+
+        // Only always-on runs here. page-scoped stays silent, exactly as it would on a
+        // Lectio page its @match does not cover.
+        window.addEventListener('lectio-manager:discover', () => {
+            window.dispatchEvent(new CustomEvent('lectio-module:register', {
+                detail: {
+                    id: 'always-on',
+                    name: 'Always On',
+                    version: '1.0.0',
+                    settingsSchema: [{ key: 'enabled', type: 'toggle', label: 'Enabled', section: 'Behaviour' }],
+                    currentValues: { enabled: true }
+                }
+            }));
+        });
+    </script>
+    <script src="../../manager/Lectio-Manager.user.js"></script>
+    <script>
+        function names() {
+            return [...document.querySelectorAll('.lectio-manager-card-name')]
+                .map(element => element.textContent.trim());
+        }
+
+        function card(id) {
+            return document.querySelector(`[data-module-id="${id}"]`);
+        }
+
+        function assert(condition, message) {
+            if (!condition) throw new Error(message);
+        }
+
+        window.addEventListener('load', async () => {
+            try {
+                const installedTab = document.querySelector('[data-primary-view="installed"]');
+                const availableTab = document.querySelector('[data-primary-view="all"]');
+
+                // A module that did not register on this page is still installed.
+                assert(installedTab.textContent.trim() === 'Installed 2',
+                    `Installed count ignored a module that is not running here: ${installedTab.textContent}`);
+                assert(availableTab.textContent.trim() === 'Available 1',
+                    `Available count counted an installed module: ${availableTab.textContent}`);
+                assert(names().join('|') === 'Always On|Page Scoped',
+                    `Installed view dropped a module that is not running here: ${names()}`);
+
+                // It is marked as installed-but-idle, and its update still shows.
+                assert(card('page-scoped').querySelector('.lectio-manager-status-idle'),
+                    'Installed module that is not running here was not marked as inactive');
+                assert(!card('always-on').querySelector('.lectio-manager-status-idle'),
+                    'Running module was wrongly marked as inactive');
+                assert(card('page-scoped').querySelector('.lectio-manager-status-update')
+                    ?.textContent.includes('v1.2.0'),
+                    'Update was not offered for an installed module that is not running here');
+
+                // Settings need a live module to receive the events, so they stay hidden.
+                assert(!card('page-scoped').querySelector('.lectio-manager-settings-btn'),
+                    'Settings were offered for a module that cannot receive setting events');
+                assert(card('always-on').querySelector('.lectio-manager-settings-btn'),
+                    'Settings disappeared for the running module');
+
+                // Available must not repeat it.
+                availableTab.click();
+                assert(names().join('|') === 'Never Installed',
+                    `Available repeated an installed module: ${names()}`);
+
+                // Remove is the escape hatch for a module actually uninstalled.
+                installedTab.click();
+                card('page-scoped').querySelector('.lectio-manager-forget-btn').click();
+                assert(installedTab.textContent.trim() === 'Installed 1',
+                    `Remove did not drop the module from Installed: ${installedTab.textContent}`);
+                assert(availableTab.textContent.trim() === 'Available 2',
+                    `Remove did not return the module to Available: ${availableTab.textContent}`);
+                assert(!JSON.parse(storage.get('lectioManager.installed.v1'))['page-scoped'],
+                    'Remove did not persist; the module would come back on the next page');
+
+                document.body.dataset.testResult = 'pass';
+            } catch (error) {
+                document.body.dataset.testResult = error.message;
+            }
+        });
+    </script>
+</body>
+</html>

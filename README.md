@@ -34,9 +34,9 @@ They run locally in your browser while you use Lectio. Install only the modules 
 
 - shows a **catalogue** of modules that are still available to install, fetched from this repository (`catalogue/modules.json`),
 - lets you **install** a module with one click, using Tampermonkey's own install screen,
-- shows whether a module is currently **detected as running**,
+- remembers every module it has ever seen as **installed**, and shows whether that module is also running on the page you are on,
 - caches the catalogue locally and refreshes it automatically at most once every 24 hours, with a manual refresh button whenever you want the latest list,
-- opens on a compact **Installed** tab, with a counted **Available** tab for discovering modules that are not currently detected; its audience and category filters narrow only that available set,
+- opens on a compact **Installed** tab, with a counted **Available** tab for discovering modules you have not installed yet; its audience and category filters narrow only that available set, and an installed module never appears in both,
 - sorts either tab by Category or Name immediately, without interrupting navigation,
 - has one **wrench button** in the header that opens Tampermonkey's own dashboard directly, for disabling, updating, or removing any script — since that dashboard already lists everything installed, there's no need for a separate button per module,
 - has a **Report a bug or idea** link at the bottom of the panel, straight to this repository's GitHub Issue templates.
@@ -46,7 +46,9 @@ The Manager itself contains **no feature logic**. Translation, message polling, 
 Look for a small teal gear button in the bottom-right corner of any Lectio page after installing it.
 
 > [!NOTE]
-> The Manager can only tell a module is installed if that module is currently **enabled and running** and replies to the Manager's handshake. If a module was disabled directly in Tampermonkey, or simply isn't installed, the Manager shows the same honest **"Not detected"** status either way — it cannot tell those two states apart.
+> A module tells the Manager it exists by replying to a handshake, which it can only do on pages its own `@match` covers — Schedule Summary only runs on the schedule page, for example. The Manager therefore **remembers** each module it has seen and keeps counting it as installed everywhere, marking it *"Not active on this page"* where it isn't running. Settings stay hidden there, because a module that isn't running cannot receive them.
+>
+> The trade-off is that the Manager cannot see a module you remove in Tampermonkey; it has no API to check. Use **Remove** on the module's card to forget it.
 
 > [!NOTE]
 > Tampermonkey has no API for a userscript to uninstall or disable *another* script, so the Manager can't do that directly — that stays Tampermonkey's job by design. The header's wrench button is a shortcut to Tampermonkey's dashboard, not a bypass, and its reliability depends on your browser:
@@ -236,9 +238,9 @@ Repeat the install steps for each one, through the Manager or manually. They app
 
 ### Disable or remove
 
-To temporarily disable a script, switch it **Off** in the Tampermonkey Dashboard and reload Lectio. The Manager will then correctly show that module as **"Not detected"**.
+To temporarily disable a script, switch it **Off** in the Tampermonkey Dashboard and reload Lectio. The Manager will keep listing it as installed — it cannot see Tampermonkey's on/off state — but will mark it *"Not active on this page"*.
 
-To remove it completely, delete it from the Dashboard. Nothing needs to be removed from Lectio itself, and nothing needs to be removed from the Manager either — an uninstalled module simply disappears from the "installed" state the next time the Manager asks.
+To remove it completely, delete it from the Dashboard, then click **Remove** on that module's card in the Manager so it stops being counted as installed and returns to **Available**.
 
 ---
 
@@ -249,7 +251,9 @@ To remove it completely, delete it from the Dashboard. Nothing needs to be remov
 | **Nothing happens** | Confirm Tampermonkey and the script are enabled, reload Lectio, and check Chrome/Edge userscript permissions. |
 | **No gear button appears** | Confirm the Lectio Manager script is installed and enabled in the Tampermonkey Dashboard, then reload Lectio. |
 | **The Manager's module list is empty or stuck loading** | This means it has never successfully fetched the catalogue. Check your connection and click the manual refresh (circular arrow) button. |
-| **A module always shows "Not detected" even though it's installed** | Confirm it is **enabled** (not just installed) in the Tampermonkey Dashboard, then reload Lectio. The Manager cannot distinguish "disabled" from "never installed." |
+| **A module shows "Not active on this page"** | Expected when that module doesn't run everywhere — Schedule Summary only runs on the schedule page. It still counts as installed. Open a page it covers to change its settings. |
+| **A module I removed still shows as installed** | The Manager can't see removals in Tampermonkey. Click **Remove** on its card to forget it. |
+| **A module never appears as installed** | Confirm it is **enabled** (not just installed) in the Tampermonkey Dashboard, then load a Lectio page that module actually runs on. |
 | **The wrench (Tampermonkey) button doesn't open anything** | On Chromium browsers it should work automatically. On Firefox it prompts you once for your own dashboard link (Tampermonkey icon → Dashboard → copy the address bar URL). On Safari, open it from Safari's own Settings → Extensions instead. Use **Set dashboard link** at the bottom of the panel to add, fix, or clear a saved link manually. |
 | **GitHub Raw only shows JavaScript** | Copy the complete file and use **Create a new script...** instead. |
 | **English translation is incomplete** | Reload, switch **DA → EN**, and report repeatable untranslated text. |
