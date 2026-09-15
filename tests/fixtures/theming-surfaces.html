@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio Theming content-surface fixture</title>
+    <style>
+        /* Lectio's own presentation, kept here so the fixture can show that
+           switching the theme off hands these surfaces back untouched. */
+        body, #masterContent, table, .s2skemabrikcontainer, .ls-card, fieldset {
+            background: #ffffff;
+        }
+        td, th {
+            border: 1px solid #dddddd;
+        }
+    </style>
+    <script>
+        window.GM_getValue = (key, fallback) => fallback;
+        window.GM_setValue = () => {};
+        window.GM_xmlhttpRequest = () => {};
+        window.registrations = new Map();
+        window.addEventListener('lectio-module:register', (event) => {
+            window.registrations.set(event.detail.id, event.detail);
+        });
+    </script>
+</head>
+<body>
+    <nav id="s_m_masterleftDiv">Menu</nav>
+    <main id="masterContent">
+        <table id="schedule">
+            <thead>
+                <tr><th>Modul</th><th>Hold</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td class="s2module-info">1. modul</td>
+                    <td class="s2skemabrikcontainer" id="lesson-cell"><a class="s2skemabrik s2brik">1i TOK/1</a></td>
+                </tr>
+                <tr>
+                    <td class="s2module-info">2. modul</td>
+                    <td class="s2skemabrikcontainer"><a class="s2skemabrik s2brik">2i Fysik</a></td>
+                </tr>
+            </tbody>
+        </table>
+        <section class="ls-card" id="lesson-content">
+            <h2>Lektionens indhold</h2>
+            <p id="lesson-text">Arbejd med opgaverne på side 42.</p>
+            <fieldset id="section-box"><legend>Afsnit</legend><p>Opsummering af modulet.</p></fieldset>
+        </section>
+    </main>
+    <script src="../../modules/Lectio-Theming.user.js"></script>
+    <script>
+        function assert(condition, message) {
+            if (!condition) throw new Error(message);
+        }
+
+        /* Chrome serialises color-mix() results as color(srgb r g b / a). */
+        function colourParts(value) {
+            const srgb = value.match(/^color\(srgb ([\d.]+) ([\d.]+) ([\d.]+)(?: \/ ([\d.]+))?\)$/);
+            if (srgb) {
+                return {
+                    rgb: [srgb[1], srgb[2], srgb[3]].map(Number).map((channel) => channel * 255),
+                    alpha: srgb[4] === undefined ? 1 : Number(srgb[4])
+                };
+            }
+
+            const rgba = value.match(/^rgba?\((\d+), (\d+), (\d+)(?:, ([\d.]+))?\)$/);
+            if (rgba) {
+                return {
+                    rgb: [rgba[1], rgba[2], rgba[3]].map(Number),
+                    alpha: rgba[4] === undefined ? 1 : Number(rgba[4])
+                };
+            }
+
+            throw new Error(`Unsupported colour value: ${value}`);
+        }
+
+        function hexToRgb(hex) {
+            const value = Number.parseInt(hex.slice(1), 16);
+            return [(value >> 16) & 255, (value >> 8) & 255, value & 255];
+        }
+
+        function relativeLuminance(rgb) {
+            const channels = rgb.map((channel) => channel / 255)
+                .map((channel) => channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4);
+            return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+        }
+
+        function contrastRatio(first, second) {
+            const values = [relativeLuminance(first), relativeLuminance(second)];
+            return (Math.max(...values) + 0.05) / (Math.min(...values) + 0.05);
+        }
+
+        function distance(first, second) {
+            return Math.hypot(...first.map((value, index) => value - second[index]));
+        }
+
+        window.addEventListener('load', () => {
+            try {
+                const theming = window.registrations.get('lectio-theming');
+                assert(theming && theming.id === 'lectio-theming', 'Lectio Theming did not register');
+                assert(document.documentElement.classList.contains('lectio-themed'), 'Theme was not applied on load');
+
+                const setSetting = (key, value) => window.dispatchEvent(new CustomEvent(
+                    'lectio-manager:set-setting',
+                    { detail: { id: 'lectio-theming', key, value } }
+                ));
+                const surfaceOf = (id) => colourParts(getComputedStyle(document.getElementById(id)).backgroundColor);
+                const themeVariable = (name) => document.documentElement.style.getPropertyValue(name);
+
+                function readTheme(preset) {
+                    setSetting('preset', preset);
+
+                    const shell = surfaceOf('masterContent');
+                    const box = surfaceOf('lesson-content');
+                    const cell = surfaceOf('lesson-cell');
+                    const background = themeVariable('--lectio-theme-bg');
+
+                    return {
+                        shell,
+                        box,
+                        cell,
+                        background,
+                        text: hexToRgb(themeVariable('--lectio-theme-text')),
+                        /* Alpha the page really ends up with where a box sits
+                           inside the shell: the two veils must not compound
+                           back into a near-opaque panel. */
+                        effective: 1 - (1 - shell.alpha) * (1 - box.alpha)
+                    };
+                }
+
+                const light = readTheme('catppuccin-latte');
+                const dark = readTheme('nord');
+
+                for (const [name, values] of [['light', light], ['dark', dark]]) {
+                    assert(values.shell.alpha < 1 && values.shell.alpha > 0, `${name}: the page shell was not translucent`);
+                    assert(values.box.alpha < 1 && values.box.alpha > 0, `${name}: the content box was not translucent`);
+                    assert(values.cell.alpha < 1 && values.cell.alpha > 0, `${name}: the lesson cell was not translucent`);
+                    assert(values.shell.alpha < values.box.alpha, `${name}: the page shell was not the thinner veil`);
+                    assert(values.effective < 0.7, `${name}: nested content surfaces compounded to ${values.effective}`);
+
+                    /* Readability: text has to keep contrasting with the surface
+                       it sits on once that surface is composited over the
+                       theme's own background. */
+                    const underlying = hexToRgb(values.background);
+                    const composited = values.box.rgb.map(
+                        (channel, index) => channel * values.box.alpha + underlying[index] * (1 - values.box.alpha)
+                    );
+                    assert(contrastRatio(composited, values.text) >= 4.5, `${name}: content text lost contrast against its surface`);
+                }
+
+                assert(dark.effective < light.effective, 'Dark themes did not thin the content surfaces further than light themes');
+                assert(dark.shell.alpha < light.shell.alpha, 'Dark themes did not thin the page shell further than light themes');
+                assert(dark.box.alpha < light.box.alpha, 'Dark themes did not thin the content boxes further than light themes');
+
+                /* A dark palette's box colour used to be its lighter neutral
+                   grey; it now sits closer to that palette's own background. */
+                const darkBackground = hexToRgb(dark.background);
+                assert(
+                    distance(dark.box.rgb, darkBackground) < distance(hexToRgb('#3b4252'), darkBackground),
+                    'Dark content box kept its neutral grey surface colour'
+                );
+
+                /* Only surfaces soften — nothing inside a box is faded whole. */
+                assert(getComputedStyle(document.getElementById('lesson-content')).opacity === '1', 'Content box was faded as a whole');
+                assert(getComputedStyle(document.getElementById('lesson-text')).opacity === '1', 'Content text was faded as a whole');
+
+                setSetting('enabled', false);
+                assert(!document.documentElement.classList.contains('lectio-themed'), 'Theme stayed enabled after being switched off');
+                assert(themeVariable('--lectio-theme-bg') === '', 'Theme variables were not cleared');
+                assert(themeVariable('--lectio-theme-content-surface') === '', 'Content-surface variables were not cleared');
+                assert(surfaceOf('masterContent').alpha === 1, 'Page shell did not return to the theme-less presentation');
+                assert(surfaceOf('lesson-content').alpha === 1, 'Content box did not return to the theme-less presentation');
+                assert(surfaceOf('lesson-cell').alpha === 1, 'Lesson cell did not return to the theme-less presentation');
+
+                document.documentElement.dataset.testResult = 'pass';
+            } catch (error) {
+                document.documentElement.dataset.testResult = `fail: ${error.message}`;
+            }
+        });
+    </script>
+</body>
+</html>

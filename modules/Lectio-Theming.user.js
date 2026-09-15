@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Theming
 // @namespace    https://www.lectio.dk/
-// @version      0.13.1
+// @version      0.14.0
 // @description  Gives Lectio a soft, translucent glass shell with 26 built-in colour schemes (Catppuccin, Nord, Dracula, Cyberpunk and more), each with its own distinct background photo, and can derive a scheme from a website or image.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-start
@@ -16,7 +16,7 @@
 
     const MODULE_ID = 'lectio-theming';
     const MODULE_NAME = 'Lectio Theming';
-    const MODULE_VERSION = '0.13.1';
+    const MODULE_VERSION = '0.14.0';
     const STORAGE_KEY = 'lectioTheming.settings.v2';
     const STYLE_ID = 'lectio-theming-styles';
     const ROOT_CLASS = 'lectio-themed';
@@ -45,6 +45,14 @@
         '--lectio-theme-text', '--lectio-theme-muted', '--lectio-theme-accent',
         '--lectio-theme-accent-alt', '--lectio-theme-blend', '--lectio-theme-danger',
         '--lectio-theme-bg-image', '--lectio-theme-radius', '--lectio-theme-space'
+    ];
+    // Content-surface treatment, internal to this module rather than part of
+    // the ADR-0006 seam: it lets the stylesheet below say "a thin veil for the
+    // page shell, a little more body for the boxes inside it" in one place,
+    // and lets applyTheme() thin and tint those surfaces per palette mode.
+    // Cleared alongside the seam variables whenever the theme is switched off.
+    const CONTENT_SURFACE_VARIABLE_NAMES = [
+        '--lectio-theme-shell-surface', '--lectio-theme-content-surface', '--lectio-theme-content-stripe'
     ];
 
     // Named themes carry their own authentic background/surface/text values,
@@ -448,6 +456,25 @@
             root.dataset.lectioThemePattern = currentPalette.pattern;
             root.style.colorScheme = currentPalette.mode === 'dark' ? 'dark' : 'light';
 
+            // The page shell and the boxes nested inside it are the largest
+            // sheet of colour on a Lectio page, so together they decide how
+            // much of the background image survives. They used to share one
+            // fixed alpha, which compounded across nesting (shell + table +
+            // cell) into a near-opaque panel, and a dark palette's box colour
+            // is a lighter neutral grey than its own background — so the page
+            // filled up with flat grey slabs. Two changes fix that: the shell
+            // becomes a thin veil while boxes keep a little more body, and a
+            // dark palette's box colour is pulled toward its own background
+            // first. Only the surface changes — text, links, borders and
+            // controls keep the contrast they already had.
+            const darkPalette = currentPalette.mode === 'dark';
+            const contentPanel = darkPalette
+                ? mixHex(currentPalette.surface, currentPalette.background, .3)
+                : currentPalette.surface;
+            const shellVeil = darkPalette ? '18%' : '28%';
+            const contentVeil = darkPalette ? '34%' : '46%';
+            const stripeVeil = darkPalette ? '22%' : '30%';
+
             const variables = {
                 '--lectio-theme-bg': currentPalette.background,
                 '--lectio-theme-surface': currentPalette.surface,
@@ -460,7 +487,10 @@
                 '--lectio-theme-danger': currentPalette.danger,
                 '--lectio-theme-bg-image': `url('${ASSET_BASE_URL}/${currentPalette.image}')`,
                 '--lectio-theme-radius': `${effectiveSettings.radius}px`,
-                '--lectio-theme-space': effectiveSettings.density === 'compact' ? '6px' : '10px'
+                '--lectio-theme-space': effectiveSettings.density === 'compact' ? '6px' : '10px',
+                '--lectio-theme-shell-surface': `color-mix(in srgb, ${contentPanel} ${shellVeil}, transparent)`,
+                '--lectio-theme-content-surface': `color-mix(in srgb, ${contentPanel} ${contentVeil}, transparent)`,
+                '--lectio-theme-content-stripe': `color-mix(in srgb, ${currentPalette.surfaceAlt} ${stripeVeil}, transparent)`
             };
 
             for (const [key, value] of Object.entries(variables)) {
@@ -469,7 +499,7 @@
         } else {
             delete root.dataset.lectioThemePattern;
             root.style.colorScheme = '';
-            for (const key of THEME_VARIABLE_NAMES) {
+            for (const key of [...THEME_VARIABLE_NAMES, ...CONTENT_SURFACE_VARIABLE_NAMES]) {
                 root.style.removeProperty(key);
             }
         }
@@ -495,6 +525,11 @@
                 --lectio-theme-danger: #d20f39;
                 --lectio-theme-radius: 12px;
                 --lectio-theme-space: 6px;
+                /* Light-theme defaults for the content-surface treatment
+                   applyTheme() derives from the active palette. */
+                --lectio-theme-shell-surface: color-mix(in srgb, #ffffff 28%, transparent);
+                --lectio-theme-content-surface: color-mix(in srgb, #ffffff 46%, transparent);
+                --lectio-theme-content-stripe: color-mix(in srgb, #e6e9ef 30%, transparent);
             }
 
             html.${ROOT_CLASS},
@@ -553,7 +588,7 @@
             }
 
             html.${ROOT_CLASS} :where(#masterContent, #content, #m_Content, .ls-master-container, .ls-content-container) {
-                background: color-mix(in srgb, var(--lectio-theme-surface) 55%, transparent) !important;
+                background: var(--lectio-theme-shell-surface) !important;
                 color: var(--lectio-theme-text) !important;
             }
 
@@ -571,16 +606,16 @@
             }
 
             html.${ROOT_CLASS} table {
-                background: color-mix(in srgb, var(--lectio-theme-surface) 55%, transparent) !important;
+                background: var(--lectio-theme-content-surface) !important;
                 color: var(--lectio-theme-text);
             }
 
             html.${ROOT_CLASS} :where(th, tr:nth-child(even) > td) {
-                background: color-mix(in srgb, var(--lectio-theme-surface-alt) 40%, transparent) !important;
+                background: var(--lectio-theme-content-stripe) !important;
             }
 
             html.${ROOT_CLASS} :where([class*="ls-card"], [class*="ls-island"], fieldset, .s2skemabrikcontainer) {
-                background: color-mix(in srgb, var(--lectio-theme-surface) 55%, transparent) !important;
+                background: var(--lectio-theme-content-surface) !important;
                 box-shadow: 0 8px 22px color-mix(in srgb, var(--lectio-theme-muted) 18%, transparent), inset 0 1px color-mix(in srgb, var(--lectio-theme-text) 6%, transparent);
                 padding: var(--lectio-theme-space);
             }
@@ -707,7 +742,7 @@
             }
 
             html.${ROOT_CLASS} :where(.ls-paper, .lc-display-fragment) {
-                background: color-mix(in srgb, var(--lectio-theme-surface) 65%, transparent) !important;
+                background: var(--lectio-theme-content-surface) !important;
                 color: var(--lectio-theme-text) !important;
             }
 
