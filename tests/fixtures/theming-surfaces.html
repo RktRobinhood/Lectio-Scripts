@@ -4,10 +4,16 @@
     <meta charset="utf-8">
     <title>Lectio Theming content-surface fixture</title>
     <style>
-        /* Lectio's own presentation, kept here so the fixture can show that
-           switching the theme off hands these surfaces back untouched. */
-        body, #masterContent, table, .s2skemabrikcontainer, .ls-card, fieldset {
+        /* What Lectio itself (and the CKEditor skin) paints without the theme,
+           kept here so the fixture can show both that these surfaces get
+           themed and that switching the theme off hands them back untouched.
+           .cke_reset mirrors CKEditor's own `background: transparent` reset. */
+        body, #masterContent, .ls-content-container, table, .s2skemabrikcontainer,
+        [class*="ls-card"], fieldset, .ls-paper, .lc-display-fragment {
             background: #ffffff;
+        }
+        .cke_reset {
+            background: transparent;
         }
         td, th {
             border: 1px solid #dddddd;
@@ -25,27 +31,45 @@
 </head>
 <body>
     <nav id="s_m_masterleftDiv">Menu</nav>
-    <main id="masterContent">
-        <table id="schedule">
-            <thead>
-                <tr><th>Modul</th><th>Hold</th></tr>
-            </thead>
-            <tbody>
-                <tr>
-                    <td class="s2module-info">1. modul</td>
-                    <td class="s2skemabrikcontainer" id="lesson-cell"><a class="s2skemabrik s2brik">1i TOK/1</a></td>
-                </tr>
-                <tr>
-                    <td class="s2module-info">2. modul</td>
-                    <td class="s2skemabrikcontainer"><a class="s2skemabrik s2brik">2i Fysik</a></td>
-                </tr>
-            </tbody>
-        </table>
-        <section class="ls-card" id="lesson-content">
-            <h2>Lektionens indhold</h2>
-            <p id="lesson-text">Arbejd med opgaverne på side 42.</p>
-            <fieldset id="section-box"><legend>Afsnit</legend><p>Opsummering af modulet.</p></fieldset>
-        </section>
+    <main id="masterContent" class="ls-master-container1">
+        <div class="ls-content-container" id="content-shell">
+            <section class="ls-card-filled" id="lesson-content">
+                <h2>Lektionens indhold</h2>
+                <p id="lesson-text">Arbejd med opgaverne på side 42.</p>
+                <fieldset id="section-box"><legend>Afsnit</legend><p>Opsummering af modulet.</p></fieldset>
+            </section>
+            <div id="homeworkContentContainer" class="ls-paper">
+                <div id="homeworkFields">
+                    <input id="title-field" type="text" value="A fun conditioning example">
+                    <textarea id="note-field">Note</textarea>
+                </div>
+                <div class="cke_chrome">
+                    <div class="cke_inner cke_reset">
+                        <div class="cke_contents">
+                            <div id="homework-editor" class="cke_editable cke_editable_themed lc-display-fragment" contenteditable="true">
+                                <h1>A fun conditioning example</h1>
+                                <p>Arbejd med opgaverne.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <table id="schedule">
+                <thead>
+                    <tr><th>Modul</th><th>Hold</th></tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class="s2module-info">1. modul</td>
+                        <td class="s2skemabrikcontainer" id="lesson-cell"><a class="s2skemabrik s2brik">1i TOK/1</a></td>
+                    </tr>
+                    <tr>
+                        <td class="s2module-info">2. modul</td>
+                        <td class="s2skemabrikcontainer"><a class="s2skemabrik s2brik">2i Fysik</a></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
     </main>
     <script src="../../modules/Lectio-Theming.user.js"></script>
     <script>
@@ -104,27 +128,34 @@
                     'lectio-manager:set-setting',
                     { detail: { id: 'lectio-theming', key, value } }
                 ));
-                const surfaceOf = (id) => colourParts(getComputedStyle(document.getElementById(id)).backgroundColor);
+                const element = (id) => document.getElementById(id);
+                const surfaceOf = (id) => colourParts(getComputedStyle(element(id)).backgroundColor);
                 const themeVariable = (name) => document.documentElement.style.getPropertyValue(name);
+                const stack = (alphas) => alphas.reduce((total, alpha) => 1 - (1 - total) * (1 - alpha), 0);
 
                 function readTheme(preset) {
                     setSetting('preset', preset);
 
                     const shell = surfaceOf('masterContent');
-                    const box = surfaceOf('lesson-content');
-                    const cell = surfaceOf('lesson-cell');
+                    const box = surfaceOf('homeworkContentContainer');
                     const background = themeVariable('--lectio-theme-bg');
 
                     return {
                         shell,
                         box,
-                        cell,
                         background,
                         text: hexToRgb(themeVariable('--lectio-theme-text')),
-                        /* Alpha the page really ends up with where a box sits
-                           inside the shell: the two veils must not compound
-                           back into a near-opaque panel. */
-                        effective: 1 - (1 - shell.alpha) * (1 - box.alpha)
+                        nestedShell: surfaceOf('content-shell'),
+                        card: surfaceOf('lesson-content'),
+                        editor: surfaceOf('homework-editor'),
+                        section: surfaceOf('section-box'),
+                        table: surfaceOf('schedule'),
+                        cell: surfaceOf('lesson-cell'),
+                        field: surfaceOf('title-field'),
+                        /* What the lesson text actually sits on: the page shell
+                           with the lesson paper's veil over it. Every layer
+                           nested in between must contribute nothing. */
+                        lessonSurface: stack([shell.alpha, box.alpha])
                     };
                 }
 
@@ -132,45 +163,75 @@
                 const dark = readTheme('nord');
 
                 for (const [name, values] of [['light', light], ['dark', dark]]) {
-                    assert(values.shell.alpha < 1 && values.shell.alpha > 0, `${name}: the page shell was not translucent`);
-                    assert(values.box.alpha < 1 && values.box.alpha > 0, `${name}: the content box was not translucent`);
-                    assert(values.cell.alpha < 1 && values.cell.alpha > 0, `${name}: the lesson cell was not translucent`);
-                    assert(values.shell.alpha < values.box.alpha, `${name}: the page shell was not the thinner veil`);
-                    assert(values.effective < 0.7, `${name}: nested content surfaces compounded to ${values.effective}`);
+                    assert(values.shell.alpha > 0 && values.shell.alpha < 1, `${name}: the page shell was not translucent`);
+                    assert(values.box.alpha > 0 && values.box.alpha < 1, `${name}: the lesson paper was not translucent`);
+                    assert(values.card.alpha > 0 && values.card.alpha < 1, `${name}: the content card was not translucent`);
 
-                    /* Readability: text has to keep contrasting with the surface
-                       it sits on once that surface is composited over the
-                       theme's own background. */
+                    /* Nesting contributes layout, not another veil. */
+                    assert(values.nestedShell.alpha === 0, `${name}: a shell inside a shell added a second veil`);
+                    assert(values.editor.alpha === 0, `${name}: the editor inside the lesson paper added a second veil`);
+                    assert(values.section.alpha === 0, `${name}: a section inside a card added a second veil`);
+                    assert(values.table.alpha === 0, `${name}: a layout table inside the shell added a veil of its own`);
+                    assert(values.cell.alpha > 0 && values.cell.alpha < 1, `${name}: schedule slots lost their own surface`);
+                    assert(stack([values.shell.alpha, values.cell.alpha]) <= 0.55, `${name}: schedule slots composited past the ceiling`);
+                    assert(values.field.alpha > values.box.alpha, `${name}: form fields should stay more solid than the boxes behind them`);
+
+                    /* The composite the eye actually sees is now the sum of two
+                       layers instead of four, and it stays legible. */
+                    assert(values.lessonSurface <= 0.55, `${name}: lesson content still composited to ${values.lessonSurface}`);
+                    assert(values.lessonSurface >= 0.35, `${name}: lesson content went below a legible floor (${values.lessonSurface})`);
+
                     const underlying = hexToRgb(values.background);
                     const composited = values.box.rgb.map(
                         (channel, index) => channel * values.box.alpha + underlying[index] * (1 - values.box.alpha)
                     );
-                    assert(contrastRatio(composited, values.text) >= 4.5, `${name}: content text lost contrast against its surface`);
+                    assert(contrastRatio(composited, values.text) >= 4.5, `${name}: lesson text lost contrast against its surface`);
                 }
 
-                assert(dark.effective < light.effective, 'Dark themes did not thin the content surfaces further than light themes');
+                assert(dark.lessonSurface < light.lessonSurface, 'Dark themes did not thin the lesson surface further than light themes');
                 assert(dark.shell.alpha < light.shell.alpha, 'Dark themes did not thin the page shell further than light themes');
-                assert(dark.box.alpha < light.box.alpha, 'Dark themes did not thin the content boxes further than light themes');
+                assert(dark.box.alpha < light.box.alpha, 'Dark themes did not thin the lesson paper further than light themes');
 
                 /* A dark palette's box colour used to be its lighter neutral
                    grey; it now sits closer to that palette's own background. */
                 const darkBackground = hexToRgb(dark.background);
                 assert(
                     distance(dark.box.rgb, darkBackground) < distance(hexToRgb('#3b4252'), darkBackground),
-                    'Dark content box kept its neutral grey surface colour'
+                    'Dark lesson paper kept its neutral grey surface colour'
                 );
 
+                /* Only two veils may exist between the page background and the
+                   lesson text — the shell and the paper box — which is the bug
+                   this fixture was written for: four stacked veils used to make
+                   the lesson-detail area read as pure white. */
+                let veiled = 0;
+                for (let node = element('homework-editor'); node && node !== document.body; node = node.parentElement) {
+                    const alpha = colourParts(getComputedStyle(node).backgroundColor).alpha;
+                    if (alpha > 0 && alpha < 1) veiled += 1;
+                }
+                assert(veiled === 2, `expected exactly the shell and the paper veil above the lesson text, saw ${veiled}`);
+
+                /* The Glass blur setting frosts the surfaces lesson text sits
+                   on, but not the hundred-odd schedule slots. */
+                assert(getComputedStyle(element('homeworkContentContainer')).backdropFilter.includes('blur(18px)'), 'Lesson paper was not frosted while Glass blur was on');
+                assert(getComputedStyle(element('lesson-cell')).backdropFilter === 'none', 'Schedule slots were frosted, which this module avoids for scroll cost');
+                setSetting('blur', false);
+                assert(getComputedStyle(element('homeworkContentContainer')).backdropFilter === 'none', 'Lesson paper stayed frosted with Glass blur off');
+                setSetting('blur', true);
+
                 /* Only surfaces soften — nothing inside a box is faded whole. */
-                assert(getComputedStyle(document.getElementById('lesson-content')).opacity === '1', 'Content box was faded as a whole');
-                assert(getComputedStyle(document.getElementById('lesson-text')).opacity === '1', 'Content text was faded as a whole');
+                assert(getComputedStyle(element('lesson-content')).opacity === '1', 'Content card was faded as a whole');
+                assert(getComputedStyle(element('homework-editor')).opacity === '1', 'Lesson editor was faded as a whole');
+                assert(getComputedStyle(element('lesson-text')).opacity === '1', 'Lesson text was faded as a whole');
 
                 setSetting('enabled', false);
                 assert(!document.documentElement.classList.contains('lectio-themed'), 'Theme stayed enabled after being switched off');
                 assert(themeVariable('--lectio-theme-bg') === '', 'Theme variables were not cleared');
                 assert(themeVariable('--lectio-theme-content-surface') === '', 'Content-surface variables were not cleared');
-                assert(surfaceOf('masterContent').alpha === 1, 'Page shell did not return to the theme-less presentation');
-                assert(surfaceOf('lesson-content').alpha === 1, 'Content box did not return to the theme-less presentation');
-                assert(surfaceOf('lesson-cell').alpha === 1, 'Lesson cell did not return to the theme-less presentation');
+                for (const id of ['masterContent', 'content-shell', 'lesson-content', 'homeworkContentContainer', 'homework-editor', 'section-box', 'lesson-cell', 'title-field']) {
+                    assert(surfaceOf(id).alpha === 1, `${id} did not return to the unthemed presentation`);
+                }
+                assert(getComputedStyle(element('homeworkContentContainer')).backdropFilter === 'none', 'Frost survived the theme being switched off');
 
                 document.documentElement.dataset.testResult = 'pass';
             } catch (error) {

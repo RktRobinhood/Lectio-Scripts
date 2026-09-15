@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Theming
 // @namespace    https://www.lectio.dk/
-// @version      0.14.0
+// @version      0.14.1
 // @description  Gives Lectio a soft, translucent glass shell with 26 built-in colour schemes (Catppuccin, Nord, Dracula, Cyberpunk and more), each with its own distinct background photo, and can derive a scheme from a website or image.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-start
@@ -16,7 +16,7 @@
 
     const MODULE_ID = 'lectio-theming';
     const MODULE_NAME = 'Lectio Theming';
-    const MODULE_VERSION = '0.14.0';
+    const MODULE_VERSION = '0.14.1';
     const STORAGE_KEY = 'lectioTheming.settings.v2';
     const STYLE_ID = 'lectio-theming-styles';
     const ROOT_CLASS = 'lectio-themed';
@@ -35,6 +35,14 @@
     const CONTENT_ROOT_SELECTOR = '#masterContent, #content, #m_Content, .ls-master-container, .ls-content-container';
     const CHOICE_CONTROL_SELECTOR = 'input[type="checkbox"], input[type="radio"]';
     const DIALOG_CLOSE_SELECTOR = '.ui-dialog .ui-dialog-titlebar-close';
+    // The boxes Lectio nests inside its content shell to hold actual content:
+    // cards, paper/read-mode surfaces, sections and schedule slots. Listed once
+    // because both the "a box inside a box adds no second veil" rule and the
+    // frost rule below need the same set. Layout tables are deliberately not in
+    // here: they are structure rather than content, and a card inside one keeps
+    // its own surface (see the rule that drops a table's veil instead).
+    const FROSTED_CONTENT_BOX_SELECTOR = '[class*="ls-card"], [class*="ls-island"], fieldset, .ls-paper, .lc-display-fragment';
+    const CONTENT_BOX_SELECTOR = `${FROSTED_CONTENT_BOX_SELECTOR}, .s2skemabrikcontainer`;
     // Shared theming seam (see ADR-0006): any other module may read these
     // same custom properties, with its own fallback in var(--name, fallback),
     // to follow the active theme without depending on this module being
@@ -458,22 +466,25 @@
 
             // The page shell and the boxes nested inside it are the largest
             // sheet of colour on a Lectio page, so together they decide how
-            // much of the background image survives. They used to share one
-            // fixed alpha, which compounded across nesting (shell + table +
-            // cell) into a near-opaque panel, and a dark palette's box colour
-            // is a lighter neutral grey than its own background — so the page
-            // filled up with flat grey slabs. Two changes fix that: the shell
-            // becomes a thin veil while boxes keep a little more body, and a
-            // dark palette's box colour is pulled toward its own background
-            // first. Only the surface changes — text, links, borders and
+            // much of the background image survives. Two things used to make
+            // them read as flat panels: one fixed alpha, and nesting — a shell
+            // inside a shell, a box inside a box — stacking that alpha onto
+            // itself, so four themed layers still added up to a near-white
+            // slab on a real activity page. The stylesheet below now gives
+            // each nesting level exactly one veil, and these alphas are chosen
+            // for the composite that leaves behind: a box sitting inside the
+            // shell lands near half-opaque in a light theme and a little
+            // thinner in a dark one, where the box colour is also pulled
+            // toward the palette's own background instead of a lighter neutral
+            // grey. Only the surface changes — text, links, borders and
             // controls keep the contrast they already had.
             const darkPalette = currentPalette.mode === 'dark';
             const contentPanel = darkPalette
                 ? mixHex(currentPalette.surface, currentPalette.background, .3)
                 : currentPalette.surface;
-            const shellVeil = darkPalette ? '18%' : '28%';
-            const contentVeil = darkPalette ? '34%' : '46%';
-            const stripeVeil = darkPalette ? '22%' : '30%';
+            const shellVeil = darkPalette ? '16%' : '26%';
+            const contentVeil = darkPalette ? '28%' : '32%';
+            const stripeVeil = darkPalette ? '16%' : '22%';
 
             const variables = {
                 '--lectio-theme-bg': currentPalette.background,
@@ -527,9 +538,9 @@
                 --lectio-theme-space: 6px;
                 /* Light-theme defaults for the content-surface treatment
                    applyTheme() derives from the active palette. */
-                --lectio-theme-shell-surface: color-mix(in srgb, #ffffff 28%, transparent);
-                --lectio-theme-content-surface: color-mix(in srgb, #ffffff 46%, transparent);
-                --lectio-theme-content-stripe: color-mix(in srgb, #e6e9ef 30%, transparent);
+                --lectio-theme-shell-surface: color-mix(in srgb, #ffffff 26%, transparent);
+                --lectio-theme-content-surface: color-mix(in srgb, #ffffff 32%, transparent);
+                --lectio-theme-content-stripe: color-mix(in srgb, #e6e9ef 22%, transparent);
             }
 
             html.${ROOT_CLASS},
@@ -627,7 +638,15 @@
                 box-shadow: 0 10px 24px color-mix(in srgb, var(--lectio-theme-muted) 20%, transparent);
             }
 
-            html.${ROOT_CLASS}.lectio-theme-blur :where(#s_m_masterleftDiv, .ls-master-header, .ls-top-nav, #s_m_mastermenu, .lectioToolbar, [class*="ls-card"], [class*="ls-island"]) {
+            /* Frost is what keeps a very thin veil readable, so it covers the
+               paper/editor/section surfaces the actual lesson text sits on,
+               not just the navigation chrome. The schedule slots are left out
+               deliberately: they number in the hundreds, where a
+               backdrop-filter costs more scroll smoothness than it returns. */
+            html.${ROOT_CLASS}.lectio-theme-blur :where(
+                #s_m_masterleftDiv, .ls-master-header, .ls-top-nav, #s_m_mastermenu, .lectioToolbar,
+                ${FROSTED_CONTENT_BOX_SELECTOR}
+            ) {
                 backdrop-filter: blur(18px) saturate(130%);
             }
 
@@ -744,6 +763,29 @@
             html.${ROOT_CLASS} :where(.ls-paper, .lc-display-fragment) {
                 background: var(--lectio-theme-content-surface) !important;
                 color: var(--lectio-theme-text) !important;
+            }
+
+            /* One veil per nesting level. Lectio nests these freely — a real
+               activity page puts .ls-content-container inside #masterContent,
+               and the editor's .lc-display-fragment inside the homework
+               .ls-paper — and every extra veil used to stack onto the ones
+               behind it, so a fully themed page still came out near-white.
+               A shell inside a shell, or a box inside a box, therefore adds no
+               second veil of its own: the outermost one already carries the
+               surface, and the nesting only contributes layout. */
+            html.${ROOT_CLASS} :is(${CONTENT_ROOT_SELECTOR}) :is(${CONTENT_ROOT_SELECTOR}),
+            html.${ROOT_CLASS} :is(${CONTENT_BOX_SELECTOR}) :is(${CONTENT_BOX_SELECTOR}) {
+                background: transparent !important;
+                box-shadow: none !important;
+            }
+
+            /* A layout table is structure, not content, so it carries no veil
+               of its own once something above it already does. Its cells keep
+               theirs, which is what keeps the schedule grid reading as slots:
+               one shell veil plus one cell veil, not two sheets. */
+            html.${ROOT_CLASS} :is(${CONTENT_ROOT_SELECTOR}, ${CONTENT_BOX_SELECTOR}) table {
+                background: transparent !important;
+                box-shadow: none !important;
             }
 
             html.${ROOT_CLASS} :where(.ls-toolbarMenuInnerContainer, .ls-std-toolbar-filled) {
