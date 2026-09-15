@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Lectio Theming
 // @namespace    https://www.lectio.dk/
-// @version      0.14.3
-// @description  Gives Lectio a soft, translucent glass shell with 26 built-in colour schemes (Catppuccin, Nord, Dracula, Cyberpunk and more), each with its own distinct background photo, and can derive a scheme from a website or image.
+// @version      0.15.0
+// @description  Gives Lectio a soft, translucent glass shell with 26 built-in colour schemes (Catppuccin, Nord, Dracula, Cyberpunk and more), each with its own distinct background photo, and can derive a scheme from a website or image, take its background from your own picture, and let you hand-pick every key colour.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-start
 // @grant        GM_xmlhttpRequest
@@ -16,13 +16,40 @@
 
     const MODULE_ID = 'lectio-theming';
     const MODULE_NAME = 'Lectio Theming';
-    const MODULE_VERSION = '0.14.3';
+    const MODULE_VERSION = '0.15.0';
     const STORAGE_KEY = 'lectioTheming.settings.v2';
+    // The chosen background picture lives in its own entry rather than in the
+    // settings blob: it is orders of magnitude larger than every other setting
+    // put together, and keeping it apart means an ordinary settings save never
+    // re-serialises a megabyte of image data.
+    const BACKGROUND_STORAGE_KEY = 'lectioTheming.background.v1';
     const STYLE_ID = 'lectio-theming-styles';
     const ROOT_CLASS = 'lectio-themed';
     const LOG = '[Lectio Theming]';
     const MAX_SOURCE_BYTES = 8 * 1024 * 1024;
+    // A chosen background is re-encoded before it is stored. A phone photo is
+    // both far more data than localStorage will hold and far more pixels than
+    // a page background needs — and a browser pays for an oversized
+    // fixed-attachment background on every single scroll. Each step is tried
+    // in turn until one fits the budget below.
+    const BACKGROUND_STEPS = Object.freeze([
+        { size: 1920, quality: .82 }, { size: 1600, quality: .74 },
+        { size: 1280, quality: .66 }, { size: 1024, quality: .58 }
+    ]);
+    // A data URL carries ~4 bytes for every 3 it encodes, and an origin's
+    // whole localStorage is typically about 5 MB — shared with every other
+    // module's settings. Stay well inside that.
+    const MAX_BACKGROUND_CHARS = 2 * 1024 * 1024;
+    const MAX_BACKGROUND_SOURCE_BYTES = 32 * 1024 * 1024;
+    const MAX_VEIL = 80;
     const MODE_KEYS = ['light', 'dark'];
+    // Which palette colour each generic colour control edits. The Manager
+    // knows none of this: it just renders a colour control per key.
+    const COLOUR_SETTING_KEYS = Object.freeze({
+        colourBackground: 'background', colourText: 'text',
+        colourAccent: 'accent', colourAccentAlt: 'accentAlt'
+    });
+    const COLOUR_KEYS = Object.freeze(Object.values(COLOUR_SETTING_KEYS));
     // Self-hosted so nothing goes stale and no third-party image host sees a
     // viewer's IP on every page load. One real photo per background pattern
     // family; see assets/theming/CREDITS.md for source/licence details.
@@ -54,13 +81,16 @@
         '--lectio-theme-accent-alt', '--lectio-theme-blend', '--lectio-theme-danger',
         '--lectio-theme-bg-image', '--lectio-theme-radius', '--lectio-theme-space'
     ];
-    // Content-surface treatment, internal to this module rather than part of
-    // the ADR-0006 seam: it lets the stylesheet below say "a thin veil for the
-    // page shell, a little more body for the boxes inside it" in one place,
-    // and lets applyTheme() thin and tint those surfaces per palette mode.
-    // Cleared alongside the seam variables whenever the theme is switched off.
+    // Surface and background treatment, internal to this module rather than
+    // part of the ADR-0006 seam: it lets the stylesheet below say "a thin veil
+    // for the page shell, a little more body for the boxes inside it" in one
+    // place, lets applyTheme() thin and tint those surfaces per palette mode,
+    // and carries how strongly the palette is laid over a user's own
+    // background picture. Cleared alongside the seam variables whenever the
+    // theme is switched off.
     const CONTENT_SURFACE_VARIABLE_NAMES = [
-        '--lectio-theme-shell-surface', '--lectio-theme-content-surface', '--lectio-theme-content-stripe'
+        '--lectio-theme-shell-surface', '--lectio-theme-content-surface',
+        '--lectio-theme-content-stripe', '--lectio-theme-bg-veil'
     ];
 
     // Named themes carry their own authentic background/surface/text values,
@@ -209,11 +239,13 @@
             value: key,
             label: `${THEMES[key].label} — ${THEMES[key].mode === 'dark' ? 'Dark' : 'Light'}`
         })),
-        { value: 'custom', label: 'Imported palette' }
+        { value: 'custom', label: 'Custom palette' }
     ];
 
-    // Neutral bases for the imported/custom palette only — named themes above
-    // never touch these, they carry their own authentic colours.
+    // Neutral starting point for the custom palette only — named themes above
+    // never touch these, they carry their own authentic colours. Once any
+    // colour is imported or hand-picked, settings.customColours carries the
+    // whole custom palette and these are only the base a reset returns to.
     const CUSTOM_BASE = Object.freeze({
         light: { background: '#f6f5fb', surface: '#ffffff', surfaceAlt: '#eceffb', text: '#20243a', muted: '#5b6178' },
         dark: { background: '#14161f', surface: '#1c1f2b', surfaceAlt: '#242840', text: '#e5e7f0', muted: '#8890a8' }
@@ -228,11 +260,22 @@
         radius: 12,
         blur: true,
         density: 'compact',
-        customHues: null
+        customColours: null,
+        backgroundVeil: 35
     });
 
     let settings = loadSettings();
-    let currentPalette = resolvePalette(settings.preset, settings.mode, settings.customHues);
+    let customBackground = loadCustomBackground();
+    let currentPalette = resolvePalette(settings.preset, settings.mode, settings.customColours);
+    // One load listener per editor frame for that frame's whole lifetime, and
+    // one re-theming pass per batch of DOM changes. Both matter on a page that
+    // stays open all day: CKEditor re-inserts its iframe on every postback, so
+    // attaching a listener each time one was seen left a growing pile of
+    // handlers on the same element, and re-theming once per added node meant
+    // walking the document hundreds of times for a single batch.
+    const watchedEditorFrames = new WeakSet();
+    let editorFrameTimer = 0;
+    let toastTimer = 0;
 
     announce();
     applyTheme();
@@ -249,6 +292,8 @@
     window.addEventListener('lectio-manager:clear-setting-preview', handleSettingPreviewClear);
 
     function announce() {
+        const colours = currentCustomColours();
+
         window.dispatchEvent(new CustomEvent('lectio-module:register', {
             detail: {
                 id: MODULE_ID,
@@ -266,12 +311,28 @@
                         options: PRESET_OPTIONS
                     },
                     {
-                        key: 'mode', type: 'select', label: 'Light or dark (imported palette)', section: 'Custom palette',
-                        description: 'Only affects the imported palette below — built-in themes keep their own light or dark look.',
+                        key: 'mode', type: 'select', label: 'Light or dark base', section: 'Custom palette',
+                        description: 'The starting point for the custom palette — built-in themes keep their own light or dark look.',
                         options: [
                             { value: 'light', label: 'Light' },
                             { value: 'dark', label: 'Dark' }
                         ]
+                    },
+                    {
+                        key: 'colourBackground', type: 'color', label: 'Page colour', section: 'Custom palette',
+                        description: 'Pick the colour behind everything. Choosing any colour here switches to the custom palette.'
+                    },
+                    {
+                        key: 'colourText', type: 'color', label: 'Text colour', section: 'Custom palette',
+                        description: 'Darkened or lightened automatically if the pair would be hard to read.'
+                    },
+                    {
+                        key: 'colourAccent', type: 'color', label: 'Accent colour', section: 'Custom palette',
+                        description: 'Links, buttons, highlights and focus rings.'
+                    },
+                    {
+                        key: 'colourAccentAlt', type: 'color', label: 'Second accent', section: 'Custom palette',
+                        description: 'Secondary highlights, lesson stripes and background gradients.'
                     },
                     {
                         key: 'sourceUrl', type: 'text', label: 'Palette source', section: 'Custom palette',
@@ -283,7 +344,25 @@
                     },
                     {
                         key: 'chooseImage', type: 'button', label: 'Local image', section: 'Custom palette',
-                        description: 'Choose an image from this device. It never leaves the browser.', buttonLabel: 'Choose image'
+                        description: 'Take the two accents from an image on this device. It never leaves the browser.', buttonLabel: 'Choose image'
+                    },
+                    {
+                        key: 'resetColours', type: 'button', label: 'Reset custom colours', section: 'Custom palette',
+                        description: 'Drop the hand-picked and imported colours and go back to the neutral base.', buttonLabel: 'Reset colours'
+                    },
+                    {
+                        key: 'chooseBackground', type: 'button', label: 'Background picture', section: 'Background',
+                        description: 'Use a picture from this device behind Lectio, whichever colour theme is selected. It is stored in this browser only and is never uploaded.',
+                        buttonLabel: 'Choose picture'
+                    },
+                    {
+                        key: 'clearBackground', type: 'button', label: 'Remove background picture', section: 'Background',
+                        description: 'Go back to the selected theme’s own background.', buttonLabel: 'Remove'
+                    },
+                    {
+                        key: 'backgroundVeil', type: 'range', label: 'Background tint', section: 'Background',
+                        description: 'How much of the theme colour is laid over your picture. Raise it if text is hard to read.',
+                        min: 0, max: MAX_VEIL, step: 5, suffix: '%'
                     },
                     {
                         key: 'radius', type: 'range', label: 'Corner radius', section: 'Appearance',
@@ -303,7 +382,7 @@
                     },
                     {
                         key: 'resetTheme', type: 'button', label: 'Reset theme', section: 'Reset',
-                        description: 'Restore the Catppuccin Latte defaults.', buttonLabel: 'Reset'
+                        description: 'Restore the Catppuccin Latte defaults. Keeps any background picture you chose.', buttonLabel: 'Reset'
                     }
                 ],
                 currentValues: {
@@ -313,7 +392,12 @@
                     sourceUrl: settings.sourceUrl,
                     radius: settings.radius,
                     blur: settings.blur,
-                    density: settings.density
+                    density: settings.density,
+                    backgroundVeil: settings.backgroundVeil,
+                    colourBackground: colours.background,
+                    colourText: colours.text,
+                    colourAccent: colours.accent,
+                    colourAccentAlt: colours.accentAlt
                 }
             }
         }));
@@ -333,6 +417,15 @@
             case 'mode':
                 if (!MODE_KEYS.includes(detail.value)) return;
                 settings.mode = detail.value;
+                // Light or dark is the custom palette's starting point, so
+                // switching it re-bases the neutral page and text colours
+                // while keeping whatever accents are already in play.
+                if (settings.customColours) {
+                    const base = CUSTOM_BASE[detail.value];
+                    settings.customColours = {
+                        ...settings.customColours, background: base.background, text: base.text
+                    };
+                }
                 break;
             case 'preset':
                 if (!PRESET_KEYS.includes(detail.value)) return;
@@ -352,13 +445,40 @@
                 if (!['compact', 'comfortable'].includes(detail.value)) return;
                 settings.density = detail.value;
                 break;
+            case 'backgroundVeil':
+                settings.backgroundVeil = clamp(Number(detail.value) || 0, 0, MAX_VEIL);
+                break;
+            case 'colourBackground':
+            case 'colourText':
+            case 'colourAccent':
+            case 'colourAccentAlt': {
+                const hex = normaliseHex(detail.value);
+                if (!hex) return;
+                // Start from whatever the custom palette currently resolves
+                // to, so a first hand-picked colour changes only that one
+                // colour instead of dropping the rest back to the base.
+                settings.customColours = { ...currentCustomColours(), [COLOUR_SETTING_KEYS[detail.key]]: hex };
+                settings.preset = 'custom';
+                break;
+            }
+            case 'resetColours':
+                settings.customColours = null;
+                break;
             case 'applySource':
                 await importPalette();
                 return;
             case 'chooseImage':
                 chooseLocalImage();
                 return;
+            case 'chooseBackground':
+                chooseBackgroundImage();
+                return;
+            case 'clearBackground':
+                clearCustomBackground();
+                return;
             case 'resetTheme':
+                // Deliberately leaves the stored picture alone: it is a file
+                // the person had to go and find, and it has its own Remove.
                 settings = cloneDefaults();
                 break;
             default:
@@ -396,7 +516,11 @@
                 radius: clamp(Number(saved.radius) || DEFAULT_SETTINGS.radius, 4, 20),
                 blur: typeof saved.blur === 'boolean' ? saved.blur : DEFAULT_SETTINGS.blur,
                 density: ['compact', 'comfortable'].includes(saved.density) ? saved.density : DEFAULT_SETTINGS.density,
-                customHues: validateHues(saved.customHues)
+                backgroundVeil: clamp(
+                    Number.isFinite(Number(saved.backgroundVeil)) ? Number(saved.backgroundVeil) : DEFAULT_SETTINGS.backgroundVeil,
+                    0, MAX_VEIL
+                ),
+                customColours: validateColours(saved.customColours) || migrateHues(saved.customHues, saved.mode)
             };
         } catch (_) {
             return cloneDefaults();
@@ -404,7 +528,29 @@
     }
 
     function cloneDefaults() {
-        return { ...DEFAULT_SETTINGS, customHues: null };
+        return { ...DEFAULT_SETTINGS, customColours: null };
+    }
+
+    // The picture is read back on its own so a corrupt or outsized entry can
+    // be dropped without taking the rest of the settings with it.
+    function loadCustomBackground() {
+        try {
+            const saved = JSON.parse(localStorage.getItem(BACKGROUND_STORAGE_KEY) || 'null');
+            const dataUrl = typeof saved?.dataUrl === 'string' ? saved.dataUrl : '';
+
+            // This value goes straight into a CSS url(), so anything that is
+            // not a self-contained image data URL is discarded rather than
+            // written into the page — it must not be able to point elsewhere.
+            if (!/^data:image\/(?:jpeg|png|webp);base64,[a-z0-9+/=]+$/i.test(dataUrl) || dataUrl.length > MAX_BACKGROUND_CHARS) {
+                if (dataUrl) localStorage.removeItem(BACKGROUND_STORAGE_KEY);
+                return null;
+            }
+
+            return { dataUrl, name: typeof saved.name === 'string' ? saved.name.slice(0, 120) : '' };
+        } catch (error) {
+            console.warn(LOG, 'Could not read the stored background:', error);
+            return null;
+        }
     }
 
     function saveSettings() {
@@ -415,14 +561,43 @@
         }
     }
 
-    function validateHues(value) {
-        const keys = ['accent', 'accentAlt', 'danger'];
-        return value && keys.every((key) => /^#[0-9a-f]{6}$/i.test(value[key] || ''))
-            ? Object.fromEntries(keys.map((key) => [key, value[key]]))
-            : null;
+    function normaliseHex(value) {
+        const text = String(value || '').trim().toLowerCase();
+        return /^#[0-9a-f]{6}$/.test(text) ? text : '';
     }
 
-    function resolvePalette(preset, mode, customHues) {
+    function validateColours(value) {
+        if (!value || !COLOUR_KEYS.every((key) => normaliseHex(value[key]))) return null;
+        return Object.fromEntries(COLOUR_KEYS.map((key) => [key, normaliseHex(value[key])]));
+    }
+
+    // Settings saved before colours could be hand-picked carried only the two
+    // accents an import had derived. Keep those, and take the page and text
+    // colours from the neutral base that palette was already being drawn on,
+    // so an upgrade looks like nothing happened.
+    function migrateHues(hues, mode) {
+        const accent = normaliseHex(hues?.accent);
+        const accentAlt = normaliseHex(hues?.accentAlt);
+        if (!accent || !accentAlt) return null;
+
+        const base = CUSTOM_BASE[MODE_KEYS.includes(mode) ? mode : DEFAULT_SETTINGS.mode];
+        return { background: base.background, text: base.text, accent, accentAlt };
+    }
+
+    // What the four colour controls show and edit. With nothing customised yet
+    // this is the resolved neutral palette, so a first hand-picked colour
+    // changes one colour rather than replacing the whole palette at once.
+    function currentCustomColours() {
+        if (settings.customColours) return { ...settings.customColours };
+
+        const palette = resolvePalette('custom', settings.mode, null);
+        return {
+            background: palette.background, text: palette.text,
+            accent: palette.accent, accentAlt: palette.accentAlt
+        };
+    }
+
+    function resolvePalette(preset, mode, customColours) {
         const theme = THEMES[preset];
 
         if (theme) {
@@ -434,8 +609,10 @@
             };
         }
 
+        if (customColours) return resolveCustomPalette(customColours);
+
         const base = CUSTOM_BASE[mode] || CUSTOM_BASE.light;
-        const hues = customHues || CUSTOM_FALLBACK_HUES;
+        const hues = CUSTOM_FALLBACK_HUES;
         const ensureAccent = mode === 'dark' ? ensureAccentOnDark : ensureAccentOnLight;
         const pattern = mode === 'dark' ? 'grid' : 'blobs';
 
@@ -450,6 +627,54 @@
         };
     }
 
+    // A hand-picked palette carries only the four colours a person actually
+    // wants to choose. Everything else — panel surfaces, muted text, the blend
+    // the background gradients use — is derived from those, light or dark is
+    // read off the chosen page colour rather than asked for again, and both
+    // the text and the accents are nudged until they stay readable on it.
+    // That is what lets someone build a bright pink theme without ending up
+    // with pink text on a pink card.
+    function resolveCustomPalette(chosen) {
+        const background = chosen.background;
+        const dark = relativeLightness(hexToRgb(background)) < .3;
+        const surface = dark ? mixHex(background, '#ffffff', .07) : mixHex(background, '#ffffff', .6);
+        const text = ensureTextContrast(chosen.text, [background, surface]);
+        const surfaceAlt = dark ? mixHex(background, '#ffffff', .14) : mixHex(background, text, .07);
+        const ensureAccent = dark ? ensureAccentOnDark : ensureAccentOnLight;
+        const accent = ensureAccent(chosen.accent, background);
+        const accentAlt = ensureAccent(chosen.accentAlt, background);
+        const pattern = dark ? 'grid' : 'blobs';
+
+        return {
+            background, surface, surfaceAlt, text,
+            muted: mixHex(text, background, .35),
+            accent, accentAlt, danger: CUSTOM_FALLBACK_HUES.danger,
+            blend: mixHex(accent, accentAlt, .5),
+            mode: dark ? 'dark' : 'light', pattern, image: `bg-${pattern}.jpg`
+        };
+    }
+
+    // Push the chosen text colour toward black or white until it is
+    // comfortably readable, rather than silently discarding the colour the
+    // person asked for. It has to hold up on both the page colour and the
+    // panel colour derived from it, and those two can pull in opposite
+    // directions — a mid-bright pink page with a pale pink panel is exactly
+    // that case — so pick the single direction that serves the worse of the
+    // two instead of correcting once per surface and undoing the first pass.
+    function ensureTextContrast(colour, surfaces) {
+        const worst = (candidate) => Math.min(...surfaces.map((surface) => contrastRatio(candidate, surface)));
+        const toward = worst('#000000') >= worst('#ffffff') ? '#000000' : '#ffffff';
+        let result = colour;
+        let guard = 0;
+
+        while (worst(result) < 4.5 && guard < 16) {
+            result = mixHex(result, toward, .12);
+            guard += 1;
+        }
+
+        return result;
+    }
+
     function applyTheme(overrides = {}) {
         const root = document.documentElement;
         const effectiveSettings = { ...settings, ...overrides };
@@ -457,7 +682,7 @@
         root.classList.toggle('lectio-theme-blur', effectiveSettings.blur);
         root.dataset.lectioThemeDensity = effectiveSettings.density;
 
-        currentPalette = resolvePalette(effectiveSettings.preset, effectiveSettings.mode, effectiveSettings.customHues);
+        currentPalette = resolvePalette(effectiveSettings.preset, effectiveSettings.mode, effectiveSettings.customColours);
 
         // Other modules are encouraged (see ADR-0006) to read these same
         // --lectio-theme-* custom properties, with their own hard-coded
@@ -467,7 +692,12 @@
         // switched off, so a sibling module's fallback kicks back in
         // instead of it being left showing a stale, no-longer-active theme.
         if (effectiveSettings.enabled) {
-            root.dataset.lectioThemePattern = currentPalette.pattern;
+            // A chosen picture is independent of the palette: it stands in for
+            // the theme's own background photo and its decorative gradients,
+            // and changes none of the colours the theme provides.
+            const backgroundImage = customBackground?.dataUrl || '';
+
+            root.dataset.lectioThemePattern = backgroundImage ? 'custom' : currentPalette.pattern;
             root.style.colorScheme = currentPalette.mode === 'dark' ? 'dark' : 'light';
 
             // The page shell and the boxes nested inside it are the largest
@@ -502,7 +732,9 @@
                 '--lectio-theme-accent-alt': currentPalette.accentAlt,
                 '--lectio-theme-blend': currentPalette.blend,
                 '--lectio-theme-danger': currentPalette.danger,
-                '--lectio-theme-bg-image': `url('${ASSET_BASE_URL}/${currentPalette.image}')`,
+                '--lectio-theme-bg-image': backgroundImage
+                    ? `url("${backgroundImage}")`
+                    : `url('${ASSET_BASE_URL}/${currentPalette.image}')`,
                 '--lectio-theme-radius': `${effectiveSettings.radius}px`,
                 '--lectio-theme-space': effectiveSettings.density === 'compact' ? '6px' : '10px',
                 '--lectio-theme-shell-surface': `color-mix(in srgb, ${contentPanel} ${shellVeil}, transparent)`,
@@ -512,6 +744,18 @@
 
             for (const [key, value] of Object.entries(variables)) {
                 root.style.setProperty(key, value);
+            }
+
+            // Only a chosen picture carries a tint variable. The built-in
+            // patterns keep the hand-tuned veil written into each of their
+            // stylesheet rules, so nothing about them changes here.
+            if (backgroundImage) {
+                root.style.setProperty(
+                    '--lectio-theme-bg-veil',
+                    `${clamp(Number(effectiveSettings.backgroundVeil) || 0, 0, MAX_VEIL)}%`
+                );
+            } else {
+                root.style.removeProperty('--lectio-theme-bg-veil');
             }
         } else {
             delete root.dataset.lectioThemePattern;
@@ -561,27 +805,53 @@
         }
     }
 
+    function watchEditorFrame(frame) {
+        // A frame Lectio re-inserts (every postback re-creates the editor) is
+        // seen again by the observer below, and a second load listener on the
+        // same element would never be removed. The WeakSet keeps it to one
+        // listener for the frame's lifetime and holds nothing itself once the
+        // element is gone.
+        if (watchedEditorFrames.has(frame)) return;
+        watchedEditorFrames.add(frame);
+        frame.addEventListener('load', scheduleEditorFrameTheming);
+    }
+
+    function scheduleEditorFrameTheming() {
+        if (editorFrameTimer) return;
+        editorFrameTimer = window.setTimeout(() => {
+            editorFrameTimer = 0;
+            themeEditorFrames();
+        }, 0);
+    }
+
     function observeEditorFrames() {
         if (!window.MutationObserver) return;
+
         const observer = new MutationObserver((mutations) => {
+            let found = false;
+
             for (const mutation of mutations) {
                 for (const node of mutation.addedNodes) {
                     if (node.nodeType !== Node.ELEMENT_NODE) continue;
+
                     if (node.matches?.('iframe.cke_wysiwyg_frame')) {
-                        node.addEventListener('load', () => themeEditorFrames());
-                        themeEditorFrames();
-                    } else if (node.querySelectorAll) {
-                        const frames = node.querySelectorAll('iframe.cke_wysiwyg_frame');
-                        if (frames.length > 0) {
-                            for (const frame of frames) {
-                                frame.addEventListener('load', () => themeEditorFrames());
-                            }
-                            themeEditorFrames();
+                        watchEditorFrame(node);
+                        found = true;
+                    } else if (node.querySelector?.('iframe.cke_wysiwyg_frame')) {
+                        for (const frame of node.querySelectorAll('iframe.cke_wysiwyg_frame')) {
+                            watchEditorFrame(frame);
                         }
+                        found = true;
                     }
                 }
             }
+
+            // One pass per batch of DOM changes, not one per added node: a
+            // Lectio page that renders a few hundred elements at once used to
+            // re-scan and rewrite every editor frame a few hundred times.
+            if (found) scheduleEditorFrameTheming();
         });
+
         observer.observe(document.documentElement, { childList: true, subtree: true });
     }
 
@@ -658,6 +928,34 @@
                     linear-gradient(0deg, color-mix(in srgb, var(--lectio-theme-accent) 16%, transparent) 0%, transparent 30%),
                     linear-gradient(color-mix(in srgb, var(--lectio-theme-bg) 50%, transparent), color-mix(in srgb, var(--lectio-theme-bg) 50%, transparent)),
                     var(--lectio-theme-bg-image) !important;
+            }
+
+            /* A picture the user chose themselves gets one layer and no
+               decorative gradients: it is their image, and the only thing laid
+               over it is as much of the palette's page colour as they asked
+               for with the Background tint setting.
+
+               It goes on the root element rather than on <body>, unlike the
+               built-in patterns: <body> only paints as tall as its own
+               content, which is invisible with a background photo that tiles
+               the same colours but obvious with a photo of something, where
+               the picture would simply stop partway down a short page. */
+            html.${ROOT_CLASS}[data-lectio-theme-pattern="custom"] {
+                background-image:
+                    linear-gradient(
+                        color-mix(in srgb, var(--lectio-theme-bg) var(--lectio-theme-bg-veil, 35%), transparent),
+                        color-mix(in srgb, var(--lectio-theme-bg) var(--lectio-theme-bg-veil, 35%), transparent)
+                    ),
+                    var(--lectio-theme-bg-image) !important;
+                background-attachment: fixed !important;
+                background-repeat: no-repeat !important;
+                background-position: center !important;
+                background-size: cover !important;
+            }
+
+            html.${ROOT_CLASS}[data-lectio-theme-pattern="custom"] body {
+                background-color: transparent !important;
+                background-image: none !important;
             }
 
             html.${ROOT_CLASS} :where(#masterContent, #content, #m_Content, .ls-master-container, .ls-content-container,
@@ -999,7 +1297,8 @@
                 throw new Error('Not enough distinct colours were found. Try a direct image URL.');
             }
 
-            settings.customHues = deriveHues(colours);
+            const hues = deriveHues(colours);
+            settings.customColours = { ...currentCustomColours(), accent: hues.accent, accentAlt: hues.accentAlt };
             settings.preset = 'custom';
             saveSettings();
             applyTheme();
@@ -1011,33 +1310,126 @@
         }
     }
 
-    function chooseLocalImage() {
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.accept = 'image/*';
-        input.addEventListener('change', async () => {
-            const file = input.files?.[0];
-            if (!file) return;
-            if (file.size > MAX_SOURCE_BYTES) {
-                showToast('Palette images must be smaller than 8 MB.', true);
-                return;
-            }
+    async function chooseLocalImage() {
+        const file = await pickImageFile();
+        if (!file) return;
+        if (file.size > MAX_SOURCE_BYTES) {
+            showToast('Palette images must be smaller than 8 MB.', true);
+            return;
+        }
 
-            try {
-                const colours = await sampleImageColours(await file.arrayBuffer(), file.type || 'image/png');
-                if (colours.length < 2) throw new Error('Not enough distinct colours were found.');
-                settings.customHues = deriveHues(colours);
-                settings.preset = 'custom';
-                saveSettings();
-                applyTheme();
-                announce();
-                showToast(`Imported ${colours.length} image colours.`);
-            } catch (error) {
-                console.warn(LOG, 'Local palette import failed:', error);
-                showToast(error.message || 'Could not read that image.', true);
+        try {
+            const colours = await sampleImageColours(await file.arrayBuffer(), file.type || 'image/png');
+            if (colours.length < 2) throw new Error('Not enough distinct colours were found.');
+            const hues = deriveHues(colours);
+            settings.customColours = { ...currentCustomColours(), accent: hues.accent, accentAlt: hues.accentAlt };
+            settings.preset = 'custom';
+            saveSettings();
+            applyTheme();
+            announce();
+            showToast(`Imported ${colours.length} image colours.`);
+        } catch (error) {
+            console.warn(LOG, 'Local palette import failed:', error);
+            showToast(error.message || 'Could not read that image.', true);
+        }
+    }
+
+    // Nothing here uploads anything: the file is read by this page, re-encoded
+    // in a canvas, and kept in this browser's own storage for this origin.
+    async function chooseBackgroundImage() {
+        const file = await pickImageFile();
+        if (!file) return;
+        if (file.size > MAX_BACKGROUND_SOURCE_BYTES) {
+            showToast('Background pictures must be smaller than 32 MB.', true);
+            return;
+        }
+
+        showToast('Preparing the background…');
+
+        try {
+            customBackground = await storeBackgroundImage(file);
+            applyTheme();
+            announce();
+            showToast('Background saved on this device only.');
+        } catch (error) {
+            console.warn(LOG, 'Background picture failed:', error);
+            showToast(error.message || 'Could not use that picture.', true);
+        }
+    }
+
+    // Try progressively smaller encodings until one both fits the budget and
+    // is accepted by storage, so a large photo degrades to a smaller one
+    // instead of failing outright or leaving the theme half-applied.
+    async function storeBackgroundImage(file) {
+        const image = await loadImage(new Blob([await file.arrayBuffer()], { type: file.type || 'image/png' }));
+
+        try {
+            for (const step of BACKGROUND_STEPS) {
+                const dataUrl = encodeBackground(image, step);
+                if (dataUrl.length > MAX_BACKGROUND_CHARS) continue;
+
+                const record = { dataUrl, name: String(file.name || '').slice(0, 120) };
+
+                try {
+                    localStorage.setItem(BACKGROUND_STORAGE_KEY, JSON.stringify(record));
+                    return record;
+                } catch (error) {
+                    console.warn(LOG, 'Background did not fit storage at', step.size, error);
+                }
             }
-        }, { once: true });
-        input.click();
+        } finally {
+            if (typeof image.close === 'function') image.close();
+        }
+
+        throw new Error('There was no room to store that picture. Try a smaller one.');
+    }
+
+    function encodeBackground(image, step) {
+        const canvas = document.createElement('canvas');
+        const scale = Math.min(1, step.size / Math.max(image.width, image.height));
+        canvas.width = Math.max(1, Math.round(image.width * scale));
+        canvas.height = Math.max(1, Math.round(image.height * scale));
+
+        const context = canvas.getContext('2d');
+        // Flatten onto the palette's own page colour first: the stored copy is
+        // JPEG, so a transparent PNG would otherwise come back as black.
+        context.fillStyle = currentPalette.background;
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+        return canvas.toDataURL('image/jpeg', step.quality);
+    }
+
+    function clearCustomBackground() {
+        try {
+            localStorage.removeItem(BACKGROUND_STORAGE_KEY);
+        } catch (error) {
+            console.warn(LOG, 'Could not remove the stored background:', error);
+        }
+
+        if (!customBackground) {
+            showToast('No background picture is set.');
+            return;
+        }
+
+        customBackground = null;
+        applyTheme();
+        announce();
+        showToast('Background removed — back to the theme\u2019s own.');
+    }
+
+    function pickImageFile() {
+        return new Promise((resolve) => {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = 'image/*';
+            // Resolve on cancel too, so a dismissed picker doesn't leave a
+            // pending promise (and the closure behind it) alive for the rest
+            // of the page's life.
+            input.addEventListener('change', () => resolve(input.files?.[0] || null), { once: true });
+            input.addEventListener('cancel', () => resolve(null), { once: true });
+            input.click();
+        });
     }
 
     function requestArrayBuffer(url) {
@@ -1101,20 +1493,25 @@
         canvas.height = Math.max(1, Math.round(image.height * scale));
         context.drawImage(image, 0, 0, canvas.width, canvas.height);
 
-        const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
-        const counts = new Map();
+        try {
+            const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+            const counts = new Map();
 
-        for (let index = 0; index < pixels.length; index += 16) {
-            if (pixels[index + 3] < 180) continue;
-            const rgb = [pixels[index], pixels[index + 1], pixels[index + 2]]
-                .map((value) => Math.round(value / 24) * 24)
-                .map((value) => clamp(value, 0, 255));
-            const hex = rgbToHex(rgb);
-            counts.set(hex, (counts.get(hex) || 0) + 1);
+            for (let index = 0; index < pixels.length; index += 16) {
+                if (pixels[index + 3] < 180) continue;
+                const rgb = [pixels[index], pixels[index + 1], pixels[index + 2]]
+                    .map((value) => Math.round(value / 24) * 24)
+                    .map((value) => clamp(value, 0, 255));
+                const hex = rgbToHex(rgb);
+                counts.set(hex, (counts.get(hex) || 0) + 1);
+            }
+
+            return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 32).map(([colour]) => colour);
+        } finally {
+            // An ImageBitmap keeps its decoded pixels outside the JS heap
+            // until it is closed, so release it even if the read above throws.
+            if (typeof image.close === 'function') image.close();
         }
-
-        if (typeof image.close === 'function') image.close();
-        return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 32).map(([colour]) => colour);
     }
 
     function loadImage(blob) {
@@ -1302,6 +1699,9 @@
 
     function showToast(message, isError = false) {
         const render = () => {
+            // Replacing a toast has to cancel the old one's removal timer too,
+            // or that timer keeps the detached node alive until it fires.
+            window.clearTimeout(toastTimer);
             document.getElementById('lectio-theme-toast')?.remove();
             const toast = document.createElement('div');
             toast.id = 'lectio-theme-toast';
@@ -1314,7 +1714,10 @@
                 boxShadow: '0 10px 28px rgba(0,0,0,.24)', font: '600 12px Roboto, Arial, sans-serif'
             });
             document.body.appendChild(toast);
-            window.setTimeout(() => toast.remove(), isError ? 5000 : 3000);
+            toastTimer = window.setTimeout(() => {
+                toastTimer = 0;
+                toast.remove();
+            }, isError ? 5000 : 3000);
         };
 
         if (document.body) render();

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.12.0
+// @version      1.13.0
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules from one small gear panel.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
@@ -1180,6 +1180,19 @@
                     input.addEventListener('change', () => emitSettingChange(module.id, control.key, input.value));
                     break;
 
+                case 'color':
+                    row.classList.add('is-color');
+                    input = document.createElement('input');
+                    input.type = 'color';
+                    // A colour input only accepts #rrggbb, and silently shows
+                    // black for anything else, so fall back to a visible grey
+                    // rather than implying a module reported black.
+                    input.value = /^#[0-9a-f]{6}$/i.test(String(currentValue ?? ''))
+                        ? String(currentValue).toLowerCase()
+                        : '#808080';
+                    input.addEventListener('change', () => emitSettingChange(module.id, control.key, input.value));
+                    break;
+
                 case 'button':
                     row.classList.add('is-button');
                     input = document.createElement('button');
@@ -2217,6 +2230,20 @@
                 width: 34px;
                 height: 18px;
                 accent-color: var(--lectio-theme-accent, #0f6f6f);
+            }
+
+            .lectio-manager-setting-row.is-color {
+                grid-template-columns: minmax(0, 1fr) auto;
+            }
+
+            .lectio-manager-setting-row input[type='color'] {
+                width: 44px;
+                height: 26px;
+                padding: 2px;
+                border: 1px solid var(--lectio-theme-accent, #cbd7d9);
+                border-radius: 6px;
+                background: #ffffff;
+                cursor: pointer;
             }
 
             .lectio-manager-setting-row.is-range {

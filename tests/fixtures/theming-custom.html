@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio Theming custom background and colour fixture</title>
+    <style>
+        body, #masterContent, .ls-content-container, [class*="ls-card"] {
+            background: #ffffff;
+        }
+    </style>
+    <script>
+        window.GM_getValue = (key, fallback) => fallback;
+        window.GM_setValue = () => {};
+        window.GM_xmlhttpRequest = () => {};
+        window.registrations = new Map();
+        window.addEventListener('lectio-module:register', (event) => {
+            window.registrations.set(event.detail.id, event.detail);
+        });
+
+        /* A real 1x1 PNG, seeded the way a previous session would have left
+           it, because that is the only way a stored background can arrive:
+           the module reads it on load, never from the page. */
+        window.storedBackground = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+        window.fixtureCase = location.hash === '#invalid' ? 'invalid' : 'background';
+
+        localStorage.setItem('lectioTheming.background.v1', JSON.stringify({
+            /* The invalid case is the important one: this value is written
+               into a CSS url(), so anything that is not a self-contained image
+               must be dropped rather than applied. */
+            dataUrl: window.fixtureCase === 'invalid'
+                ? 'https://example.com/photo.png"); background: red; x: ("'
+                : window.storedBackground,
+            name: 'holiday.png'
+        }));
+    </script>
+</head>
+<body>
+    <main id="masterContent">
+        <div class="ls-content-container">
+            <section class="ls-card-filled" id="lesson-content">
+                <h2>Lektionens indhold</h2>
+                <p id="lesson-text">Arbejd med opgaverne på side 42.</p>
+            </section>
+        </div>
+    </main>
+    <script src="../../modules/Lectio-Theming.user.js"></script>
+    <script>
+        function assert(condition, message) {
+            if (!condition) throw new Error(message);
+        }
+
+        function hexToRgb(hex) {
+            const value = Number.parseInt(hex.slice(1), 16);
+            return [(value >> 16) & 255, (value >> 8) & 255, value & 255];
+        }
+
+        function relativeLuminance(rgb) {
+            const channels = rgb.map((channel) => channel / 255)
+                .map((channel) => channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4);
+            return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+        }
+
+        function contrastRatio(first, second) {
+            const values = [relativeLuminance(first), relativeLuminance(second)];
+            return (Math.max(...values) + 0.05) / (Math.min(...values) + 0.05);
+        }
+
+        const setSetting = (key, value) => window.dispatchEvent(new CustomEvent(
+            'lectio-manager:set-setting',
+            { detail: { id: 'lectio-theming', key, value } }
+        ));
+        const themeVariable = (name) => document.documentElement.style.getPropertyValue(name).trim();
+        const pattern = () => document.documentElement.dataset.lectioThemePattern;
+        const registration = () => window.registrations.get('lectio-theming');
+        const storedBackground = () => localStorage.getItem('lectioTheming.background.v1');
+
+        window.addEventListener('load', () => {
+            try {
+                assert(registration(), 'Lectio Theming did not register');
+                assert(document.documentElement.classList.contains('lectio-themed'), 'Theme was not applied on load');
+
+                if (window.fixtureCase === 'invalid') {
+                    /* A stored value that is not a self-contained image is
+                       dropped, and the theme still applies normally. */
+                    assert(pattern() === 'blobs', `an invalid stored background changed the pattern to ${pattern()}`);
+                    assert(
+                        themeVariable('--lectio-theme-bg-image').includes('raw.githubusercontent.com'),
+                        'an invalid stored background reached the page'
+                    );
+                    assert(themeVariable('--lectio-theme-bg-veil') === '', 'a tint was applied without a background picture');
+                    assert(storedBackground() === null, 'the invalid stored background was kept');
+                    assert(themeVariable('--lectio-theme-bg') === '#eff1f5', 'the theme palette did not survive an invalid background');
+
+                    document.documentElement.dataset.testResult = 'pass';
+                    return;
+                }
+
+                /* --- A stored picture survives the reload this page is ----- */
+                assert(pattern() === 'custom', `stored background did not become the page background (${pattern()})`);
+                assert(
+                    themeVariable('--lectio-theme-bg-image') === `url("${window.storedBackground}")`,
+                    'the stored picture was not used as the background image'
+                );
+                assert(
+                    getComputedStyle(document.documentElement).backgroundImage.includes(window.storedBackground),
+                    'the stored picture never reached the page background'
+                );
+
+                /* ...without touching the colours of the selected theme. */
+                assert(themeVariable('--lectio-theme-bg') === '#eff1f5', 'the picture changed the theme palette');
+                assert(themeVariable('--lectio-theme-accent') === '#1e66f5', 'the picture changed the theme accent');
+
+                /* The tint over the picture is the readability control. */
+                assert(themeVariable('--lectio-theme-bg-veil') === '35%', 'the default background tint was not applied');
+                setSetting('backgroundVeil', 60);
+                assert(themeVariable('--lectio-theme-bg-veil') === '60%', 'the background tint could not be changed');
+                assert(registration().currentValues.backgroundVeil === 60, 'the background tint was not reported back');
+
+                /* The picture is independent of the colour theme. */
+                setSetting('preset', 'nord');
+                assert(pattern() === 'custom', 'switching theme dropped the chosen picture');
+                assert(themeVariable('--lectio-theme-bg') === '#2e3440', 'switching theme did not change the palette');
+
+                /* Removing it hands the theme its own background back. */
+                setSetting('clearBackground', true);
+                assert(pattern() === 'waves', `removing the picture did not restore the theme pattern (${pattern()})`);
+                assert(
+                    themeVariable('--lectio-theme-bg-image').includes('bg-nord.jpg'),
+                    'removing the picture did not restore the theme background image'
+                );
+                assert(themeVariable('--lectio-theme-bg-veil') === '', 'the tint variable outlived the picture');
+                assert(storedBackground() === null, 'the picture was still stored after being removed');
+
+                /* --- Hand-picked colours ---------------------------------- */
+                /* Deliberately unreadable: bright pink text on bright pink. */
+                setSetting('colourBackground', '#ff5fb0');
+                setSetting('colourText', '#ff8fd0');
+                setSetting('colourAccent', '#ff1493');
+                setSetting('colourAccentAlt', '#c71585');
+
+                assert(registration().currentValues.preset === 'custom', 'choosing a colour did not switch to the custom palette');
+                assert(themeVariable('--lectio-theme-bg') === '#ff5fb0', 'the chosen page colour was not applied');
+                assert(registration().currentValues.colourBackground === '#ff5fb0', 'the chosen page colour was not reported back');
+
+                const surface = hexToRgb(themeVariable('--lectio-theme-surface'));
+                const text = hexToRgb(themeVariable('--lectio-theme-text'));
+                const accent = hexToRgb(themeVariable('--lectio-theme-accent'));
+                const background = hexToRgb(themeVariable('--lectio-theme-bg'));
+
+                /* Still recognisably pink rather than flattened to a neutral. */
+                assert(surface[0] > 200 && surface[0] > surface[1] + 30, `the derived panel colour lost the chosen hue (${themeVariable('--lectio-theme-surface')})`);
+
+                /* But readable, which is what the user could not have got by
+                   picking those two colours by hand. */
+                assert(contrastRatio(text, surface) >= 4.5, `chosen text was unreadable on its panel (${contrastRatio(text, surface)})`);
+                assert(contrastRatio(text, background) >= 4.5, `chosen text was unreadable on the page (${contrastRatio(text, background)})`);
+                assert(contrastRatio(accent, background) >= 3, `the accent was unreadable on the page (${contrastRatio(accent, background)})`);
+
+                /* Built-in themes are untouched by any of it. */
+                setSetting('preset', 'catppuccin-latte');
+                assert(themeVariable('--lectio-theme-bg') === '#eff1f5', 'custom colours leaked into a built-in theme');
+                assert(themeVariable('--lectio-theme-text') === '#4c4f69', 'custom colours leaked into a built-in theme');
+
+                /* And resetting returns the custom palette to its base. */
+                setSetting('resetColours', true);
+                setSetting('preset', 'custom');
+                assert(themeVariable('--lectio-theme-bg') === '#f6f5fb', 'resetting the colours did not return to the neutral base');
+                assert(registration().currentValues.colourBackground === '#f6f5fb', 'the reset colours were not reported back');
+
+                document.documentElement.dataset.testResult = 'pass';
+            } catch (error) {
+                document.documentElement.dataset.testResult = `fail: ${error.message}`;
+            }
+        });
+    </script>
+</body>
+</html>
