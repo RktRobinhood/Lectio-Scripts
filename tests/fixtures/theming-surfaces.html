@@ -15,6 +15,9 @@
         .cke_reset {
             background: transparent;
         }
+        .cke_inner, .cke_wysiwyg_frame, .cke_wysiwyg_div, .cke_source {
+            background: #ffffff;
+        }
         td, th {
             border: 1px solid #dddddd;
         }
@@ -44,7 +47,7 @@
                     <textarea id="note-field">Note</textarea>
                 </div>
                 <div class="cke_chrome">
-                    <div class="cke_inner cke_reset">
+                    <div id="homework-editor-inner" class="cke_inner cke_reset">
                         <div class="cke_contents">
                             <div id="homework-editor" class="cke_editable cke_editable_themed lc-display-fragment" contenteditable="true">
                                 <h1>A fun conditioning example</h1>
@@ -77,13 +80,33 @@
             if (!condition) throw new Error(message);
         }
 
-        /* Chrome serialises color-mix() results as color(srgb r g b / a). */
+        /* Chrome serialises color-mix() results as color(srgb r g b / a) or oklab(l a b / a). */
         function colourParts(value) {
             const srgb = value.match(/^color\(srgb ([\d.]+) ([\d.]+) ([\d.]+)(?: \/ ([\d.]+))?\)$/);
             if (srgb) {
                 return {
                     rgb: [srgb[1], srgb[2], srgb[3]].map(Number).map((channel) => channel * 255),
                     alpha: srgb[4] === undefined ? 1 : Number(srgb[4])
+                };
+            }
+
+            const oklab = value.match(/^oklab\(([\d.-]+) ([\d.-]+) ([\d.-]+)(?: \/ ([\d.]+))?\)$/);
+            if (oklab) {
+                const L = Number(oklab[1]);
+                const a = Number(oklab[2]);
+                const b = Number(oklab[3]);
+                const l_ = L + 0.3963377774 * a + 0.2158037573 * b;
+                const m_ = L - 0.1055613458 * a - 0.0638541728 * b;
+                const s_ = L - 0.0894841775 * a - 1.2914855480 * b;
+                const l = l_ * l_ * l_;
+                const m = m_ * m_ * m_;
+                const s = s_ * s_ * s_;
+                const r = Math.min(255, Math.max(0, (+4.0767434036 * l - 3.3077115913 * m + 0.2309699292 * s) * 255));
+                const g = Math.min(255, Math.max(0, (-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s) * 255));
+                const b_val = Math.min(255, Math.max(0, (-0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s) * 255));
+                return {
+                    rgb: [r, g, b_val],
+                    alpha: oklab[4] === undefined ? 1 : Number(oklab[4])
                 };
             }
 
@@ -147,6 +170,7 @@
                         text: hexToRgb(themeVariable('--lectio-theme-text')),
                         nestedShell: surfaceOf('content-shell'),
                         card: surfaceOf('lesson-content'),
+                        editorInner: surfaceOf('homework-editor-inner'),
                         editor: surfaceOf('homework-editor'),
                         section: surfaceOf('section-box'),
                         table: surfaceOf('schedule'),
@@ -169,6 +193,7 @@
 
                     /* Nesting contributes layout, not another veil. */
                     assert(values.nestedShell.alpha === 0, `${name}: a shell inside a shell added a second veil`);
+                    assert(values.editorInner.alpha === 0, `${name}: the editor inner container retained an opaque background`);
                     assert(values.editor.alpha === 0, `${name}: the editor inside the lesson paper added a second veil`);
                     assert(values.section.alpha === 0, `${name}: a section inside a card added a second veil`);
                     assert(values.table.alpha === 0, `${name}: a layout table inside the shell added a veil of its own`);
@@ -228,7 +253,7 @@
                 assert(!document.documentElement.classList.contains('lectio-themed'), 'Theme stayed enabled after being switched off');
                 assert(themeVariable('--lectio-theme-bg') === '', 'Theme variables were not cleared');
                 assert(themeVariable('--lectio-theme-content-surface') === '', 'Content-surface variables were not cleared');
-                for (const id of ['masterContent', 'content-shell', 'lesson-content', 'homeworkContentContainer', 'homework-editor', 'section-box', 'lesson-cell', 'title-field']) {
+                for (const id of ['masterContent', 'content-shell', 'lesson-content', 'homeworkContentContainer', 'homework-editor-inner', 'homework-editor', 'section-box', 'lesson-cell', 'title-field']) {
                     assert(surfaceOf(id).alpha === 1, `${id} did not return to the unthemed presentation`);
                 }
                 assert(getComputedStyle(element('homeworkContentContainer')).backdropFilter === 'none', 'Frost survived the theme being switched off');

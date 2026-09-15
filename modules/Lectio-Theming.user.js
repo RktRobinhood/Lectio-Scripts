@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Theming
 // @namespace    https://www.lectio.dk/
-// @version      0.14.2
+// @version      0.14.3
 // @description  Gives Lectio a soft, translucent glass shell with 26 built-in colour schemes (Catppuccin, Nord, Dracula, Cyberpunk and more), each with its own distinct background photo, and can derive a scheme from a website or image.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-start
@@ -16,7 +16,7 @@
 
     const MODULE_ID = 'lectio-theming';
     const MODULE_NAME = 'Lectio Theming';
-    const MODULE_VERSION = '0.14.2';
+    const MODULE_VERSION = '0.14.3';
     const STORAGE_KEY = 'lectioTheming.settings.v2';
     const STYLE_ID = 'lectio-theming-styles';
     const ROOT_CLASS = 'lectio-themed';
@@ -236,6 +236,12 @@
 
     announce();
     applyTheme();
+    observeEditorFrames();
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', themeEditorFrames);
+    }
+    window.addEventListener('load', themeEditorFrames);
 
     window.addEventListener('lectio-manager:discover', announce);
     window.addEventListener('lectio-manager:set-setting', handleSetting);
@@ -516,6 +522,67 @@
         }
 
         injectStyles();
+        themeEditorFrames();
+    }
+
+    function themeEditorFrames() {
+        const isThemed = document.documentElement.classList.contains(ROOT_CLASS);
+        const frames = document.querySelectorAll('iframe.cke_wysiwyg_frame');
+        for (const frame of frames) {
+            try {
+                const doc = frame.contentDocument || frame.contentWindow?.document;
+                if (!doc || !doc.head) continue;
+                let style = doc.getElementById('lectio-theme-editor-frame');
+                if (!isThemed) {
+                    style?.remove();
+                    continue;
+                }
+                if (!style) {
+                    style = doc.createElement('style');
+                    style.id = 'lectio-theme-editor-frame';
+                    doc.head.appendChild(style);
+                }
+                const textColor = document.documentElement.style.getPropertyValue('--lectio-theme-text') || 'inherit';
+                const accentColor = document.documentElement.style.getPropertyValue('--lectio-theme-accent') || 'inherit';
+                style.textContent = `
+                    html, body {
+                        background: transparent !important;
+                        background-color: transparent !important;
+                        color: ${textColor} !important;
+                    }
+                    :where(p, span, h1, h2, h3, h4, h5, h6, li, blockquote, div, td, th, label) {
+                        color: inherit !important;
+                    }
+                    a {
+                        color: ${accentColor} !important;
+                    }
+                `;
+            } catch (_) {}
+        }
+    }
+
+    function observeEditorFrames() {
+        if (!window.MutationObserver) return;
+        const observer = new MutationObserver((mutations) => {
+            for (const mutation of mutations) {
+                for (const node of mutation.addedNodes) {
+                    if (node.nodeType !== Node.ELEMENT_NODE) continue;
+                    if (node.matches?.('iframe.cke_wysiwyg_frame')) {
+                        node.addEventListener('load', () => themeEditorFrames());
+                        themeEditorFrames();
+                    } else if (node.querySelectorAll) {
+                        const frames = node.querySelectorAll('iframe.cke_wysiwyg_frame');
+                        if (frames.length > 0) {
+                            for (const frame of frames) {
+                                frame.addEventListener('load', () => themeEditorFrames());
+                            }
+                            themeEditorFrames();
+                        }
+                    }
+                }
+            }
+        });
+        observer.observe(document.documentElement, { childList: true, subtree: true });
     }
 
     function injectStyles() {
@@ -809,6 +876,47 @@
 
             html.${ROOT_CLASS} .cke_chrome {
                 border-color: color-mix(in srgb, var(--lectio-theme-muted) 25%, transparent) !important;
+                border-radius: max(4px, calc(var(--lectio-theme-radius) - 4px)) !important;
+                background: transparent !important;
+                box-shadow: none !important;
+            }
+
+            /* CKEditor skins paint a solid white background on .cke_inner,
+               .cke_wysiwyg_div, .cke_wysiwyg_frame, and .cke_source, which resists
+               the theme and leaves the lesson editor as an opaque white box.
+               Clear those backgrounds so the editor rests cleanly on the
+               underlying paper/card surface without adding an opaque veil or
+               stacking extra layers. */
+            html.${ROOT_CLASS} :where(
+                .cke_inner,
+                .cke_contents,
+                .cke_wysiwyg_frame,
+                .cke_wysiwyg_div,
+                .cke_editable,
+                .cke_source
+            ) {
+                background: transparent !important;
+                background-color: transparent !important;
+                color: var(--lectio-theme-text) !important;
+            }
+
+            html.${ROOT_CLASS} :where(.cke_editable, .cke_wysiwyg_div, .lc-display-fragment) :where(
+                p, span, h1, h2, h3, h4, h5, h6, li, blockquote, div, td, th, label
+            ) {
+                color: inherit !important;
+            }
+
+            html.${ROOT_CLASS} :where(.cke_editable, .cke_wysiwyg_div, .lc-display-fragment) a {
+                color: var(--lectio-theme-accent) !important;
+            }
+
+            /* Floating tooltips (e.g. lesson header hover details) */
+            html.${ROOT_CLASS} :where(.ui-tooltip, .ui-tooltip-content) {
+                background: color-mix(in srgb, var(--lectio-theme-surface) 85%, transparent) !important;
+                border: 1px solid color-mix(in srgb, var(--lectio-theme-accent) 25%, transparent) !important;
+                color: var(--lectio-theme-text) !important;
+                border-radius: max(4px, calc(var(--lectio-theme-radius) - 6px)) !important;
+                box-shadow: 0 8px 24px color-mix(in srgb, var(--lectio-theme-muted) 25%, transparent) !important;
             }
 
             html.${ROOT_CLASS} .s2module-bg {
