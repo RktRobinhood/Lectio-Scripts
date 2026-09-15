@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Lectio Theming
 // @namespace    https://www.lectio.dk/
-// @version      0.15.0
-// @description  Gives Lectio a soft, translucent glass shell with 26 built-in colour schemes (Catppuccin, Nord, Dracula, Cyberpunk and more), each with its own distinct background photo, and can derive a scheme from a website or image, take its background from your own picture, and let you hand-pick every key colour.
+// @version      0.16.0
+// @description  Gives Lectio a soft, translucent glass shell with 44 built-in colour schemes (Catppuccin, Nord, Dracula, Cyberpunk, sports, social-app and Danish-landscape palettes and more), each with its own distinct background photo, and can derive a scheme from a website or image, take its background from your own picture, and let you hand-pick every key colour.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-start
 // @grant        GM_xmlhttpRequest
@@ -16,7 +16,7 @@
 
     const MODULE_ID = 'lectio-theming';
     const MODULE_NAME = 'Lectio Theming';
-    const MODULE_VERSION = '0.15.0';
+    const MODULE_VERSION = '0.16.0';
     const STORAGE_KEY = 'lectioTheming.settings.v2';
     // The chosen background picture lives in its own entry rather than in the
     // settings blob: it is orders of magnitude larger than every other setting
@@ -130,6 +130,51 @@
             background: '#ffffff', surface: '#f6f8fa', surfaceAlt: '#eaeef2',
             text: '#1f2328', muted: '#656d76', accent: '#0969da', accentAlt: '#8250df', danger: '#d1242f'
         },
+        bubblegum: {
+            label: 'Bubblegum', mode: 'light', pattern: 'blobs',
+            background: '#fff0f6', surface: '#ffffff', surfaceAlt: '#ffe0ee',
+            text: '#3d1030', muted: '#8a5a76', accent: '#d4157f', accentAlt: '#7b3fa0', danger: '#c60036'
+        },
+        'pastel-dream': {
+            label: 'Pastel Dream', mode: 'light', pattern: 'blobs',
+            background: '#f7f4ff', surface: '#ffffff', surfaceAlt: '#ece7fb',
+            text: '#332b4d', muted: '#6f6790', accent: '#6a57e8', accentAlt: '#ad4185', danger: '#d0455e'
+        },
+        matcha: {
+            label: 'Matcha Latte', mode: 'light', pattern: 'blobs',
+            background: '#f4f2e6', surface: '#fffdf3', surfaceAlt: '#e6e8d0',
+            text: '#2f3a24', muted: '#6b7359', accent: '#4a7a2b', accentAlt: '#7b5d33', danger: '#b3402f'
+        },
+        'handball-court': {
+            label: 'Handball Court', mode: 'light', pattern: 'blobs',
+            background: '#f2f6fb', surface: '#ffffff', surfaceAlt: '#e2ecf7',
+            text: '#17293b', muted: '#5b7185', accent: '#0b6fa4', accentAlt: '#9a6400', danger: '#c8102e'
+        },
+        fairway: {
+            label: 'Golf Fairway', mode: 'light', pattern: 'blobs',
+            background: '#f2f7ee', surface: '#ffffff', surfaceAlt: '#e0ecda',
+            text: '#1f3324', muted: '#5d7361', accent: '#2c7a4c', accentAlt: '#5a7526', danger: '#b5432f'
+        },
+        'north-sea': {
+            label: 'North Sea', mode: 'light', pattern: 'blobs',
+            background: '#eef3f5', surface: '#ffffff', surfaceAlt: '#dfe8ec',
+            text: '#1d2b33', muted: '#5e7280', accent: '#276d85', accentAlt: '#776643', danger: '#b23f43'
+        },
+        heathland: {
+            label: 'Heathland', mode: 'light', pattern: 'blobs',
+            background: '#f6f1f6', surface: '#ffffff', surfaceAlt: '#ebe0ec',
+            text: '#33253a', muted: '#74657c', accent: '#8b3f86', accentAlt: '#5f7238', danger: '#b34350'
+        },
+        lemon: {
+            label: 'Lemon', mode: 'light', pattern: 'blobs',
+            background: '#fffbe6', surface: '#ffffff', surfaceAlt: '#fff3bf',
+            text: '#2a2513', muted: '#6e6538', accent: '#946a00', accentAlt: '#2f6c8c', danger: '#c23c2f'
+        },
+        'skate-park': {
+            label: 'Skate Park', mode: 'light', pattern: 'blobs',
+            background: '#f2f2f0', surface: '#ffffff', surfaceAlt: '#e3e4e1',
+            text: '#22242a', muted: '#63666e', accent: '#b4470f', accentAlt: '#3f6d8a', danger: '#b3261e'
+        },
         nord: {
             label: 'Nord', mode: 'dark', pattern: 'waves',
             background: '#2e3440', surface: '#3b4252', surfaceAlt: '#434c5e',
@@ -229,6 +274,51 @@
             label: "Synthwave '84", mode: 'dark', pattern: 'scanlines',
             background: '#241b2f', surface: '#2a2139', surfaceAlt: '#34294f',
             text: '#f6eff5', muted: '#848bbd', accent: '#ff7edb', accentAlt: '#36f9f6', danger: '#fe4450'
+        },
+        hardwood: {
+            label: 'Hardwood', mode: 'dark', pattern: 'waves',
+            background: '#1b1410', surface: '#241a14', surfaceAlt: '#33251b',
+            text: '#f2e4d6', muted: '#a08a76', accent: '#f0783c', accentAlt: '#d9b382', danger: '#e85c47'
+        },
+        stable: {
+            label: 'Stable', mode: 'dark', pattern: 'waves',
+            background: '#1e1712', surface: '#2a211a', surfaceAlt: '#3a2d22',
+            text: '#efe3d5', muted: '#a99181', accent: '#cf9459', accentAlt: '#9db177', danger: '#d96b52'
+        },
+        'feed-gradient': {
+            label: 'Feed Gradient', mode: 'dark', pattern: 'waves',
+            background: '#1a0f1e', surface: '#241429', surfaceAlt: '#331c3a',
+            text: '#f6e9f4', muted: '#a78bb0', accent: '#f4608f', accentAlt: '#fdab3d', danger: '#ff5a5a'
+        },
+        'floodlit-pitch': {
+            label: 'Floodlit Pitch', mode: 'dark', pattern: 'waves',
+            background: '#0d1712', surface: '#14211a', surfaceAlt: '#1d2f24',
+            text: '#e6f2e9', muted: '#85a292', accent: '#3ad77e', accentAlt: '#e3ee9e', danger: '#e5605a'
+        },
+        paddock: {
+            label: 'Paddock', mode: 'dark', pattern: 'grid',
+            background: '#14151a', surface: '#1c1e25', surfaceAlt: '#272a33',
+            text: '#eceef4', muted: '#8d94a6', accent: '#ff3b2d', accentAlt: '#ffb800', danger: '#ff6a5e'
+        },
+        'clip-neon': {
+            label: 'Clip Neon', mode: 'dark', pattern: 'scanlines',
+            background: '#0a0a0d', surface: '#141418', surfaceAlt: '#1f1f26',
+            text: '#f3f3f7', muted: '#9a9aa8', accent: '#25f4ee', accentAlt: '#ff4a70', danger: '#ff3b5c'
+        },
+        playlist: {
+            label: 'Playlist', mode: 'dark', pattern: 'grid',
+            background: '#101410', surface: '#181d18', surfaceAlt: '#232a23',
+            text: '#eaf2ea', muted: '#8ea38e', accent: '#1ed760', accentAlt: '#b3f28a', danger: '#e05353'
+        },
+        blurple: {
+            label: 'Blurple', mode: 'dark', pattern: 'grid',
+            background: '#1a1b23', surface: '#23242d', surfaceAlt: '#2e303b',
+            text: '#e9eaf2', muted: '#969ab0', accent: '#8b95f9', accentAlt: '#58d6c9', danger: '#ed5f68'
+        },
+        'deep-space': {
+            label: 'Deep Space', mode: 'dark', pattern: 'waves',
+            background: '#0a0d1a', surface: '#111524', surfaceAlt: '#1a2035',
+            text: '#dfe4f5', muted: '#7b85a8', accent: '#7ea8ff', accentAlt: '#c08cf5', danger: '#f0687e'
         }
     });
 

@@ -32,6 +32,24 @@ Used by [Lectio Theming](../../modules/Lectio-Theming.user.js) as each theme's b
 | Material Ocean | `bg-material-ocean.jpg` | Willy the Wizard | [Unsplash photo](https://unsplash.com/photos/dark-blue-ocean-water-with-subtle-waves-QSi3fSgkbqc) |
 | Cyberpunk Neon | `bg-cyberpunk.jpg` | Nat ([@nattgw](https://unsplash.com/@nattgw)) | [Unsplash photo](https://unsplash.com/photos/a-futuristic-city-at-night-with-neon-lights-dA0-qxdbyyY) |
 | Synthwave '84 | `bg-synthwave84.jpg` | Anthony Ievlev ([@onmywayhome](https://unsplash.com/@onmywayhome)) | [Unsplash photo](https://unsplash.com/photos/beautiful-sunset-sky-with-vibrant-pink-and-purple-hues-C7yDvYTcli8) |
+| Bubblegum | `bg-bubblegum.jpg` | Bekky Bekks | [Unsplash photo](https://unsplash.com/photos/pink-concrete-wall-during-daytime-R7PARg0vpAU) |
+| Pastel Dream | `bg-pastel-dream.jpg` | Atsadawut Chaiseeha | [Unsplash photo](https://unsplash.com/photos/pink-and-purple-clouds-in-sky-Mv3mEpWDhSM) |
+| Matcha Latte | `bg-matcha.jpg` | Kairi Kaljo | [Unsplash photo](https://unsplash.com/photos/a-close-up-of-a-green-colored-substance-raY_ESVlINQ) |
+| Handball Court | `bg-handball-court.jpg` | Marino Bobetic | [Unsplash photo](https://unsplash.com/photos/blue-and-white-goal-IxtM5H-l1rI) |
+| Golf Fairway | `bg-fairway.jpg` | Thomas Park | [Unsplash photo](https://unsplash.com/photos/golf-course-with-green-trees-in-the-distance-sWqaGzQF1N4) |
+| North Sea | `bg-north-sea.jpg` | Sebastian Puskeiler | [Unsplash photo](https://unsplash.com/photos/a-sandy-beach-next-to-the-ocean-under-a-cloudy-sky-7gsDvwtB_oQ) |
+| Heathland | `bg-heathland.jpg` | Wojciech Wyszkowski | [Unsplash photo](https://unsplash.com/photos/winding-dirt-path-through-purple-heather-field-and-green-trees-s96-T9tkdn0) |
+| Lemon | `bg-lemon.jpg` | Jason Dent | [Unsplash photo](https://unsplash.com/photos/bright-yellow-wall-texture-S53ekmu8KkE) |
+| Skate Park | `bg-skate-park.jpg` | Reinis Brūzītis | [Unsplash photo](https://unsplash.com/photos/empty-skate-park-with-ramps-and-rails-0g7_mxTlggY) |
+| Hardwood | `bg-hardwood.jpg` | Markus Spiske | [Unsplash photo](https://unsplash.com/photos/ball-under-basketball-ring-BfphcCvhl6E) |
+| Stable | `bg-stable.jpg` | Levi Arnold | [Unsplash photo](https://unsplash.com/photos/a-brown-horse-standing-inside-of-a-barn-b4_r-8M-I6g) |
+| Feed Gradient | `bg-feed-gradient.jpg` | MagicPattern | [Unsplash photo](https://unsplash.com/photos/a-blurry-image-of-a-purple-and-red-background-4fF44tm4hpM) |
+| Floodlit Pitch | `bg-floodlit-pitch.jpg` | Alex Simpson | [Unsplash photo](https://unsplash.com/photos/a-soccer-match-in-a-stadium-at-night-DOicNPBVSHs) |
+| Paddock | `bg-paddock.jpg` | Felix Berger | [Unsplash photo](https://unsplash.com/photos/race-track-with-cars-C_J29bp8-4Y) |
+| Clip Neon | `bg-clip-neon.jpg` | Valou _c | [Unsplash photo](https://unsplash.com/photos/red-and-blue-lights-during-night-time-zr37t2UlzpY) |
+| Playlist | `bg-playlist.jpg` | Pawel Czerwinski | [Unsplash photo](https://unsplash.com/photos/a-black-and-green-abstract-background-with-wavy-lines-ELaFzBeZ6i0) |
+| Blurple | `bg-blurple.jpg` | Milad Fakurian | [Unsplash photo](https://unsplash.com/photos/abstract-purple-wave-gradient-background-seA-FPPXL-M) |
+| Deep Space | `bg-deep-space.jpg` | Ferenc Horvath | [Unsplash photo](https://unsplash.com/photos/milky-way-galaxy-skcFiBu91AA) |
 
 ## Fallback photos (Imported palette only)
 
@@ -44,4 +62,4 @@ These four are used only when the **Imported palette** option has no photo of it
 | `bg-grid.jpg` | Pawel Czerwinski ([@pawel_czerwinski](https://unsplash.com/@pawel_czerwinski)) | [Unsplash photo](https://unsplash.com/photos/an-abstract-black-background-with-wavy-lines-2zJ3m80fSU4) |
 | `bg-scanlines.jpg` | Nat ([@nattgw](https://unsplash.com/@nattgw)) | [Unsplash photo](https://unsplash.com/photos/a-futuristic-city-at-night-with-neon-lights-dA0-qxdbyyY) |
 
-Each file was fetched from Unsplash's own image CDN with `?auto=format&fit=crop&w=1920&h=1080&q=68-70` to keep delivery size reasonable for a background that loads on every page view.
+Each file was fetched from Unsplash's own image CDN with `?auto=format&fit=crop&w=1920&h=1080&q=68-70` to keep delivery size reasonable for a background that loads on every page view. A few unusually detailed photos were fetched at `w=1600&h=900&q=62` instead, for the same reason.
