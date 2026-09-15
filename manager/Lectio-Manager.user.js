@@ -323,7 +323,7 @@
             return view.slice(CATEGORY_VIEW_PREFIX.length);
         }
 
-        return 'All modules';
+        return 'Available';
     }
 
     // ============================================================
@@ -402,7 +402,9 @@
                         <button type="button" class="lectio-manager-tab" data-primary-view="installed" role="tab" aria-controls="lectio-manager-main-view" aria-selected="true">
                             Installed <span class="lectio-manager-installed-count"></span>
                         </button>
-                        <button type="button" class="lectio-manager-tab" data-primary-view="all" role="tab" aria-controls="lectio-manager-main-view" aria-selected="false">Browse</button>
+                        <button type="button" class="lectio-manager-tab" data-primary-view="all" role="tab" aria-controls="lectio-manager-main-view" aria-selected="false">
+                            Available <span class="lectio-manager-available-count"></span>
+                        </button>
                     </div>
                     <div class="lectio-manager-nav">
                         <button type="button" class="lectio-manager-nav-trigger" aria-haspopup="true" aria-expanded="false">
@@ -572,6 +574,7 @@
             nav: root.querySelector('.lectio-manager-nav'),
             tabs: [...root.querySelectorAll('.lectio-manager-tab')],
             installedCount: root.querySelector('.lectio-manager-installed-count'),
+            availableCount: root.querySelector('.lectio-manager-available-count'),
             sortButtons: [...root.querySelectorAll('.lectio-manager-sort [data-sort]')],
             mainView,
             settingsView,
@@ -659,7 +662,7 @@
         if (!modules.length) {
             const empty = document.createElement('div');
             empty.className = 'lectio-manager-loading';
-            empty.textContent = 'No modules in this view yet.';
+            empty.textContent = getEmptyStateText(currentView);
             list.appendChild(empty);
             return;
         }
@@ -695,9 +698,13 @@
         const installedCount = catalogue
             ? catalogue.modules.filter((module) => detected.has(module.id)).length
             : 0;
+        const availableCount = catalogue
+            ? catalogue.modules.filter((module) => !detected.has(module.id)).length
+            : 0;
         const primaryView = currentView === 'installed' ? 'installed' : 'all';
 
         elements.installedCount.textContent = String(installedCount);
+        elements.availableCount.textContent = String(availableCount);
         for (const tab of elements.tabs) {
             const active = tab.dataset.primaryView === primaryView;
             tab.classList.toggle('is-active', active);
@@ -718,12 +725,12 @@
             filtered = catalogue.modules.filter((module) => detected.has(module.id));
         } else if (currentView.startsWith(AUDIENCE_VIEW_PREFIX)) {
             const audience = currentView.slice(AUDIENCE_VIEW_PREFIX.length);
-            filtered = catalogue.modules.filter((module) => !module.audience.length || module.audience.includes(audience));
+            filtered = getAvailableModules().filter((module) => !module.audience.length || module.audience.includes(audience));
         } else if (currentView.startsWith(CATEGORY_VIEW_PREFIX)) {
             const category = currentView.slice(CATEGORY_VIEW_PREFIX.length);
-            filtered = catalogue.modules.filter((module) => module.category === category);
+            filtered = getAvailableModules().filter((module) => module.category === category);
         } else {
-            filtered = catalogue.modules.slice();
+            filtered = getAvailableModules();
         }
 
         const sorted = filtered.slice();
@@ -735,6 +742,22 @@
         }
 
         return sorted;
+    }
+
+    function getAvailableModules() {
+        return catalogue.modules.filter((module) => !detected.has(module.id));
+    }
+
+    function getEmptyStateText(view) {
+        if (view === 'installed') {
+            return 'No installed modules detected yet.';
+        }
+
+        if (getAvailableModules().length === 0) {
+            return 'All available modules are installed.';
+        }
+
+        return 'No available modules match this filter.';
     }
 
     // ============================================================
@@ -756,7 +779,7 @@
 
         const topGroup = document.createElement('div');
         topGroup.className = 'lectio-manager-nav-group';
-        topGroup.appendChild(buildNavMenuItem('all', 'All modules'));
+        topGroup.appendChild(buildNavMenuItem('all', 'All available modules'));
         navMenu.appendChild(topGroup);
 
         const audienceGroup = document.createElement('div');
@@ -1503,7 +1526,8 @@
                 color: var(--lectio-theme-accent, #0f6f6f);
             }
 
-            .lectio-manager-installed-count {
+            .lectio-manager-installed-count,
+            .lectio-manager-available-count {
                 color: var(--lectio-theme-muted, #5e6870);
                 font-size: 10px;
             }

@@ -98,9 +98,11 @@
                     const mainView = document.querySelector('.lectio-manager-main-view');
                     const settingsView = document.querySelector('.lectio-manager-settings-view');
                     const installedTab = document.querySelector('[data-primary-view="installed"]');
-                    const browseTab = document.querySelector('[data-primary-view="all"]');
+                    const availableTab = document.querySelector('[data-primary-view="all"]');
 
                     assert(installedTab.getAttribute('aria-selected') === 'true', 'Installed is not the primary view');
+                    assert(installedTab.textContent.trim() === 'Installed 2', `Installed tab did not show count: ${installedTab.textContent}`);
+                    assert(availableTab.textContent.trim() === 'Available 1', `Available tab did not show count: ${availableTab.textContent}`);
                     assert(names().join('|') === 'Zulu Interface|Alpha Timetable', `Unexpected installed order: ${names()}`);
                     assert(!document.querySelector('.lectio-manager-card-desc'), 'Installed cards should be compact');
                     assert(document.querySelector('[data-module-id="zulu-interface"] .lectio-manager-status-update')?.textContent.includes('v1.1.0'), 'Newer catalogue version was not shown');
@@ -112,14 +114,15 @@
                     assert(names().join('|') === 'Alpha Timetable|Zulu Interface', `Name sort did not update immediately: ${names()}`);
                     assert(document.querySelector('[data-sort="name"]'), 'Sort controls disappeared after sorting');
 
-                    browseTab.click();
-                    assert(browseTab.getAttribute('aria-selected') === 'true', 'Browse tab did not activate');
-                    assert(names().includes('Browse Only'), 'Browse view omitted an uninstalled module');
-                    assert(document.querySelector('.lectio-manager-card-desc'), 'Browse cards should include descriptions');
+                    availableTab.click();
+                    assert(availableTab.getAttribute('aria-selected') === 'true', 'Available tab did not activate');
+                    assert(names().join('|') === 'Browse Only', `Available view did not narrow to uninstalled modules: ${names()}`);
+                    assert(document.querySelector('.lectio-manager-view-heading').textContent === 'Available · 1', 'Available heading did not show its filtered count');
+                    assert(document.querySelector('.lectio-manager-card-desc'), 'Available cards should include descriptions');
 
                     document.querySelector('.lectio-manager-nav-trigger').click();
                     document.querySelector('[data-view="audience:teacher"]').click();
-                    assert(names().join('|') === 'Browse Only|Zulu Interface', `Audience filter returned the wrong modules: ${names()}`);
+                    assert(names().join('|') === 'Browse Only', `Audience filter returned installed modules: ${names()}`);
                     assert(!document.querySelector('.lectio-manager-nav-menu').hidden, 'Filter menu closed after changing the Audience filter');
                     assert(document.querySelector('.lectio-manager-nav-trigger').getAttribute('aria-expanded') === 'true', 'Filter trigger did not remain expanded after changing the Audience filter');
                     assert(document.querySelector('[data-view="audience:teacher"]').getAttribute('aria-checked') === 'true', 'Audience filter did not expose selected state');
@@ -129,7 +132,14 @@
                     assert(document.querySelector('.lectio-manager-nav-current').textContent === 'Messages', 'Active filter label did not update while the menu remained open');
                     assert(document.querySelector('[data-view="category:Messages"]').getAttribute('aria-checked') === 'true', 'Category filter did not expose selected state');
 
-                    browseTab.click();
+                    window.dispatchEvent(new CustomEvent('lectio-module:register', {
+                        detail: { id: 'browse-only', name: 'Browse Only', version: '1.0.0' }
+                    }));
+                    availableTab.click();
+                    assert(document.querySelector('.lectio-manager-available-count').textContent === '0', 'Available count did not update after detecting all modules');
+                    assert(document.querySelector('.lectio-manager-loading').textContent === 'All available modules are installed.', 'Available empty state was unclear');
+
+                    installedTab.click();
                     assert(document.querySelector('.lectio-manager-nav-menu').hidden, 'Switching primary tabs did not close the filter menu');
                     document.querySelector('[data-module-id="zulu-interface"] .lectio-manager-settings-btn').click();
                     settingsView.querySelector('.lectio-manager-settings-back').click();

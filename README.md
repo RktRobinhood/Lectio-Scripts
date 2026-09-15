@@ -32,11 +32,11 @@ They run locally in your browser while you use Lectio. Install only the modules 
 
 **[Lectio Manager](manager/Lectio-Manager.user.js)** is a small, stable control surface that lives inside Lectio. Install it once and it:
 
-- shows a **catalogue** of every available module, fetched from this repository (`catalogue/modules.json`),
+- shows a **catalogue** of modules that are still available to install, fetched from this repository (`catalogue/modules.json`),
 - lets you **install** a module with one click, using Tampermonkey's own install screen,
 - shows whether a module is currently **detected as running**,
 - caches the catalogue locally and refreshes it automatically at most once every 24 hours, with a manual refresh button whenever you want the latest list,
-- opens on a compact **Installed** tab, with a separate **Browse** tab for discovering every available module and filtering by audience or category,
+- opens on a compact **Installed** tab, with a counted **Available** tab for discovering modules that are not currently detected; its audience and category filters narrow only that available set,
 - sorts either tab by Category or Name immediately, without interrupting navigation,
 - has one **wrench button** in the header that opens Tampermonkey's own dashboard directly, for disabling, updating, or removing any script — since that dashboard already lists everything installed, there's no need for a separate button per module,
 - has a **Report a bug or idea** link at the bottom of the panel, straight to this repository's GitHub Issue templates.
