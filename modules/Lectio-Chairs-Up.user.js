@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Chairs Up
 // @namespace    https://www.lectio.dk/
-// @version      1.1.0
+// @version      1.1.1
 // @description  Shows when a lesson is the final active booking of the day in its room. Universal Lectio version.
 // @match        https://www.lectio.dk/lectio/*
 // @grant        none
@@ -35,7 +35,7 @@
   (function registerWithLectioManager() {
     const MODULE_ID = 'chairs-up';
     const MODULE_NAME = 'Lectio - Chairs Up';
-    const MODULE_VERSION = '1.1.0';
+    const MODULE_VERSION = '1.1.1';
 
     function announce() {
       window.dispatchEvent(new CustomEvent('lectio-module:register', {
@@ -141,7 +141,7 @@
     schoolMatch[1];
 
   console.info(
-    `[Lectio Chairs Up] v1.1.0 started - school ${SCHOOL}`
+    `[Lectio Chairs Up] v1.1.1 started - school ${SCHOOL}`
   );
 
 
@@ -208,6 +208,41 @@
 
   const LESSON_NOTICE_CLASS =
     'lectio-chairs-up-lesson-notice';
+
+
+  // =========================================================
+  // ACTIVITY NOTICE LAYOUT
+  // =========================================================
+
+  /*
+   * The notice only moves out beside the activity paper when the
+   * gutter there can hold the whole notice, this gap between the
+   * two, and this much breathing space at the window edge.
+   */
+  const NOTICE_SIDE_GAP =
+    18;
+
+  const NOTICE_EDGE_GAP =
+    12;
+
+
+  /*
+   * Overlays the notice must never cover: Lectio's jQuery UI
+   * dialogs (the Grupper group maker among them), native and
+   * ARIA dialogs, Bootstrap modals, and Lectio's own mobile
+   * modal background. Each match is still visibility-checked,
+   * because Lectio leaves dialog shells in the page unused.
+   */
+  const OVERLAY_SELECTOR = [
+    '.ui-dialog',
+    '.ui-widget-overlay',
+    '.modal.show',
+    '.modal-backdrop',
+    '#modalBackgroundID',
+    'dialog[open]',
+    '[role="dialog"]',
+    '[role="alertdialog"]'
+  ].join(', ');
 
 
   // =========================================================
@@ -624,9 +659,80 @@
     `;
 
 
-    card.appendChild(
+    /*
+     * First child, so the in-flow fallback reads with the
+     * activity heading instead of trailing the whole lesson.
+     */
+    card.insertBefore(
+      notice,
+      card.firstChild
+    );
+
+
+    placeActivityNotice(
       notice
     );
+
+
+    watchNoticeSurroundings();
+  }
+
+
+  /*
+   * The activity paper is a fixed-width column, so a wide window
+   * usually leaves a gutter beside it. The notice moves out there
+   * when the gutter can actually hold it, and otherwise stays in
+   * the flow above the content, where it cannot cover anything.
+   */
+  function placeActivityNotice(
+    notice
+  ) {
+    const card =
+      notice.parentElement;
+
+
+    if (!card) {
+      return;
+    }
+
+
+    /*
+     * A hidden notice measures as zero-width, so leave the
+     * placement alone until it is shown again.
+     */
+    if (
+      notice.dataset.overlay ===
+        'open'
+    ) {
+      return;
+    }
+
+
+    /*
+     * Measure in the flow first, where the notice takes its
+     * natural width.
+     */
+    notice.dataset.placement =
+      'inline';
+
+
+    const gutter =
+      document.documentElement.clientWidth -
+      card.getBoundingClientRect().right;
+
+
+    const needed =
+      notice.offsetWidth +
+      NOTICE_SIDE_GAP +
+      NOTICE_EDGE_GAP;
+
+
+    if (
+      gutter >= needed
+    ) {
+      notice.dataset.placement =
+        'beside';
+    }
   }
 
 
@@ -639,6 +745,258 @@
         element =>
           element.remove()
       );
+
+
+    unwatchNoticeSurroundings();
+  }
+
+
+  // =========================================================
+  // LECTIO OVERLAYS
+  // =========================================================
+
+  /*
+   * Lectio opens dialogs and nested views (the Grupper group
+   * maker among them) over the activity page. The notice is
+   * page furniture, so it steps aside for all of them rather
+   * than competing for the same space.
+   */
+  function syncNoticeOverlayState() {
+    const open =
+      isLectioOverlayOpen();
+
+
+    document
+      .querySelectorAll(
+        `.${LESSON_NOTICE_CLASS}`
+      )
+      .forEach(
+        notice => {
+          const wasOpen =
+            notice.dataset.overlay ===
+              'open';
+
+
+          if (
+            wasOpen === open
+          ) {
+            return;
+          }
+
+
+          notice.dataset.overlay =
+            open
+              ? 'open'
+              : 'clear';
+
+
+          /*
+           * The page may have reflowed while the notice was
+           * hidden, so re-measure before showing it again.
+           */
+          if (!open) {
+            placeActivityNotice(
+              notice
+            );
+          }
+        }
+      );
+  }
+
+
+  function isLectioOverlayOpen() {
+    return [
+      ...document.querySelectorAll(
+        OVERLAY_SELECTOR
+      )
+    ]
+      .some(
+        isVisibleOverlay
+      );
+  }
+
+
+  function isVisibleOverlay(
+    element
+  ) {
+    /*
+     * Feature-detected rather than trusted: Lectio leaves
+     * dialog shells in the page between uses.
+     */
+    const style =
+      getComputedStyle(
+        element
+      );
+
+
+    if (
+      style.display === 'none' ||
+      style.visibility === 'hidden' ||
+      style.opacity === '0'
+    ) {
+      return false;
+    }
+
+
+    const box =
+      element.getBoundingClientRect();
+
+
+    return (
+      box.width > 0 &&
+      box.height > 0
+    );
+  }
+
+
+  // =========================================================
+  // NOTICE WATCHERS
+  // =========================================================
+
+  /*
+   * Scoped to the lifetime of a notice: both watchers are torn
+   * down again as soon as no notice is left on the page.
+   */
+  let noticeObserver =
+    null;
+
+  let noticeFrame =
+    0;
+
+  let noticeNeedsPlacement =
+    false;
+
+
+  function watchNoticeSurroundings() {
+    syncNoticeOverlayState();
+
+
+    if (noticeObserver) {
+      return;
+    }
+
+
+    noticeObserver =
+      new MutationObserver(
+        handleNoticeMutations
+      );
+
+
+    noticeObserver.observe(
+      document.body,
+
+      {
+        childList: true,
+        subtree: true,
+        attributes: true,
+
+        attributeFilter: [
+          'class',
+          'style',
+          'open',
+          'hidden',
+          'aria-hidden'
+        ]
+      }
+    );
+
+
+    window.addEventListener(
+      'resize',
+      handleNoticeResize
+    );
+  }
+
+
+  function unwatchNoticeSurroundings() {
+    if (!noticeObserver) {
+      return;
+    }
+
+
+    noticeObserver.disconnect();
+
+    noticeObserver =
+      null;
+
+
+    window.removeEventListener(
+      'resize',
+      handleNoticeResize
+    );
+
+
+    if (noticeFrame) {
+      cancelAnimationFrame(
+        noticeFrame
+      );
+
+      noticeFrame =
+        0;
+    }
+
+
+    noticeNeedsPlacement =
+      false;
+  }
+
+
+  function handleNoticeMutations() {
+    scheduleNoticeSync();
+  }
+
+
+  function handleNoticeResize() {
+    noticeNeedsPlacement =
+      true;
+
+    scheduleNoticeSync();
+  }
+
+
+  function scheduleNoticeSync() {
+    if (noticeFrame) {
+      return;
+    }
+
+
+    noticeFrame =
+      requestAnimationFrame(
+        runNoticeSync
+      );
+  }
+
+
+  function runNoticeSync() {
+    noticeFrame =
+      0;
+
+
+    const notices =
+      document.querySelectorAll(
+        `.${LESSON_NOTICE_CLASS}`
+      );
+
+
+    if (!notices.length) {
+      unwatchNoticeSurroundings();
+
+      return;
+    }
+
+
+    if (noticeNeedsPlacement) {
+      noticeNeedsPlacement =
+        false;
+
+
+      notices.forEach(
+        placeActivityNotice
+      );
+    }
+
+
+    syncNoticeOverlayState();
   }
 
 
@@ -3128,15 +3486,26 @@
          ACTIVITY PAGE NOTICE
          ===================================================== */
 
+      /*
+       * In the flow by default: a notice that shares the paper's
+       * own column can never cover the activity heading, its
+       * actions, links, or the lesson material.
+       */
       .${LESSON_NOTICE_CLASS} {
         position:
-          absolute;
+          relative;
 
-        top:
-          18px;
+        box-sizing:
+          border-box;
 
-        right:
-          52px;
+        width:
+          max-content;
+
+        max-width:
+          100%;
+
+        margin:
+          0 0 16px auto;
 
         display:
           flex;
@@ -3170,8 +3539,13 @@
         color:
           #ffffff;
 
+        /*
+         * Modest, because the notice no longer sits over the
+         * page: overlays are handled by stepping aside, not by
+         * out-stacking them.
+         */
         z-index:
-          500;
+          40;
 
         user-select:
           none;
@@ -3201,6 +3575,35 @@
         box-shadow:
           0 7px 17px rgba(0,0,0,0.29),
           0 0 0 1px rgba(130,0,20,0.16);
+      }
+
+
+      /*
+       * Set only after the gutter beside the activity paper has
+       * been measured and found wide enough to hold the notice.
+       */
+      .${LESSON_NOTICE_CLASS}[data-placement='beside'] {
+        position:
+          absolute;
+
+        top:
+          18px;
+
+        left:
+          100%;
+
+        margin:
+          0 0 0 ${NOTICE_SIDE_GAP}px;
+      }
+
+
+      /*
+       * A Lectio dialog, popup, or nested subview is open in
+       * front of the page.
+       */
+      .${LESSON_NOTICE_CLASS}[data-overlay='open'] {
+        display:
+          none !important;
       }
 
 
@@ -3275,6 +3678,13 @@
 
         flex-direction:
           column;
+
+        /*
+         * Lets the copy shrink instead of pushing the notice
+         * wider than the space it was placed in.
+         */
+        min-width:
+          0;
 
         line-height:
           1.05;
@@ -3351,26 +3761,23 @@
         }
 
 
+        /*
+         * Narrow layouts never get the gutter placement, so the
+         * notice only has to stay inside the paper and wrap its
+         * copy rather than overflow it.
+         */
         .${LESSON_NOTICE_CLASS} {
-          position:
-            relative;
-
-          top:
-            auto;
-
-          right:
-            auto;
-
-          width:
-            max-content;
-
           max-width:
-            calc(
-              100% - 20px
-            );
+            100%;
 
           margin:
-            10px 10px 12px auto;
+            0 0 12px;
+        }
+
+
+        .lectio-chairs-up-lesson-copy {
+          white-space:
+            normal;
         }
       }
     `;

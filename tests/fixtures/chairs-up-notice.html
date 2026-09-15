@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>Chairs Up activity-notice fixture</title>
+    <style>
+        /* The parts of Lectio's own activity-page layout the notice has to
+           live inside: a left table of contents and a fixed-width paper
+           column, which is what leaves a gutter beside the content on a wide
+           window. Lectio narrows the paper to 95dvw on small screens; the
+           same rule is written against the viewport here so the narrow run
+           reflows the way a phone does. */
+        body {
+            margin: 0;
+            font-family: Roboto, Arial, sans-serif;
+        }
+        .ls-content-container {
+            display: flex;
+            align-items: flex-start;
+        }
+        .ls-tocContainer-outer {
+            flex: 0 0 280px;
+            padding: 12px;
+            box-sizing: border-box;
+        }
+        .ls-paper {
+            width: min(708px, 95vw);
+            box-sizing: border-box;
+            padding: 1.8rem 2.2rem 1.8rem 4.4rem;
+            background: #ffffff;
+            border: 1px solid #c1c7ce;
+            border-radius: 0.5rem;
+        }
+        .floatRight {
+            float: right;
+        }
+        @media (max-width: 768px) {
+            .ls-tocContainer-outer {
+                display: none;
+            }
+        }
+
+        /* A jQuery UI dialog as Lectio opens it over the page - the Grupper
+           group maker is one of these. Hidden until the test opens it. */
+        .ui-widget-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.3);
+        }
+        .ui-dialog {
+            position: fixed;
+            top: 60px;
+            left: 40px;
+            width: 520px;
+            padding: 12px;
+            background: #ffffff;
+            border: 1px solid #aaaaaa;
+        }
+    </style>
+    <script>
+        /* The module debounces its overlay and placement work through
+           requestAnimationFrame. Running those callbacks synchronously lets
+           the assertions below observe the settled DOM inside the load
+           event, which is the only point this harness can read. */
+        window.requestAnimationFrame = (callback) => {
+            callback(0);
+            return 0;
+        };
+        window.cancelAnimationFrame = () => {};
+
+        /* ISO week of the lesson date, by the same reckoning the module
+           uses, so the seeded room-week cache lands on the key it reads. */
+        function isoWeekOf(date) {
+            const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+            const dayNumber = d.getUTCDay() || 7;
+            d.setUTCDate(d.getUTCDate() + 4 - dayNumber);
+            const isoYear = d.getUTCFullYear();
+            const yearStart = new Date(Date.UTC(isoYear, 0, 1));
+            return { isoWeek: Math.ceil(((d - yearStart) / 86400000 + 1) / 7), isoYear };
+        }
+
+        /* A lesson safely in the past: the module never schedules a room
+           refresh for one, so the fixture needs no network at all. */
+        const LESSON_DATE = new Date(2020, 8, 15, 9, 40, 0, 0);
+        const ISO_DATE = '2020-09-15';
+        const ROOM = '1.05';
+        const ROOM_ID = 'RO123';
+        const ABS_ID = '81266224407';
+
+        localStorage.clear();
+        localStorage.setItem('lectioChairsUp.v102.223.roomMap', JSON.stringify({ [ROOM]: ROOM_ID }));
+        localStorage.setItem('lectioChairsUp.v102.223.roomMapTime', String(Date.now()));
+
+        const week = isoWeekOf(LESSON_DATE);
+        localStorage.setItem(
+            `lectioChairsUp.v104.223.roomWeek.${ROOM_ID}.${week.isoYear}.${week.isoWeek}`,
+            JSON.stringify({
+                fetchedAt: Date.now(),
+                days: {
+                    [ISO_DATE]: [
+                        { absid: '81266224400', startMinutes: 480, endMinutes: 570 },
+                        { absid: ABS_ID, startMinutes: 580, endMinutes: 650 }
+                    ]
+                }
+            })
+        );
+    </script>
+</head>
+<body>
+    <div id="modalBackgroundID" class="modal ls-hidden-bigscreen" style="display: none"></div>
+
+    <div class="ls-master-container1" id="masterContent">
+        <div class="ls-content-container">
+            <div class="ls-tocContainer-outer">
+                <ul><li>Lektionens indhold</li><li>Praesentation</li></ul>
+            </div>
+            <div class="ls-tocContent-outer">
+                <div class="ls-texteditor-paper-container">
+                    <div id="homeworkContentContainer" class="ls-paper">
+                        <div id="s_m_Content_Content_tocAndToolbar_actHeader">
+                            <div id="activity-actions" class="floatRight noprint">
+                                <img id="share-icon" class="ls-paper-section-heading-icon" alt="Kopier indhold til lektion"
+                                     src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+                                     width="24" height="24">
+                            </div>
+                            <div id="activity-title" class="ls-section-title-heading" role="heading" aria-level="2">
+                                <a class="s2skemabrik s2normal" data-brikid="ABS81266224407"
+                                   href="/lectio/223/aktivitet/aktivitetforside2.aspx?absid=81266224407"
+                                   data-tooltip="15/9-2020 09:40 til 10:50&#10;Hold: 1i Psyc HL&#10;Laerer: MP&#10;Lokale: 1.05">1i Psyc HL</a>
+                            </div>
+                            <div id="activity-links">
+                                <a href="#grupper">Grupper</a>
+                                <a href="#lektier">Lektier</a>
+                                <a href="#fravaer">Fravaer</a>
+                            </div>
+                        </div>
+                        <div id="lesson-material">
+                            <h3>Lektionens indhold</h3>
+                            <p>Arbejd med opgaverne paa side 42, og aflever gruppens noter inden modulet slutter.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="groups-overlay" class="ui-widget-overlay" style="display: none"></div>
+    <div id="groups-dialog" class="ui-dialog" role="dialog" aria-label="Grupper" style="display: none">
+        <div class="ui-dialog-titlebar">Grupper<button class="ui-dialog-titlebar-close">luk</button></div>
+        <div id="groups-controls">
+            <label>Antal grupper <input type="number" value="4"></label>
+            <button id="groups-create">Opret grupper</button>
+        </div>
+    </div>
+
+    <script src="/modules/Lectio-Chairs-Up.user.js"></script>
+    <script>
+        function assert(condition, message) {
+            if (!condition) throw new Error(message);
+        }
+
+        const NOTICE = '.lectio-chairs-up-lesson-notice';
+
+        function notice() {
+            return document.querySelector(NOTICE);
+        }
+
+        function boxesOverlap(first, second) {
+            return first.left < second.right && second.left < first.right &&
+                first.top < second.bottom && second.top < first.bottom;
+        }
+
+        /* What the notice used to cover on a real activity page. */
+        const CONTENT_IDS = ['activity-actions', 'activity-title', 'activity-links', 'lesson-material'];
+
+        function assertClearOfContent(label) {
+            const box = notice().getBoundingClientRect();
+            assert(box.width > 0 && box.height > 0, `${label}: the notice was not visible`);
+
+            for (const id of CONTENT_IDS) {
+                const content = document.getElementById(id).getBoundingClientRect();
+                assert(!boxesOverlap(box, content), `${label}: the notice covered #${id}`);
+            }
+
+            assert(box.left >= 0, `${label}: the notice ran off the left of the window`);
+            assert(
+                box.right <= document.documentElement.clientWidth,
+                `${label}: the notice ran off the right of the window`
+            );
+            assert(
+                document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+                `${label}: the notice pushed the page into horizontal scroll`
+            );
+        }
+
+        /* Mutation records reach the module on the microtask queue, and its
+           own rAF work is synchronous here, so a couple of turns is enough
+           for the DOM to settle. */
+        async function settle() {
+            await Promise.resolve();
+            await Promise.resolve();
+            await Promise.resolve();
+        }
+
+        window.addEventListener('load', async () => {
+            try {
+                const layout = new URL(location.href).searchParams.get('layout') || 'wide';
+
+                await settle();
+
+                assert(notice(), 'Chairs Up did not render its activity notice');
+                assertClearOfContent(`${layout} layout`);
+
+                /* Wide windows leave a gutter beside the fixed-width paper;
+                   narrow ones do not, and must not be forced to pretend. */
+                const placement = notice().dataset.placement;
+                assert(
+                    placement === (layout === 'wide' ? 'beside' : 'inline'),
+                    `${layout} layout: notice placement was "${placement}"`
+                );
+
+                if (layout === 'wide') {
+                    const box = notice().getBoundingClientRect();
+                    const paper = document.getElementById('homeworkContentContainer').getBoundingClientRect();
+                    assert(box.left >= paper.right, 'wide layout: the notice was not beside the activity paper');
+                }
+
+                /* Opening the Grupper dialog the way Lectio does. */
+                document.getElementById('groups-overlay').style.display = 'block';
+                document.getElementById('groups-dialog').style.display = 'block';
+                await settle();
+
+                assert(
+                    getComputedStyle(notice()).display === 'none',
+                    'the notice stayed on the page over an open Lectio dialog'
+                );
+
+                const controls = document.getElementById('groups-controls').getBoundingClientRect();
+                const hidden = notice().getBoundingClientRect();
+                assert(
+                    hidden.width === 0 && hidden.height === 0,
+                    'the notice still occupied space over the dialog'
+                );
+                assert(!boxesOverlap(hidden, controls), 'the notice covered the dialog controls');
+
+                /* Closing it again restores the notice, since the activity
+                   still qualifies. */
+                document.getElementById('groups-overlay').style.display = 'none';
+                document.getElementById('groups-dialog').style.display = 'none';
+                await settle();
+
+                assert(
+                    getComputedStyle(notice()).display !== 'none',
+                    'the notice did not come back after the dialog closed'
+                );
+                assertClearOfContent(`${layout} layout after the dialog closed`);
+
+                /* Lectio's own mobile modal background counts as an overlay. */
+                const mobileModal = document.getElementById('modalBackgroundID');
+                mobileModal.style.display = 'block';
+                mobileModal.style.position = 'fixed';
+                mobileModal.style.inset = '0';
+                await settle();
+
+                assert(
+                    getComputedStyle(notice()).display === 'none',
+                    'the notice stayed on the page over the mobile modal background'
+                );
+
+                mobileModal.style.display = 'none';
+                await settle();
+
+                assert(getComputedStyle(notice()).display !== 'none', 'the notice did not come back');
+
+                /* The lesson-page notice setting still governs the notice. */
+                window.dispatchEvent(new CustomEvent('lectio-manager:set-setting', {
+                    detail: { id: 'chairs-up', key: 'showLessonNotice', value: false }
+                }));
+                await settle();
+
+                assert(
+                    getComputedStyle(notice()).display === 'none',
+                    'switching the lesson-page notice off left it on the page'
+                );
+
+                window.dispatchEvent(new CustomEvent('lectio-manager:set-setting', {
+                    detail: { id: 'chairs-up', key: 'showLessonNotice', value: true }
+                }));
+                await settle();
+
+                assert(
+                    getComputedStyle(notice()).display !== 'none',
+                    'switching the lesson-page notice back on left it hidden'
+                );
+
+                document.documentElement.dataset.testResult = 'pass';
+            } catch (error) {
+                document.documentElement.dataset.testResult = `fail: ${error.message}`;
+            }
+        });
+    </script>
+</body>
+</html>

@@ -20,7 +20,7 @@
       "category": "Timetable",
       "audience": ["teacher"],
       "status": "stable",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Chairs-Up.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues"
     },
