@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Theming
 // @namespace    https://www.lectio.dk/
-// @version      0.16.0
+// @version      0.17.0
 // @description  Gives Lectio a soft, translucent glass shell with 44 built-in colour schemes (Catppuccin, Nord, Dracula, Cyberpunk, sports, social-app and Danish-landscape palettes and more), each with its own distinct background photo, and can derive a scheme from a website or image, take its background from your own picture, and let you hand-pick every key colour.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-start
@@ -16,7 +16,7 @@
 
     const MODULE_ID = 'lectio-theming';
     const MODULE_NAME = 'Lectio Theming';
-    const MODULE_VERSION = '0.16.0';
+    const MODULE_VERSION = '0.17.0';
     const STORAGE_KEY = 'lectioTheming.settings.v2';
     // The chosen background picture lives in its own entry rather than in the
     // settings blob: it is orders of magnitude larger than every other setting
@@ -1322,11 +1322,24 @@
             }
 
             html.${ROOT_CLASS} :where(.s2skemabrik, a.s2skemabrik.s2brik) {
-                background: color-mix(in srgb, var(--lectio-theme-surface-alt) 68%, transparent) !important;
-                color: var(--lectio-theme-text) !important;
                 border: 1px solid color-mix(in srgb, var(--lectio-theme-accent-alt) 14%, transparent) !important;
                 border-radius: max(5px, calc(var(--lectio-theme-radius) - 5px)) !important;
                 box-shadow: inset 3px 0 color-mix(in srgb, var(--lectio-theme-accent-alt) 55%, transparent), 0 3px 10px color-mix(in srgb, var(--lectio-theme-muted) 16%, transparent);
+            }
+
+            /* A lesson block that already carries somebody else's colour keeps
+               it. Subject-colouring extensions (Lectio Farver, Lectio i farver,
+               Lectio Colors++) write their colour as an inline background, and
+               an inline declaration loses to an !important stylesheet one — so
+               without this guard the surface rule below silently overwrote
+               every per-subject colour they assigned. Only the surface steps
+               aside: the frame above still themes every block, coloured or not.
+               A module that colours blocks through a more specific selector
+               (rather than an inline background) composes with this rule
+               unchanged and needs no marker here. */
+            html.${ROOT_CLASS} :where(.s2skemabrik, a.s2skemabrik.s2brik):not([style*="background"]) {
+                background: color-mix(in srgb, var(--lectio-theme-surface-alt) 68%, transparent) !important;
+                color: var(--lectio-theme-text) !important;
             }
 
             html.${ROOT_CLASS} :where(.s2cancelled, .ls-status-cancelled) {
