@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio English Mode
 // @namespace    lectio-english-mode
-// @version      1.7.0
+// @version      1.8.0
 // @description  Context-aware English layer for Lectio with instant core UI translation, persistent cache and Google fallback.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-start
@@ -20,7 +20,37 @@
     const MODE_DA = 'da';
     const MODE_EN = 'en';
     const STORAGE_MODE = 'lectioEnglish.mode';
+    const SWITCH_POSITION_LOCKED = 'locked';
+    const SWITCH_POSITION_FLOATING = 'floating';
+    const SWITCH_POSITIONS = [
+        SWITCH_POSITION_LOCKED,
+        SWITCH_POSITION_FLOATING
+    ];
+    const STORAGE_SWITCH_POSITION = 'lectioEnglish.switchPosition';
     const LOG = '[Lectio English Mode]';
+
+    function readSwitchPosition() {
+        const savedPosition = GM_getValue(
+            STORAGE_SWITCH_POSITION,
+            SWITCH_POSITION_LOCKED
+        );
+
+        return SWITCH_POSITIONS.includes(savedPosition)
+            ? savedPosition
+            : SWITCH_POSITION_LOCKED;
+    }
+
+    let switchPosition = readSwitchPosition();
+
+    function applySwitchPosition() {
+        const languageSwitch = document.getElementById(
+            'lectio-english-switch'
+        );
+
+        if (languageSwitch) {
+            languageSwitch.dataset.position = switchPosition;
+        }
+    }
 
     /*
      * Lectio Manager handshake.
@@ -30,7 +60,7 @@
     (function registerWithLectioManager() {
         const MODULE_ID = 'english-mode';
         const MODULE_NAME = 'Lectio English Mode';
-        const MODULE_VERSION = '1.7.0';
+        const MODULE_VERSION = '1.8.0';
 
         function announce() {
             const storedMode = GM_getValue(STORAGE_MODE, MODE_DA);
@@ -50,10 +80,21 @@
                                 { value: MODE_DA, label: 'Dansk' },
                                 { value: MODE_EN, label: 'English' }
                             ]
+                        },
+                        {
+                            key: 'switchPosition',
+                            type: 'select',
+                            label: 'Language switch position',
+                            description: 'Choose whether the DA/EN switch scrolls with the page or stays visible.',
+                            options: [
+                                { value: SWITCH_POSITION_LOCKED, label: 'Locked' },
+                                { value: SWITCH_POSITION_FLOATING, label: 'Floating' }
+                            ]
                         }
                     ],
                     currentValues: {
-                        language: [MODE_DA, MODE_EN].includes(storedMode) ? storedMode : MODE_DA
+                        language: [MODE_DA, MODE_EN].includes(storedMode) ? storedMode : MODE_DA,
+                        switchPosition
                     }
                 }
             }));
@@ -62,13 +103,23 @@
         function handleSetting(event) {
             const detail = event?.detail;
 
-            if (detail?.id !== MODULE_ID || detail.key !== 'language' || ![MODE_DA, MODE_EN].includes(detail.value)) {
+            if (detail?.id !== MODULE_ID) {
                 return;
             }
 
-            GM_setValue(STORAGE_MODE, detail.value);
-            announce();
-            location.reload();
+            if (detail.key === 'language' && [MODE_DA, MODE_EN].includes(detail.value)) {
+                GM_setValue(STORAGE_MODE, detail.value);
+                announce();
+                location.reload();
+            } else if (
+                detail.key === 'switchPosition' &&
+                SWITCH_POSITIONS.includes(detail.value)
+            ) {
+                switchPosition = detail.value;
+                GM_setValue(STORAGE_SWITCH_POSITION, switchPosition);
+                applySwitchPosition();
+                announce();
+            }
         }
 
         window.addEventListener('lectio-manager:discover', announce);
@@ -3100,7 +3151,7 @@
 
         style.textContent = `
             #lectio-english-switch {
-                position: fixed;
+                position: absolute;
                 top: 36px;
                 right: max(
                     72px,
@@ -3116,6 +3167,10 @@
                 box-shadow: 0 1px 3px rgba(0,0,0,.10);
                 font-family: Arial, Helvetica, sans-serif;
                 user-select: none;
+            }
+
+            #lectio-english-switch[data-position="floating"] {
+                position: fixed;
             }
 
             #lectio-english-switch button {
@@ -3180,6 +3235,9 @@
 
         box.id =
             'lectio-english-switch';
+
+        box.dataset.position =
+            switchPosition;
 
         box.innerHTML =
             '<button type="button" data-lang="da" title="Dansk">DA</button>' +

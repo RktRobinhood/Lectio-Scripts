@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio English Mode fixture</title>
+    <script>
+        const storagePrefix = 'gm.';
+        const stage = new URLSearchParams(location.search).get('stage');
+        if (stage === 'fresh') localStorage.removeItem(`${storagePrefix}lectioEnglish.switchPosition`);
+        window.GM_getValue = (key, fallback) => {
+            const saved = localStorage.getItem(`${storagePrefix}${key}`);
+            return saved === null ? fallback : JSON.parse(saved);
+        };
+        window.GM_setValue = (key, value) => {
+            localStorage.setItem(`${storagePrefix}${key}`, JSON.stringify(value));
+        };
+        window.GM_xmlhttpRequest = () => {};
+        window.registrations = new Map();
+        window.addEventListener('lectio-module:register', (event) => {
+            window.registrations.set(event.detail.id, event.detail);
+        });
+    </script>
+</head>
+<body>
+    <main style="min-height: 2000px">Long Lectio page</main>
+    <script src="../../modules/Lectio-English-Mode.user.js"></script>
+    <script>
+        function assert(condition, message) {
+            if (!condition) throw new Error(message);
+        }
+
+        window.addEventListener('load', () => {
+            try {
+                const registration = window.registrations.get('english-mode');
+                const positionSetting = registration.settingsSchema.find(control => control.key === 'switchPosition');
+                const languageSwitch = document.getElementById('lectio-english-switch');
+
+                assert(positionSetting?.type === 'select', 'Position select was not registered');
+                assert(positionSetting.options.some(option => option.value === 'locked' && option.label === 'Locked'), 'Locked option was not registered');
+                assert(positionSetting.options.some(option => option.value === 'floating' && option.label === 'Floating'), 'Floating option was not registered');
+                if (stage === 'fresh') {
+                    assert(registration.currentValues.switchPosition === 'locked', 'Fresh install did not default to Locked');
+                    assert(getComputedStyle(languageSwitch).position === 'absolute', 'Locked switch did not use document positioning');
+
+                    window.scrollTo(0, 0);
+                    const lockedTop = languageSwitch.getBoundingClientRect().top;
+                    window.scrollTo(0, 500);
+                    assert(languageSwitch.getBoundingClientRect().top < lockedTop - 450, 'Locked switch did not scroll with the document');
+
+                    window.dispatchEvent(new CustomEvent('lectio-manager:set-setting', {
+                        detail: { id: 'english-mode', key: 'switchPosition', value: 'floating' }
+                    }));
+                    assert(GM_getValue('lectioEnglish.switchPosition') === 'floating', 'Floating position did not persist');
+                    assert(getComputedStyle(languageSwitch).position === 'fixed', 'Floating switch did not apply immediately');
+
+                } else if (stage === 'floating') {
+                    assert(registration.currentValues.switchPosition === 'floating', 'Floating position did not survive reload');
+                    assert(getComputedStyle(languageSwitch).position === 'fixed', 'Reloaded Floating switch did not use viewport positioning');
+
+                    window.scrollTo(0, 0);
+                    const floatingTop = languageSwitch.getBoundingClientRect().top;
+                    window.scrollTo(0, 500);
+                    assert(Math.abs(languageSwitch.getBoundingClientRect().top - floatingTop) < 1, 'Floating switch moved with the document');
+
+                    window.dispatchEvent(new CustomEvent('lectio-manager:set-setting', {
+                        detail: { id: 'english-mode', key: 'switchPosition', value: 'locked' }
+                    }));
+                    assert(GM_getValue('lectioEnglish.switchPosition') === 'locked', 'Locked position did not persist');
+                    assert(getComputedStyle(languageSwitch).position === 'absolute', 'Locked switch did not apply immediately');
+
+                } else if (stage === 'locked') {
+                    assert(registration.currentValues.switchPosition === 'locked', 'Locked position did not survive reload');
+                    GM_setValue('lectioEnglish.switchPosition', 'unsupported-position');
+                } else if (stage === 'invalid') {
+                    assert(registration.currentValues.switchPosition === 'locked', 'Invalid saved position did not fall back to Locked');
+                    assert(getComputedStyle(languageSwitch).position === 'absolute', 'Invalid saved position did not render Locked');
+                } else {
+                    throw new Error('Unknown test stage');
+                }
+
+                document.documentElement.dataset.testResult = 'pass';
+            } catch (error) {
+                document.documentElement.dataset.testResult = `fail: ${error.message}`;
+            }
+        });
+    </script>
+</body>
+</html>
