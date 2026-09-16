@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Schedule Summary
 // @namespace    https://www.lectio.dk/
-// @version      0.2.1
+// @version      0.2.2
 // @description  Collapses the schedule's week information into a compact, previewable summary strip.
 // @match        https://www.lectio.dk/lectio/*/SkemaNy.aspx*
 // @grant        none
@@ -15,7 +15,7 @@
 
     const MODULE_ID = 'schedule-summary';
     const MODULE_NAME = 'Lectio - Schedule Summary';
-    const MODULE_VERSION = '0.2.1';
+    const MODULE_VERSION = '0.2.2';
     const STYLE_ID = 'lectio-schedule-summary-styles';
     const ENHANCED_ATTRIBUTE = 'data-lectio-schedule-summary';
     const SETTINGS_KEY = 'lectioScheduleSummary.settings.v1';
@@ -33,7 +33,7 @@
         hoverPreview: true,
         initialState: 'collapsed'
     });
-    const INFO_ANIMATION_MS = 160;
+    const INFO_ANIMATION_MS = 200;
     const lifecycle = new AbortController();
     let settings = loadSettings();
     let collapseTimeoutId = null;
@@ -132,8 +132,9 @@
 
         if (expanded) {
             informationRow.hidden = false;
-            // Force a reflow so the browser registers the collapsed state
-            // before the visible class is added, letting the fade-in run.
+            // Force a reflow so the browser registers the collapsed (0-height)
+            // state before the visible class is added, so the height/opacity
+            // transition actually plays instead of jumping straight to open.
             void informationRow.offsetHeight;
             informationRow.classList.add('lectio-schedule-summary__info--visible');
         } else {
@@ -378,7 +379,7 @@
             }
 
             .lectio-schedule-summary__row[data-hover-preview="true"][data-hover-armed="true"]:not(.is-expanded):hover .lectio-schedule-summary__tooltip,
-            .lectio-schedule-summary__row:not(.is-expanded):focus-within .lectio-schedule-summary__tooltip {
+            .lectio-schedule-summary__row:not(.is-expanded) .lectio-schedule-summary__toggle:focus-visible + .lectio-schedule-summary__tooltip {
                 opacity: 1;
                 pointer-events: auto;
                 transform: translateY(0);
@@ -415,20 +416,22 @@
                 }
             }
 
-            tr[${ENHANCED_ATTRIBUTE}] {
+            tr[${ENHANCED_ATTRIBUTE}] > td {
+                interpolate-size: allow-keywords;
+                height: 0;
                 opacity: 0;
-                transform: translateY(-6px);
-                transition: opacity ${INFO_ANIMATION_MS}ms ease, transform ${INFO_ANIMATION_MS}ms ease;
+                overflow: hidden;
+                transition: height ${INFO_ANIMATION_MS}ms ease, opacity ${INFO_ANIMATION_MS}ms ease;
             }
 
-            tr[${ENHANCED_ATTRIBUTE}].lectio-schedule-summary__info--visible {
+            tr[${ENHANCED_ATTRIBUTE}].lectio-schedule-summary__info--visible > td {
+                height: auto;
                 opacity: 1;
-                transform: translateY(0);
             }
 
             @media (prefers-reduced-motion: reduce) {
                 .lectio-schedule-summary__tooltip,
-                tr[${ENHANCED_ATTRIBUTE}] {
+                tr[${ENHANCED_ATTRIBUTE}] > td {
                     transition: none;
                 }
             }
