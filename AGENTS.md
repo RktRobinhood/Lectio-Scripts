@@ -33,6 +33,8 @@ A new module is just:
 
 Nothing else is required, and the Manager's own code never needs to change for a new module.
 
+**A new module cannot be exercised through the Manager until its Catalogue entry is on `main`.** The Manager fetches `catalogue/modules.json` from `main` and renders a module's settings only where it finds both a Catalogue entry and a live Registration, so a module installed from a branch registers correctly and still shows no settings panel at all — every control it offers is invisible, which looks exactly like a broken module. To exercise one before merging, point the `CATALOGUE_URL` in your own installed copy of the Manager at the branch; do not add the entry to `main` ahead of the module, or the Catalogue advertises an `installUrl` that 404s.
+
 ## Lectio platform notes (extracted from the existing modules)
 
 - **School scoping**: a Lectio installation is identified by a numeric id in the URL path, e.g. `/lectio/223/...`. Chairs Up and English Mode work universally across schools already. Unread Message Notifications is hard-restricted to one school via `@match https://www.lectio.dk/lectio/223/*` because its DOM-scraping logic was written against that school's rendering and hasn't been generalized yet — this is accepted **debt to fix**, not the intended long-term scope. See [ADR-0007](./docs/adr/0007-school-agnostic-by-default.md).
