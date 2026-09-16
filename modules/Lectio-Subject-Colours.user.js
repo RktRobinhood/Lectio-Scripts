@@ -91,6 +91,12 @@
     // to call a no-hold activity.
     const TOOLTIP_FIELD_PATTERN = /^(Hold|Lærer|Laerer|Teacher|Teachers|Lokale|Lokaler|Room|Rooms|Elever|Students|Grupper|Groups|Ressourcer|Resources|Lektier|Homework|Note|Noter|Øvrigt indhold|Other content)\s*:/i;
     const CANCELLED_PATTERN = /^\s*(aflyst|cancell?ed)\b/i;
+    // Lectio opens a tooltip with a status word of its own where there is
+    // one: Aflyst! for a cancelled lesson, Ændret! for a changed one.
+    // Cancellation is answered on its own; the rest are still not what the
+    // activity is called, and without this a changed one-off is filed under
+    // the word Ændret!.
+    const STATUS_PATTERN = /^\s*(ændret|aendret|changed|flyttet|moved)\s*!*\s*$/i;
     const HOLD_FIELD_PATTERN = /^(?:Hold|Team|Class)\s*:\s*(.+)$/i;
     const TOOLTIP_DATE_PATTERN = /(\d{1,2})\/(\d{1,2})-(\d{4})(?:\s+(\d{1,2}):(\d{2}))?/;
 
@@ -313,6 +319,7 @@
 
         for (const line of lines) {
             if (!line) continue;
+            if (STATUS_PATTERN.test(line)) continue;
             if (TOOLTIP_FIELD_PATTERN.test(line)) {
                 if (/^(Lektier|Homework|Note|Noter|Øvrigt indhold|Other content)\s*:/i.test(line)) break;
                 continue;
@@ -462,8 +469,15 @@
     // replaces what was counted before; a page that happens to show a couple of
     // blocks (the front page, an activity page) may only raise a count, never
     // lower one.
+    // The rendered week table is what makes a document authoritative about a
+    // week, and equally what makes it a timetable at all rather than an error
+    // page wearing a 200. One definition, used for both.
+    function isTimetable(doc) {
+        return Boolean(doc.querySelector('tr.s2dayHeader, [id$="_skematabel"]'));
+    }
+
     function harvestDocument(doc, { counting = true } = {}) {
-        const fullWeek = counting && Boolean(doc.querySelector('tr.s2dayHeader, [id$="_skematabel"]'));
+        const fullWeek = counting && isTimetable(doc);
         const counts = new Map();
         let observed = 0;
 
@@ -923,7 +937,7 @@
 
     async function fetchWeek(week) {
         const response = await fetch(
-            `/lectio/${SCHOOL}/SkemaNy.aspx?week=${week}&nosubnav=1`,
+            `/lectio/${SCHOOL}/SkemaNy.aspx?week=${week}`,
             {
                 method: 'GET',
                 credentials: 'include',
@@ -934,7 +948,18 @@
         );
 
         if (!response.ok) throw new Error(`HTTP ${response.status} loading week ${week}`);
-        return new DOMParser().parseFromString(await response.text(), 'text/html');
+
+        const parsed = new DOMParser().parseFromString(await response.text(), 'text/html');
+
+        // Lectio answers a request it does not like with its own error page and
+        // a perfectly ordinary 200, so the status line says nothing about
+        // whether a timetable actually came back. Without this the scan read
+        // eight error pages, learned nothing from any of them, recorded all
+        // eight as freshly scanned and reported none of it -- leaving every
+        // class permanently one week short of being recognised.
+        if (!isTimetable(parsed)) throw new Error(`week ${week} did not return a timetable`);
+
+        return parsed;
     }
 
     function weeksToScan(force) {
