@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.13.2
+// @version      1.13.3
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules from one small gear panel.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
@@ -2370,7 +2370,12 @@
                 grid-template-columns: minmax(0, 1fr) auto;
             }
 
-            .lectio-manager-setting-row.is-button button {
+            /* Direct child only — a button-type row's info toggle is also a
+               <button>, but it sits nested inside the copy/label, not as a
+               direct child of the row like the row's own action button. A
+               descendant selector here would restyle that icon toggle into
+               a bordered, padded box and swallow its small SVG. */
+            .lectio-manager-setting-row.is-button > button {
                 border: 1px solid var(--lectio-theme-accent, #0f6f6f);
                 border-radius: 6px;
                 background: var(--lectio-theme-surface, #ffffff);
