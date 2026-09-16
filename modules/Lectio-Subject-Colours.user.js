@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Subject Colours
 // @namespace    https://www.lectio.dk/
-// @version      0.3.0
+// @version      0.3.1
 // @description  Learns which classes are actually yours from your own timetable and gives each one its own colour, with a separate muted spectrum for one-off activities like assemblies and meetings.
 // @match        https://www.lectio.dk/lectio/*
 // @grant        none
@@ -15,7 +15,7 @@
 
     const MODULE_ID = 'subject-colours';
     const MODULE_NAME = 'Lectio - Subject Colours';
-    const MODULE_VERSION = '0.3.0';
+    const MODULE_VERSION = '0.3.1';
     const LOG = '[Lectio Subject Colours]';
     const STYLE_ID = 'lectio-subject-colours-styles';
 
@@ -81,7 +81,7 @@
         regularity: 'balanced',
         scanWeeks: 8,
         colourOther: true,
-        showLegend: true,
+        showLegend: false,
         lockColours: false,
         lockedTheme: null,
         overrides: {}
@@ -1013,8 +1013,8 @@
             #${LEGEND_ID} {
                 bottom: 14px;
                 font: 400 12px/1.3 Roboto, Arial, sans-serif;
+                left: 14px;
                 position: fixed;
-                right: 14px;
                 z-index: 900;
             }
 
@@ -1059,12 +1059,12 @@
                 border-radius: max(6px, var(--lectio-theme-radius, 10px));
                 bottom: calc(100% + 8px);
                 box-shadow: 0 10px 28px color-mix(in srgb, var(--lectio-theme-muted, #5e6870) 28%, transparent);
+                left: 0;
                 max-height: 60vh;
                 max-width: min(280px, calc(100vw - 28px));
                 overflow: auto;
                 padding: 8px;
                 position: absolute;
-                right: 0;
             }
 
             #${LEGEND_PANEL_ID}[hidden] {
@@ -1579,7 +1579,7 @@
                 type: 'toggle',
                 label: 'Show colour key on the schedule',
                 section: 'Colours',
-                description: 'A small, collapsed-by-default key on the page listing the classes currently on screen. '
+                description: 'Off by default. A small, collapsed key on the page listing the classes currently on screen. '
                     + 'Hover an entry to highlight its blocks, or click its swatch to recolour it there and then.'
             },
             {
