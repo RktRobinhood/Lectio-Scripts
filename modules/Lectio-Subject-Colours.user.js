@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Subject Colours
 // @namespace    https://www.lectio.dk/
-// @version      0.3.1
+// @version      0.4.0
 // @description  Learns which classes are actually yours from your own timetable and gives each one its own colour, with a separate muted spectrum for one-off activities like assemblies and meetings.
 // @match        https://www.lectio.dk/lectio/*
 // @grant        none
@@ -15,7 +15,7 @@
 
     const MODULE_ID = 'subject-colours';
     const MODULE_NAME = 'Lectio - Subject Colours';
-    const MODULE_VERSION = '0.3.1';
+    const MODULE_VERSION = '0.4.0';
     const LOG = '[Lectio Subject Colours]';
     const STYLE_ID = 'lectio-subject-colours-styles';
 
@@ -686,6 +686,154 @@
         return toHex(hslToRgb([hue, saturation, lightness]));
     }
 
+    // ============================================================
+    // COLOUR-VISION-SAFE HUE SPACING
+    // ============================================================
+    //
+    // Two class hues spaced apart on the raw hue wheel are not necessarily
+    // spaced apart perceptually, and hue distance alone says nothing about
+    // what a colour-vision deficiency does to that pair. Around 8% of men
+    // see red and green as far closer together than the hue wheel implies,
+    // so a golden-angle sequence can hand two classes hues that collapse
+    // together for them while looking obviously different to everyone else.
+    //
+    // This section builds each class's hue by simulating three common
+    // deficiencies (protanopia, deuteranopia, tritanopia) over a fixed
+    // light-theme and dark-theme preview of every candidate hue, measuring
+    // the worst-case perceptual distance in OKLab space, and greedily
+    // picking whichever candidate keeps the largest minimum distance from
+    // every hue already in use. Slot 0 keeps the same accent-anchored hue
+    // the old golden-angle sequence used, so a single-class schedule looks
+    // unchanged.
+
+    function srgbToLinearChannel(value) {
+        const channel = value / 255;
+        return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+    }
+
+    // sRGB -> OKLab, by way of the LMS cone-response space OKLab is built on.
+    // Euclidean distance in this space tracks perceived colour difference far
+    // more evenly than the same distance in raw RGB or HSL ever does.
+    function rgbToOklab([red, green, blue]) {
+        const r = srgbToLinearChannel(red);
+        const g = srgbToLinearChannel(green);
+        const b = srgbToLinearChannel(blue);
+
+        const l = 0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b;
+        const m = 0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b;
+        const s = 0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b;
+
+        const l_ = Math.cbrt(l);
+        const m_ = Math.cbrt(m);
+        const s_ = Math.cbrt(s);
+
+        return [
+            0.2104542553 * l_ + 0.7936177850 * m_ - 0.0040720468 * s_,
+            1.9779984951 * l_ - 2.4285922050 * m_ + 0.4505937099 * s_,
+            0.0259040371 * l_ + 0.7827717662 * m_ - 0.8086757660 * s_
+        ];
+    }
+
+    function oklabDistance(rgbA, rgbB) {
+        const a = rgbToOklab(rgbA);
+        const b = rgbToOklab(rgbB);
+        return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+    }
+
+    // The classic HCIRN/colorjack dichromacy matrices (as used by the
+    // original Coblis simulator): a fixed per-channel linear recombination
+    // that approximates what a fully dichromatic eye receives. Each row sums
+    // to 1, so it applies the same whether fed 0-255 or 0-1 channels. This is
+    // not the physiologically-modelled Machado et al. 2009 simulation, but it
+    // is a well-precedented, cheap approximation for "would these two colours
+    // collapse together" — which is all a slot-picking heuristic needs.
+    const CVD_MATRICES = {
+        protanopia: [[0.567, 0.433, 0.000], [0.558, 0.442, 0.000], [0.000, 0.242, 0.758]],
+        deuteranopia: [[0.625, 0.375, 0.000], [0.700, 0.300, 0.000], [0.000, 0.300, 0.700]],
+        tritanopia: [[0.950, 0.050, 0.000], [0.000, 0.433, 0.567], [0.000, 0.475, 0.525]]
+    };
+    const CVD_TYPES = Object.keys(CVD_MATRICES);
+
+    function simulateCvd([red, green, blue], type) {
+        const [row0, row1, row2] = CVD_MATRICES[type];
+        return [
+            clamp(row0[0] * red + row0[1] * green + row0[2] * blue, 0, 255),
+            clamp(row1[0] * red + row1[1] * green + row1[2] * blue, 0, 255),
+            clamp(row2[0] * red + row2[1] * green + row2[2] * blue, 0, 255)
+        ];
+    }
+
+    // What a class's fill actually looks like, at a fixed intensity, under
+    // each theme mode this module renders — the two roughly-fixed points a
+    // hue's own separation from every other hue has to survive, whatever
+    // intensity setting or per-class contrast nudge later moves it around.
+    function huePreviewColours(hue) {
+        return [hslToRgb([hue, 55, 88]), hslToRgb([hue, 38, 24])];
+    }
+
+    // The worst-case perceptual distance between two hues: across both theme
+    // previews, under normal vision and under every simulated deficiency.
+    // Picking hues to maximise this is what keeps a schedule legible for
+    // everyone, not just for whichever comparison happens to be checked.
+    function hueGap(hueA, hueB) {
+        const previewsA = huePreviewColours(hueA);
+        const previewsB = huePreviewColours(hueB);
+        let gap = Infinity;
+
+        for (let index = 0; index < previewsA.length; index += 1) {
+            gap = Math.min(gap, oklabDistance(previewsA[index], previewsB[index]));
+            for (const type of CVD_TYPES) {
+                gap = Math.min(gap, oklabDistance(
+                    simulateCvd(previewsA[index], type),
+                    simulateCvd(previewsB[index], type)
+                ));
+            }
+        }
+
+        return gap;
+    }
+
+    // Hue sequences are built once per accent hue and grown lazily: slot 0 is
+    // always the same accent-anchored hue the old golden-angle sequence used
+    // (so one class looks unchanged), and every later slot is whichever
+    // candidate keeps the largest minimum hueGap from every hue already
+    // chosen — a greedy farthest-point search, evaluated at 1° resolution.
+    // Because each slot only depends on the slots before it, this is safe to
+    // extend one class at a time without knowing how many there will end up
+    // being, which is the same prefix-safety the golden angle used to give.
+    const hueSequences = new Map();
+
+    function hueSequenceFor(anchorHue) {
+        const key = Math.round(anchorHue * 10);
+        let sequence = hueSequences.get(key);
+        if (!sequence) {
+            sequence = [];
+            hueSequences.set(key, sequence);
+        }
+        return sequence;
+    }
+
+    function extendHueSequence(sequence, anchorHue, upToSlot) {
+        while (sequence.length <= upToSlot) {
+            if (sequence.length === 0) {
+                sequence.push((anchorHue + 40) % 360);
+                continue;
+            }
+
+            let bestHue = 0;
+            let bestGap = -Infinity;
+            for (let candidate = 0; candidate < 360; candidate += 1) {
+                let minGap = Infinity;
+                for (const hue of sequence) minGap = Math.min(minGap, hueGap(candidate, hue));
+                if (minGap > bestGap) {
+                    bestGap = minGap;
+                    bestHue = candidate;
+                }
+            }
+            sequence.push(bestHue);
+        }
+    }
+
     function relativeLightness(rgb) {
         const channels = rgb.map(value => {
             const channel = value / 255;
@@ -728,10 +876,6 @@
         return result;
     }
 
-    // Successive hues a golden angle apart stay far from each other for any
-    // number of classes, and for every prefix of that sequence — which is what
-    // makes a stable slot number safe to hand out before anyone knows how many
-    // classes there will end up being.
     // Locking freezes the hue every auto-derived colour is built from, not
     // just the ones someone has hand-picked: the lock is against the theme
     // moving colours out from under a class, and a class nobody has picked a
@@ -758,7 +902,10 @@
     }
 
     function classHue(slot) {
-        return (effectiveTheme().accentHue + 40 + slot * 137.508) % 360;
+        const anchor = effectiveTheme().accentHue;
+        const sequence = hueSequenceFor(anchor);
+        extendHueSequence(sequence, anchor, slot);
+        return sequence[slot];
     }
 
     function otherHue(slot) {

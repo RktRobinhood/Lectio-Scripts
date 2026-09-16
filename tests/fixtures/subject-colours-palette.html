@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio Subject Colours palette fixture</title>
+    <style>
+        *, *::before, *::after {
+            transition: none !important;
+            animation: none !important;
+        }
+
+        .s2skemabrik {
+            background: #ffffff;
+            color: #000000;
+            display: block;
+            padding: 2px;
+        }
+    </style>
+    <script>
+        window.GM_getValue = (key, fallback) => fallback;
+        window.GM_setValue = () => {};
+        window.GM_xmlhttpRequest = () => {};
+
+        window.registrations = new Map();
+        window.addEventListener('lectio-module:register', (event) => {
+            window.registrations.set(event.detail.id, event.detail);
+        });
+
+        localStorage.clear();
+
+        // How many synthetic classes to generate, and which theme mode to
+        // render them under. The perceptual-separation check itself lives in
+        // the Node test, which runs this fixture once per theme.
+        const params = new URLSearchParams(location.search);
+        const classCount = Number(params.get('count')) || 12;
+        const mode = params.get('theme') === 'dark' ? 'dark' : 'light';
+
+        localStorage.setItem('lectioSubjectColours.settings.v1', JSON.stringify({
+            enabled: true,
+            style: 'fill',
+            intensity: 100,
+            regularity: 'balanced',
+            scanWeeks: 0,
+            colourOther: true,
+            showLegend: false,
+            lockColours: false,
+            lockedTheme: null,
+            overrides: {}
+        }));
+
+        // Every class is pre-learned directly in the store, well past the
+        // "balanced" threshold (2 weeks, 3 occurrences), on two weeks nothing
+        // rendered on this page belongs to — so nothing the fixture draws for
+        // "today" can add to, or interfere with, this evidence. Slots are
+        // pre-assigned 0..N-1 so the palette test can rely on a stable order
+        // rather than on DOM/iteration order.
+        const entries = {};
+        const slots = {};
+        for (let index = 0; index < classCount; index += 1) {
+            const holdId = `HE${index + 1}`;
+            const key = `h:${holdId}`;
+            entries[key] = {
+                label: `Class ${index + 1}`,
+                hold: true,
+                ids: [holdId],
+                names: [`Class ${index + 1}`],
+                weekCounts: { '012000': 2, '022000': 2 },
+                lastSeen: Date.now()
+            };
+            slots[key] = index;
+        }
+
+        localStorage.setItem('lectioSubjectColours.schedule.v1.unknown', JSON.stringify({
+            scannedAt: 0,
+            weeks: {},
+            slots,
+            otherSlots: {},
+            entries,
+            aliases: {}
+        }));
+
+        localStorage.setItem('lectioTheming.settings.v2', JSON.stringify({
+            enabled: true,
+            preset: mode === 'dark' ? 'catppuccin-mocha' : 'catppuccin-latte',
+            mode,
+            blur: false
+        }));
+    </script>
+</head>
+<body>
+    <main id="masterContent">
+        <table id="s_m_Content_Content_SkemaNyMedNavigation_skema_skematabel">
+            <tbody id="schedule-body">
+                <tr class="s2dayHeader"><td></td><td>Mandag</td></tr>
+            </tbody>
+        </table>
+    </main>
+
+    <script>
+        (() => {
+            const params = new URLSearchParams(location.search);
+            const classCount = Number(params.get('count')) || 12;
+            const today = new Date();
+            const isoDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+            const shortDate = `${today.getDate()}/${today.getMonth() + 1}-${today.getFullYear()}`;
+
+            const body = document.getElementById('schedule-body');
+
+            for (let index = 0; index < classCount; index += 1) {
+                const holdId = `HE${index + 1}`;
+                const holdName = `Class ${index + 1}`;
+                const hour = 8 + Math.floor(index / 4);
+                const slotInHour = index % 4;
+                const startMinute = slotInHour * 15;
+                const time = `${String(hour).padStart(2, '0')}:${String(startMinute).padStart(2, '0')} til ${String(hour).padStart(2, '0')}:${String(startMinute + 10).padStart(2, '0')}`;
+
+                const anchor = document.createElement('a');
+                anchor.id = `class-${index + 1}`;
+                anchor.className = 's2skemabrik s2brik s2normal';
+                anchor.setAttribute('data-tooltip', [
+                    `${shortDate} ${time}`,
+                    `Hold: ${holdName}`,
+                    'Lærer: Matthew Pilley (MP)',
+                    'Lokale: 205'
+                ].join('\n'));
+
+                const span = document.createElement('span');
+                span.setAttribute('data-lectiocontextcard', holdId);
+                span.textContent = holdName;
+                anchor.append(document.createTextNode(`${time} `), span);
+
+                const tr = document.createElement('tr');
+                const label = document.createElement('td');
+                const cell = document.createElement('td');
+                const container = document.createElement('div');
+
+                label.textContent = time;
+                cell.setAttribute('data-date', isoDate);
+                container.className = 's2skemabrikcontainer';
+                container.appendChild(anchor);
+                cell.appendChild(container);
+                tr.append(label, cell);
+                body.appendChild(tr);
+            }
+        })();
+    </script>
+    <script src="../../modules/Lectio-Theming.user.js"></script>
+    <script src="../../modules/Lectio-Subject-Colours.user.js"></script>
+    <script>
+        window.addEventListener('load', () => {
+            const result = document.createElement('pre');
+            result.id = 'test-result';
+
+            const params = new URLSearchParams(location.search);
+            const classCount = Number(params.get('count')) || 12;
+
+            try {
+                const registration = window.registrations.get('subject-colours');
+                if (!registration) throw new Error('module did not register with the Manager');
+
+                const fills = [];
+                for (let index = 0; index < classCount; index += 1) {
+                    const element = document.getElementById(`class-${index + 1}`);
+                    const kind = element.getAttribute('data-lectio-subject');
+                    if (kind !== 'class') throw new Error(`class ${index + 1} was not classified as a class (${kind})`);
+                    const fill = element.style.getPropertyValue('--lectio-subject-fill').trim();
+                    if (!/^#[0-9a-f]{6}$/i.test(fill)) throw new Error(`class ${index + 1} has no hex fill (${fill})`);
+                    fills.push(fill);
+                }
+
+                result.dataset.testResult = 'pass';
+                result.dataset.fills = JSON.stringify(fills);
+                result.textContent = 'PASS';
+                document.body.appendChild(result);
+            } catch (error) {
+                result.dataset.testResult = 'fail';
+                result.textContent = `FAIL: ${error.message}`;
+                document.body.appendChild(result);
+            }
+        });
+    </script>
+</body>
+</html>
