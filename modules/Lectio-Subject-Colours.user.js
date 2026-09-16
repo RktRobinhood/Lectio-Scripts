@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Subject Colours
 // @namespace    https://www.lectio.dk/
-// @version      0.1.2
+// @version      0.2.0
 // @description  Learns which classes are actually yours from your own timetable and gives each one its own colour, with a separate muted spectrum for one-off activities like assemblies and meetings.
 // @match        https://www.lectio.dk/lectio/*
 // @grant        none
@@ -15,7 +15,7 @@
 
     const MODULE_ID = 'subject-colours';
     const MODULE_NAME = 'Lectio - Subject Colours';
-    const MODULE_VERSION = '0.1.2';
+    const MODULE_VERSION = '0.2.0';
     const LOG = '[Lectio Subject Colours]';
     const STYLE_ID = 'lectio-subject-colours-styles';
 
@@ -74,6 +74,7 @@
         regularity: 'balanced',
         scanWeeks: 8,
         colourOther: true,
+        lockColours: false,
         overrides: {}
     });
 
@@ -150,6 +151,9 @@
             colourOther: typeof saved.colourOther === 'boolean'
                 ? saved.colourOther
                 : DEFAULT_SETTINGS.colourOther,
+            lockColours: typeof saved.lockColours === 'boolean'
+                ? saved.lockColours
+                : DEFAULT_SETTINGS.lockColours,
             overrides
         };
     }
@@ -729,11 +733,19 @@
         }
 
         const chosen = isHexColour(override);
+        // A locked colour is the one thing on the page the theme does not get a
+        // say in: it is used exactly as it was picked, and everything paired
+        // with it is derived from the colour itself rather than the scheme, so
+        // it looks identical whichever theme is running.
+        const locked = chosen && settings.lockColours;
 
         if (chosen) {
             fill = String(override).toLowerCase();
-            const [hue, saturation] = rgbToHsl(parseColour(fill));
-            line = hslHex(hue, clamp(saturation + 18, 18, 96), theme.dark ? 62 : 40);
+            const [hue, saturation, lightness] = rgbToHsl(parseColour(fill));
+            line = locked
+                ? hslHex(hue, clamp(saturation + 18, 18, 96),
+                    clamp(lightness < 50 ? lightness + 28 : lightness - 28, 0, 100))
+                : hslHex(hue, clamp(saturation + 18, 18, 96), theme.dark ? 62 : 40);
         }
 
         // The theme's own text colour is kept wherever it can be read, because
@@ -750,7 +762,10 @@
             guard += 1;
         }
 
-        if (contrastRatio(text, fill) < 4.5) {
+        // Readability is not what the lock is for: a colour someone picked
+        // still has to be legible, so the text is chosen against that colour
+        // instead of inherited from a theme the lock is ignoring.
+        if (locked || contrastRatio(text, fill) < 4.5) {
             text = contrastRatio('#ffffff', fill) >= contrastRatio('#000000', fill) ? '#ffffff' : '#000000';
         }
 
@@ -1114,6 +1129,13 @@
             ...classes,
             ...(classes.length
                 ? [{
+                    key: 'lockColours',
+                    type: 'toggle',
+                    label: 'Keep my colours exactly',
+                    section: 'Your classes',
+                    description: 'Use the colours you pick as they are, instead of tuning them to the current theme. '
+                        + 'Classes you have not picked a colour for still follow the theme.'
+                }, {
                     key: 'resetColours',
                     type: 'button',
                     label: 'Reset chosen colours',
@@ -1139,6 +1161,7 @@
             style: settings.style,
             intensity: settings.intensity,
             colourOther: settings.colourOther,
+            lockColours: settings.lockColours,
             regularity: settings.regularity,
             scanWeeks: settings.scanWeeks
         };
@@ -1181,6 +1204,8 @@
             settings.intensity = clamp(Math.round(Number(value) || DEFAULT_SETTINGS.intensity), 60, 140);
         } else if (key === 'colourOther' && typeof value === 'boolean') {
             settings.colourOther = value;
+        } else if (key === 'lockColours' && typeof value === 'boolean') {
+            settings.lockColours = value;
         } else if (key === 'regularity' && hasOption(REGULARITY_OPTIONS, value)) {
             settings.regularity = value;
         } else if (key === 'scanWeeks') {

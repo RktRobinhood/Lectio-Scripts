@@ -47,6 +47,15 @@ test('subject colours are learned from a repeating timetable and keep their own 
         // A block another colouring extension has claimed is left alone.
         const foreignColours = await runFixture('foreign');
         assert.match(foreignColours, /data-test-result="pass"/, foreignColours);
+
+        // A hand-picked colour asked to be kept exactly comes out identical
+        // under a light theme and a dark one. The light run records it; the
+        // dark run is the one that can fail.
+        const lockedLight = await runFixture('locked-light');
+        assert.match(lockedLight, /data-test-result="pass"/, lockedLight);
+
+        const lockedDark = await runFixture('locked');
+        assert.match(lockedDark, /data-test-result="pass"/, lockedDark);
     } finally {
         await rm(profileDirectory, { recursive: true, force: true });
     }

@@ -49,13 +49,17 @@
             regularity: 'balanced',
             scanWeeks: 0,
             colourOther: true,
-            overrides: {}
+            // The locked phase pins one class to a colour of its own and asks
+            // for it back exactly, under a dark theme it would otherwise be
+            // re-derived by.
+            lockColours: phase.startsWith('locked'),
+            overrides: phase.startsWith('locked') ? { 'h:HE111': '#7b1fa2' } : {}
         }));
 
         localStorage.setItem('lectioTheming.settings.v2', JSON.stringify({
             enabled: true,
-            preset: phase === 'dark' ? 'catppuccin-mocha' : 'catppuccin-latte',
-            mode: phase === 'dark' ? 'dark' : 'light',
+            preset: (phase === 'dark' || phase === 'locked') ? 'catppuccin-mocha' : 'catppuccin-latte',
+            mode: (phase === 'dark' || phase === 'locked') ? 'dark' : 'light',
             blur: false
         }));
     </script>
@@ -197,6 +201,9 @@
             const kindOf = (id) => document.getElementById(id).getAttribute('data-lectio-subject');
             const learned = () => JSON.parse(localStorage.getItem('lectioSubjectColours.schedule.v1.unknown') || '{"entries":{}}');
             const fillOf = (id) => document.getElementById(id).style.getPropertyValue('--lectio-subject-fill').trim();
+            const paintedTriple = (id) => ['fill', 'line', 'text']
+                .map(part => document.getElementById(id).style.getPropertyValue(`--lectio-subject-${part}`).trim())
+                .join(' ');
             const channel = (value) => {
                 const part = value / 255;
                 return part <= 0.04045 ? part / 12.92 : ((part + 0.055) / 1.055) ** 2.4;
@@ -284,6 +291,36 @@
                     const saved = JSON.parse(localStorage.getItem('lectio-subject-colours-light-fill') || 'null');
                     if (saved && saved === fillOf('psyc-1')) {
                         throw new Error('the subject colour did not change with the theme');
+                    }
+                } else if (phase.startsWith('locked')) {
+                    if (fillOf('psyc-1') !== '#7b1fa2') {
+                        throw new Error(`a locked colour was not used as picked (${fillOf('psyc-1')})`);
+                    }
+                    if (painted !== 'rgb(123, 31, 162)') {
+                        throw new Error(`a locked colour did not reach the block (${painted})`);
+                    }
+                    // Locked is not a licence to be unreadable.
+                    if (contrast(painted, lessonStyle.color) < 4.5) {
+                        throw new Error('a locked colour left its text unreadable');
+                    }
+
+                    // The lock's actual promise. The picked fill was always kept
+                    // as written; what moved with the theme was everything paired
+                    // with it, so the test is that the whole triple is identical
+                    // under a light theme and a dark one.
+                    if (phase === 'locked-light') {
+                        localStorage.setItem('lectio-subject-colours-locked', paintedTriple('psyc-1'));
+                    } else {
+                        const saved = localStorage.getItem('lectio-subject-colours-locked');
+                        if (!saved) throw new Error('the light locked phase recorded nothing to compare against');
+                        if (saved !== paintedTriple('psyc-1')) {
+                            throw new Error(`a locked colour changed with the theme (${saved} -> ${paintedTriple('psyc-1')})`);
+                        }
+                        // A class nobody picked a colour for still follows the theme.
+                        const unpicked = `rgb(${fillOf('math-1').slice(1).match(/../g).map(part => parseInt(part, 16)).join(', ')})`;
+                        if (luminance(unpicked) > 0.25) {
+                            throw new Error(`the lock stopped an unpicked class following the theme (${unpicked})`);
+                        }
                     }
                 } else {
                     if (luminance(painted) < 0.4) throw new Error('a light theme produced a dark subject colour');
