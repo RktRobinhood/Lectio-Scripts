@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.13.3
+// @version      1.13.4
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules from one small gear panel.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
@@ -69,6 +69,7 @@
     let currentView = 'installed';
     let sortMode = 'category';
     let openSettingsModuleId = null;
+    let pendingSettingsRefresh = null;
 
     // Modules that registered on THIS page load. A module only registers where its
     // own @match lets it run, so this is "active here", not "installed".
@@ -676,6 +677,13 @@
             viewHeading: root.querySelector('.lectio-manager-view-heading'),
             errorBox: root.querySelector('.lectio-manager-error')
         };
+
+        // focusout fires before the next element takes focus, so check on the
+        // next tick — otherwise moving focus between two controls in the same
+        // settings view would look like the view going idle and re-render mid-tab.
+        elements.settingsBody.addEventListener('focusout', () => {
+            setTimeout(flushPendingSettingsRefresh, 0);
+        });
     }
 
     function closePanel() {
@@ -775,10 +783,58 @@
             const module = catalogue.modules.find((entry) => entry.id === openSettingsModuleId);
             const registration = detected.get(openSettingsModuleId);
             if (module && registration) {
-                renderFocusedSettings(module, registration);
+                refreshFocusedSettingsView(module, registration);
             } else {
                 showMainView();
             }
+        }
+    }
+
+    // A schema can grow while its settings view is open (Subject Colours discovers
+    // classes from the timetable a second or two after the page loads). Rebuilding
+    // the view is safe most of the time -- a toggle, select, or preview-select all
+    // commit atomically, so replacing them afterwards loses nothing, and the open
+    // module's own committed change is expected to redraw the panel immediately
+    // even mid-preview. A text or range input is different: it holds uncommitted
+    // state (a partial keystroke, a drag in progress) between focus and its
+    // eventual `change` event, and rebuilding out from under that would discard
+    // it. So: rebuild immediately, unless a text/range input has focus, in which
+    // case queue the rebuild for the moment that input loses focus.
+    function isSettingsBodyBusy() {
+        if (!elements) {
+            return false;
+        }
+
+        const { settingsBody } = elements;
+        const active = document.activeElement;
+
+        if (!settingsBody.contains(active) || active === settingsBody) {
+            return false;
+        }
+
+        return active.tagName === 'INPUT' && (active.type === 'text' || active.type === 'range');
+    }
+
+    function refreshFocusedSettingsView(module, registration) {
+        if (isSettingsBodyBusy()) {
+            pendingSettingsRefresh = { module, registration };
+            return;
+        }
+
+        pendingSettingsRefresh = null;
+        renderFocusedSettings(module, registration);
+    }
+
+    function flushPendingSettingsRefresh() {
+        if (!pendingSettingsRefresh || isSettingsBodyBusy()) {
+            return;
+        }
+
+        const { module, registration } = pendingSettingsRefresh;
+        pendingSettingsRefresh = null;
+
+        if (openSettingsModuleId === module.id) {
+            renderFocusedSettings(module, registration);
         }
     }
 
@@ -1049,7 +1105,10 @@
         elements.settingsTitle.textContent = module.name;
         elements.settingsCategory.textContent = module.category;
         elements.settingsVersion.textContent = `v${registration.version || module.version}`;
+
+        const { scrollTop } = elements.settingsBody;
         renderSettingsControls(elements.settingsBody, module, registration);
+        elements.settingsBody.scrollTop = scrollTop;
     }
 
     function showMainView({ restoreFocus = true } = {}) {

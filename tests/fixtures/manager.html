@@ -72,9 +72,10 @@
                         version: module.id === 'zulu-interface' ? '1.0.0' : module.version,
                         settingsSchema: module.id === 'zulu-interface' ? [
                             { key: 'enabled', type: 'toggle', label: 'Enabled', section: 'Behaviour' },
-                            { key: 'density', type: 'select', label: 'Spacing', section: 'Appearance', previewOnHover: true, options: ['compact', 'comfortable'] }
+                            { key: 'density', type: 'select', label: 'Spacing', section: 'Appearance', previewOnHover: true, options: ['compact', 'comfortable'] },
+                            { key: 'nickname', type: 'text', label: 'Nickname', section: 'Behaviour' }
                         ] : [],
-                        currentValues: { enabled: true, density: 'compact' }
+                        currentValues: { enabled: true, density: 'compact', nickname: '' }
                     }
                 }));
             }
@@ -174,6 +175,41 @@
                     document.querySelector('[data-module-id="zulu-interface"] .lectio-manager-settings-btn').click();
                     settingsView.querySelector('.lectio-manager-settings-back').click();
                     assert(!mainView.hidden && settingsView.hidden, 'Back did not restore the module list');
+
+                    // A module can re-register with a grown settingsSchema while its
+                    // settings view is open (Subject Colours discovering classes in the
+                    // background). The Manager should refresh that view generically, but
+                    // never discard a keystroke someone is mid-way through typing.
+                    document.querySelector('[data-module-id="zulu-interface"] .lectio-manager-settings-btn').click();
+                    await Promise.resolve();
+                    const nicknameInput = settingsView.querySelector('input[type="text"]');
+                    nicknameInput.focus();
+                    nicknameInput.value = 'Hal';
+                    assert(document.activeElement === nicknameInput, 'Test setup: text field did not receive focus');
+
+                    window.dispatchEvent(new CustomEvent('lectio-module:register', {
+                        detail: {
+                            id: 'zulu-interface',
+                            name: 'Zulu Interface',
+                            version: '1.0.0',
+                            settingsSchema: [
+                                { key: 'enabled', type: 'toggle', label: 'Enabled', section: 'Behaviour' },
+                                { key: 'density', type: 'select', label: 'Spacing', section: 'Appearance', previewOnHover: true, options: ['compact', 'comfortable'] },
+                                { key: 'nickname', type: 'text', label: 'Nickname', section: 'Behaviour' },
+                                { key: 'notify', type: 'toggle', label: 'Notify', section: 'Behaviour' }
+                            ],
+                            currentValues: { enabled: true, density: 'comfortable', nickname: '', notify: false }
+                        }
+                    }));
+                    assert(document.activeElement === nicknameInput && nicknameInput.value === 'Hal',
+                        'Re-registering while a text field was focused discarded the in-progress edit');
+                    assert(settingsView.querySelectorAll('.lectio-manager-setting-label').length === 3,
+                        'Re-registering while a text field was focused rebuilt the settings view immediately');
+
+                    nicknameInput.blur();
+                    await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
+                    assert(settingsView.querySelectorAll('.lectio-manager-setting-label').length === 4,
+                        'Blurring the busy text field did not apply the queued settings refresh');
 
                 document.documentElement.dataset.testResult = 'pass';
             } catch (error) {
