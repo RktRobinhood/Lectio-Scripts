@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio English Mode
 // @namespace    lectio-english-mode
-// @version      1.8.0
+// @version      1.9.0
 // @description  Context-aware English layer for Lectio with instant core UI translation, persistent cache and Google fallback.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-start
@@ -60,7 +60,7 @@
     (function registerWithLectioManager() {
         const MODULE_ID = 'english-mode';
         const MODULE_NAME = 'Lectio English Mode';
-        const MODULE_VERSION = '1.8.0';
+        const MODULE_VERSION = '1.9.0';
 
         function announce() {
             const storedMode = GM_getValue(STORAGE_MODE, MODE_DA);
@@ -634,7 +634,107 @@
                 'Type',
 
             'Navn':
-                'Name'
+                'Name',
+
+            /*
+             * Documents screen toolbar and list headers
+             * (issue #9 audit: previously had no dictionary
+             * coverage at all, so they never resolved even
+             * via the Google fallback).
+             */
+            'Ny fil':
+                'New File',
+
+            'Ny mappe':
+                'New Folder',
+
+            'Rediger mappe':
+                'Edit Folder',
+
+            'Filnavn':
+                'Filename',
+
+            'Kommentar':
+                'Comment',
+
+            'Ændret af':
+                'Modified By',
+
+            'Ændret':
+                'Modified',
+
+            'Størrelse':
+                'Size',
+
+            'Vis/Red.':
+                'View/Edit',
+
+            'Flyt':
+                'Move',
+
+            /*
+             * Assignment/grade table headers with no coverage.
+             */
+            'Antal':
+                'Number',
+
+            'Holdelement':
+                'Class Element',
+
+            /*
+             * Native error page recovery button (issue #9 audit:
+             * "Hovedmenu" alone is already mapped for the fixed
+             * nav bar, but this full button string on the error
+             * template isn't reached by that path).
+             */
+            'Gå til Hovedmenu':
+                'Go to Main Menu',
+
+            /*
+             * Profile / settings screen (issue #9 audit: this
+             * whole screen had close to zero dictionary coverage).
+             */
+            'Vælg Hold-favoritter':
+                'Select Class Favorites',
+
+            'Vælg Stamklasse-favoritter':
+                'Select Home Class Favorites',
+
+            'Valgte:':
+                'Selected:',
+
+            'Konto':
+                'Account',
+
+            'Skoleår:':
+                'School Year:',
+
+            '(Gælder kun indtil næste login)':
+                '(Applies only until next login)',
+
+            'Du kan nemt få Lectio på mobilen (eller andre enheder) sådan her:':
+                'You can easily get Lectio on your phone (or other devices) like this:',
+
+            'Scan QR koden med din mobil':
+                'Scan the QR code with your phone',
+
+            'Vis QR kode':
+                'Show QR Code',
+
+            'På mobilen: Opret genvej på startskærm':
+                'On your phone: create a shortcut on the home screen',
+
+            'Du er færdig':
+                'You\'re done',
+
+            'For at scanne QR-koden skal kameraet på din mobil være i fototilstand (ikke video), og QR-scanning skal være aktiveret i kameraindstillingerne.':
+                'To scan the QR code, your phone\'s camera must be in photo mode (not video), and QR scanning must be enabled in the camera settings.',
+
+            'De hold man er holdlærer for vil automatisk være tilknyttet som holdfavoritter, og de vil ikke kunne fjernes.':
+                'The classes you are a class teacher for are automatically added as class favorites and cannot be removed.',
+
+            'Ved at vælge en stamklasse som stamklassefavorit vil der være adgang til den indbyggede gruppe med stamklassens lærere:"Alle stamklassenavn lærere" fra Dokumenter, Beskeder samt på Forsiden.':
+                'Selecting a home class as a home class favorite gives access to the built-in group of that home class\'s teachers: "All [home class name] teachers" from Documents, Messages, and the Overview page.'
         });
 
     const WEEKDAYS =
@@ -879,6 +979,47 @@
                 return (
                     CORE[bare] +
                     ':'
+                );
+            }
+        }
+
+        /*
+         * Grade-type labels carry an "afsl."/"ikke afsl."
+         * (finalized/not yet finalized) qualifier suffix that
+         * isn't part of the base CORE key, e.g. the on-screen
+         * "Standpunktskarakter afsl.". Without this, the exact
+         * match above misses and the whole label falls through
+         * to the Google fallback, which mistranslated it as
+         * "Point of view final" (issue #9 audit).
+         */
+        const qualifierMatch =
+            source.match(
+                /^(.+?)\s+(ikke\s+afsl\.|afsl\.)$/i
+            );
+
+        if (qualifierMatch) {
+            const [
+                ,
+                base,
+                qualifier
+            ] = qualifierMatch;
+
+            if (
+                Object.prototype
+                    .hasOwnProperty
+                    .call(
+                        CORE,
+                        base
+                    )
+            ) {
+                return (
+                    CORE[base] +
+                    (
+                        /^ikke/i
+                            .test(qualifier)
+                            ? ' (not yet finalized)'
+                            : ' (finalized)'
+                    )
                 );
             }
         }
@@ -1333,9 +1474,18 @@
             return true;
         }
 
+        /*
+         * A letter run glued directly to a digit (no space),
+         * e.g. the "i" in class code "1i", is part of an
+         * identifier, not a standalone Danish word. Without
+         * these lookarounds a lone "i" ("in") gets counted as
+         * a Danish-word hit, which used to send whole class
+         * codes like "1i TOK/1" to the Google fallback and get
+         * them corrupted into "1 in TOK/1" (issue #9 audit).
+         */
         const words =
             lower.match(
-                /\p{L}+/gu
+                /(?<![\p{N}])\p{L}+(?![\p{N}])/gu
             ) || [];
 
         let hits = 0;
@@ -1982,6 +2132,49 @@
                     .replace(
                         /\bnotification\b/gi,
                         'message'
+                    );
+        }
+
+        /*
+         * Defence in depth for the "1i" class-code corruption
+         * (issue #9 audit): a string that legitimately needs the
+         * Google fallback (e.g. "1i aktivitet/4", which contains
+         * real Danish) can still have its class code mangled by
+         * the remote translation into "1 in aktivitet/4". Put
+         * back any "Ni" identifier the fallback split into
+         * "N in", but only when that exact identifier is present
+         * in the original source, so this never touches a
+         * genuine "in".
+         */
+        result =
+            result.replace(
+                /\b(\d+)\s+in\b/gi,
+                (
+                    match,
+                    number
+                ) =>
+                    new RegExp(
+                        `\\b${number}i\\b`,
+                        'i'
+                    )
+                        .test(source)
+                        ? `${number}i`
+                        : match
+            );
+
+        if (
+            ui &&
+            lower.includes('aktivitet')
+        ) {
+            result =
+                result
+                    .replace(
+                        /\bactivities\b/g,
+                        'Activities'
+                    )
+                    .replace(
+                        /\bactivity\b/g,
+                        'Activity'
                     );
         }
 
