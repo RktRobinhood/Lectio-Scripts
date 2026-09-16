@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Lectio Theming
 // @namespace    https://www.lectio.dk/
-// @version      0.17.1
-// @description  Gives Lectio a soft, translucent glass shell with 44 built-in colour schemes (Catppuccin, Nord, Dracula, Cyberpunk, sports, social-app and Danish-landscape palettes and more), each with its own distinct background photo, and can derive a scheme from a website or image, take its background from your own picture, and let you hand-pick every key colour.
+// @version      0.18.0
+// @description  Gives Lectio a soft, translucent glass shell with 46 built-in colour schemes (Catppuccin, Nord, Dracula, Cyberpunk, sports, social-app, IB and Danish-landscape palettes and more), each with its own distinct background photo, and can derive a scheme from a website or image, take its background from your own picture, and let you hand-pick every key colour.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-start
 // @grant        GM_xmlhttpRequest
@@ -16,7 +16,7 @@
 
     const MODULE_ID = 'lectio-theming';
     const MODULE_NAME = 'Lectio Theming';
-    const MODULE_VERSION = '0.17.1';
+    const MODULE_VERSION = '0.18.0';
     const STORAGE_KEY = 'lectioTheming.settings.v2';
     // The chosen background picture lives in its own entry rather than in the
     // settings blob: it is orders of magnitude larger than every other setting
@@ -175,6 +175,11 @@
             background: '#f2f2f0', surface: '#ffffff', surfaceAlt: '#e3e4e1',
             text: '#22242a', muted: '#63666e', accent: '#b4470f', accentAlt: '#3f6d8a', danger: '#b3261e'
         },
+        'ib-light': {
+            label: 'IB Light', mode: 'light', pattern: 'blobs',
+            background: '#f2ecdd', surface: '#fffdf6', surfaceAlt: '#e5dcc2',
+            text: '#2b2515', muted: '#756a4f', accent: '#0f4c8c', accentAlt: '#8c6d1f', danger: '#c8102e'
+        },
         nord: {
             label: 'Nord', mode: 'dark', pattern: 'waves',
             background: '#2e3440', surface: '#3b4252', surfaceAlt: '#434c5e',
@@ -319,6 +324,11 @@
             label: 'Deep Space', mode: 'dark', pattern: 'waves',
             background: '#0a0d1a', surface: '#111524', surfaceAlt: '#1a2035',
             text: '#dfe4f5', muted: '#7b85a8', accent: '#7ea8ff', accentAlt: '#c08cf5', danger: '#f0687e'
+        },
+        'ib-dark': {
+            label: 'IB Dark', mode: 'dark', pattern: 'waves',
+            background: '#12161f', surface: '#1b212e', surfaceAlt: '#262e3f',
+            text: '#ece6d6', muted: '#98a0b3', accent: '#d4af5a', accentAlt: '#5b8dd9', danger: '#e35d5d'
         }
     });
 

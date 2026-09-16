@@ -63,3 +63,12 @@ These four are used only when the **Imported palette** option has no photo of it
 | `bg-scanlines.jpg` | Nat ([@nattgw](https://unsplash.com/@nattgw)) | [Unsplash photo](https://unsplash.com/photos/a-futuristic-city-at-night-with-neon-lights-dA0-qxdbyyY) |
 
 Each file was fetched from Unsplash's own image CDN with `?auto=format&fit=crop&w=1920&h=1080&q=68-70` to keep delivery size reasonable for a background that loads on every page view. A few unusually detailed photos were fetched at `w=1600&h=900&q=62` instead, for the same reason.
+
+## Custom-provided artwork
+
+Unlike every photo above, these two are not from Unsplash — they were supplied directly by a repo maintainer for the IB Light/Dark themes and are original artwork, not a licensed stock photo of a real person or place.
+
+| Theme | File | Source |
+|---|---|---|
+| IB Light | `bg-ib-light.jpg` | Provided by the repo maintainer |
+| IB Dark | `bg-ib-dark.jpg` | Provided by the repo maintainer |
