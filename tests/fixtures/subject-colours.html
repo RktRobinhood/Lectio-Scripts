@@ -153,6 +153,16 @@
 
             const body = document.getElementById('schedule-body');
 
+            // Lectio wears the lesson-block class decoratively too: an activity
+            // page's table-of-contents entry is a plain div carrying
+            // .s2skemabrik for the icon alone, with no tooltip behind it. It is
+            // not a lesson and must never be painted or learned from. Taken
+            // from the real markup of an activity front page.
+            const decoration = document.createElement('div');
+            decoration.id = 'decoration-1';
+            decoration.className = 'prepend-fonticon-activity s2skemabrik ';
+            document.body.appendChild(decoration);
+
             for (const row of rows) {
                 const tr = document.createElement('tr');
                 const label = document.createElement('td');
@@ -178,6 +188,7 @@
 
             const phase = new URLSearchParams(location.search).get('phase') || 'first';
             const kindOf = (id) => document.getElementById(id).getAttribute('data-lectio-subject');
+            const learned = () => JSON.parse(localStorage.getItem('lectioSubjectColours.schedule.v1.unknown') || '{"entries":{}}');
             const fillOf = (id) => document.getElementById(id).style.getPropertyValue('--lectio-subject-fill').trim();
             const channel = (value) => {
                 const part = value / 255;
@@ -201,6 +212,11 @@
                 if (kindOf('cancelled-1') !== null) throw new Error('a cancelled lesson was coloured');
                 // An activity with no hold is never a class, in any phase.
                 if (kindOf('assembly-1') !== 'other') throw new Error('an assembly was not treated as a one-off');
+                // Decoration wearing the lesson-block class is not a lesson.
+                if (kindOf('decoration-1') !== null) throw new Error('a decorative .s2skemabrik was coloured as an activity');
+                if (JSON.stringify(learned().entries).includes('t:aktivitet')) {
+                    throw new Error('a decorative .s2skemabrik was learned from');
+                }
 
                 if (phase === 'first') {
                     if (kindOf('psyc-1') !== 'other') throw new Error('one week of evidence was enough to call a hold a class');
@@ -268,8 +284,7 @@
                     // Identity still works on somebody else's page — these are
                     // the same holds — but a room's timetable is never evidence
                     // about how often they are yours.
-                    const learned = JSON.parse(localStorage.getItem('lectioSubjectColours.schedule.v1.unknown'));
-                    const weeksCounted = Object.keys(learned.entries['h:HE111'].weekCounts).length;
+                    const weeksCounted = Object.keys(learned().entries['h:HE111'].weekCounts).length;
                     if (weeksCounted !== 2) {
                         throw new Error(`a room's timetable was counted as evidence (${weeksCounted} weeks)`);
                     }

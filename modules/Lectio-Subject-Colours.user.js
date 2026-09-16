@@ -254,8 +254,16 @@
     // READING A LESSON BLOCK
     // ============================================================
 
+    // Lectio reuses the .s2skemabrik class decoratively: an activity page's
+    // table-of-contents entry carries it purely to borrow the block icon, with
+    // no tooltip, no hold and no date. The class on its own is therefore not
+    // enough to identify a lesson. Every real lesson or booking block carries
+    // the tooltip this module already reads its date, hold names and
+    // cancellation from, so requiring one keeps decoration out of both the
+    // paint and the learned timetable, and costs nothing on a block the module
+    // could have said anything about.
     function blockElements(root) {
-        return [...root.querySelectorAll('.s2skemabrik')];
+        return [...root.querySelectorAll('.s2skemabrik[data-tooltip]')];
     }
 
     function tooltipLines(element) {
