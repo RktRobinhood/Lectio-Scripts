@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio Manager cross-module announce fixture</title>
+</head>
+<body>
+    <script>
+        const catalogue = {
+            schemaVersion: 1,
+            generatedAt: '2026-09-13T00:00:00.000Z',
+            modules: [
+                {
+                    id: 'lectio-theming',
+                    name: 'Lectio Theming',
+                    description: 'Visual theme layer.',
+                    category: 'Interface',
+                    audience: ['student', 'teacher'],
+                    status: 'stable',
+                    version: '0.17.0',
+                    installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Theming.user.js'
+                }
+            ]
+        };
+
+        const storage = new Map([
+            ['lectioManager.catalogue.v1', JSON.stringify(catalogue)],
+            ['lectioManager.lastRefresh.v1', Date.now()],
+            ['lectioManager.updateTipDismissed.v1', true]
+        ]);
+
+        window.GM_getValue = (key, fallback) => storage.has(key) ? storage.get(key) : fallback;
+        window.GM_setValue = (key, value) => storage.set(key, value);
+        window.GM_xmlhttpRequest = () => {};
+    </script>
+    <script src="../../manager/Lectio-Manager.user.js"></script>
+    <script>
+        function assert(condition, message) {
+            if (!condition) throw new Error(message);
+        }
+
+        function registerTheming(preset) {
+            window.dispatchEvent(new CustomEvent('lectio-module:register', {
+                detail: {
+                    id: 'lectio-theming',
+                    name: 'Lectio Theming',
+                    version: '0.17.0',
+                    settingsSchema: [
+                        {
+                            key: 'preset', type: 'select', label: 'Theme', section: 'Theme',
+                            previewOnHover: true,
+                            options: [
+                                { value: 'a', label: 'Theme A' },
+                                { value: 'b', label: 'Theme B' },
+                                { value: 'c', label: 'Theme C' }
+                            ]
+                        }
+                    ],
+                    currentValues: { preset }
+                }
+            }));
+        }
+
+        window.addEventListener('load', async () => {
+            try {
+                document.querySelector('#lectio-manager-toggle').click();
+
+                registerTheming('a');
+                document.querySelector('[data-module-id="lectio-theming"] .lectio-manager-settings-btn').click();
+                await Promise.resolve();
+
+                const trigger = document.querySelector('.lectio-manager-preview-select-trigger');
+                trigger.click();
+                const wrapper = document.querySelector('.lectio-manager-preview-select');
+                assert(wrapper.classList.contains('is-open'), 'Dropdown did not open');
+
+                // A module unrelated to the one whose settings are open can
+                // announce itself at any time -- e.g. Subject Colours
+                // re-registering because its own MutationObserver reacted to
+                // a theme preview mutation. That must not tear down and
+                // rebuild the settings panel the user is actively using.
+                window.dispatchEvent(new CustomEvent('lectio-module:register', {
+                    detail: {
+                        id: 'subject-colours',
+                        name: 'Subject Colours',
+                        version: '1.0.0',
+                        settingsSchema: [{ key: 'enabled', type: 'toggle', label: 'Enabled', section: 'Colours' }],
+                        currentValues: { enabled: true }
+                    }
+                }));
+
+                const wrapperAfterUnrelatedAnnounce = document.querySelector('.lectio-manager-preview-select');
+                assert(wrapperAfterUnrelatedAnnounce === wrapper,
+                    'An unrelated module announcing replaced the open dropdown\'s DOM node');
+                assert(wrapperAfterUnrelatedAnnounce.classList.contains('is-open'),
+                    'An unrelated module announcing closed the open dropdown');
+                assert(!document.querySelector('#lectio-manager-panel').hasAttribute('hidden'),
+                    'An unrelated module announcing closed the manager panel');
+
+                // The module whose settings ARE open committing a real change
+                // should still refresh the panel to reflect it.
+                registerTheming('b');
+                const triggerAfterOwnCommit = document.querySelector('.lectio-manager-preview-select-trigger');
+                assert(triggerAfterOwnCommit.textContent.trim() === 'Theme B',
+                    'The open module committing its own change did not refresh the settings panel');
+
+                document.documentElement.dataset.testResult = 'pass';
+            } catch (error) {
+                document.documentElement.dataset.testResult = `fail: ${error.message}`;
+            }
+        });
+    </script>
+</body>
+</html>

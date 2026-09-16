@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.13.0
+// @version      1.13.1
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules from one small gear panel.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
@@ -440,7 +440,7 @@
         });
 
         rememberInstalled(detected.get(detail.id));
-        renderModuleList();
+        renderModuleList({ refreshFocusedSettings: detail.id === openSettingsModuleId });
     }
 
     function emitSettingChange(moduleId, key, value) {
@@ -715,7 +715,7 @@
     // UI: RENDER
     // ============================================================
 
-    function renderModuleList() {
+    function renderModuleList({ refreshFocusedSettings = true } = {}) {
         if (!elements) {
             return;
         }
@@ -771,7 +771,7 @@
             list.appendChild(buildModuleCard(module));
         }
 
-        if (openSettingsModuleId) {
+        if (openSettingsModuleId && refreshFocusedSettings) {
             const module = catalogue.modules.find((entry) => entry.id === openSettingsModuleId);
             const registration = detected.get(openSettingsModuleId);
             if (module && registration) {
