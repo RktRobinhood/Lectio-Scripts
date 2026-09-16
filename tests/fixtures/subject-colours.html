@@ -66,10 +66,18 @@
             overrides: lockColours ? { 'h:HE111': '#7b1fa2' } : {}
         }));
 
+        const presetFor = () => {
+            if (phase === 'dark' || phase === 'locked') return { preset: 'catppuccin-mocha', mode: 'dark' };
+            // Solarized Light's own text colour never clears 4.5 contrast
+            // against anything up to pure white — a real, shipped preset that
+            // used to wash every class out to the same white block.
+            if (phase === 'solarized') return { preset: 'solarized-light', mode: 'light' };
+            return { preset: 'catppuccin-latte', mode: 'light' };
+        };
+
         localStorage.setItem('lectioTheming.settings.v2', JSON.stringify({
             enabled: true,
-            preset: (phase === 'dark' || phase === 'locked') ? 'catppuccin-mocha' : 'catppuccin-latte',
-            mode: (phase === 'dark' || phase === 'locked') ? 'dark' : 'light',
+            ...presetFor(),
             blur: false
         }));
     </script>
@@ -359,6 +367,21 @@
                     }
                     if (getComputedStyle(foreign).backgroundColor !== 'rgb(255, 0, 0)') {
                         throw new Error('another extension\'s lesson colour did not survive');
+                    }
+                }
+
+                if (phase === 'solarized') {
+                    // Solarized Light's own text colour cannot clear 4.5
+                    // contrast against anything up to pure white, which used
+                    // to run every class's fill all the way to the same
+                    // washed-out white block. Two classes staying two
+                    // different, non-white colours is the actual regression
+                    // test — an aggressive theme should not be able to erase
+                    // the schedule's colours.
+                    if (fillOf('psyc-1') === '#ffffff') throw new Error('a marginal-contrast theme washed a class out to white');
+                    if (fillOf('math-1') === '#ffffff') throw new Error('a marginal-contrast theme washed a class out to white');
+                    if (fillOf('psyc-1') === fillOf('math-1')) {
+                        throw new Error('a marginal-contrast theme collapsed two different classes to one colour');
                     }
                 }
 

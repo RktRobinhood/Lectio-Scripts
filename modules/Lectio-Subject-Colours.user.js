@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Subject Colours
 // @namespace    https://www.lectio.dk/
-// @version      0.2.1
+// @version      0.2.2
 // @description  Learns which classes are actually yours from your own timetable and gives each one its own colour, with a separate muted spectrum for one-off activities like assemblies and meetings.
 // @match        https://www.lectio.dk/lectio/*
 // @grant        none
@@ -15,7 +15,7 @@
 
     const MODULE_ID = 'subject-colours';
     const MODULE_NAME = 'Lectio - Subject Colours';
-    const MODULE_VERSION = '0.2.1';
+    const MODULE_VERSION = '0.2.2';
     const LOG = '[Lectio Subject Colours]';
     const STYLE_ID = 'lectio-subject-colours-styles';
 
@@ -799,9 +799,16 @@
         let text = activeTheme.text;
         let guard = 0;
 
+        // Bounded well short of pure black or white: a theme whose own text
+        // colour is too middling to ever clear 4.5 against anything (Solarized
+        // Light's does not, even against white) would otherwise have this loop
+        // run every class all the way to the same washed-out extreme, erasing
+        // hue and turning "colour the schedule" into "blank the schedule".
+        // Stopping short keeps every class's own hue showing through — legible
+        // or not is then the job of the text-colour fallback just below.
         while (!chosen && contrastRatio(text, fill) < 4.5 && guard < 10) {
             const [hue, saturation, lightness] = rgbToHsl(parseColour(fill));
-            fill = hslHex(hue, saturation, clamp(lightness + (activeTheme.dark ? -5 : 5), 0, 100));
+            fill = hslHex(hue, saturation, clamp(lightness + (activeTheme.dark ? -5 : 5), 8, 92));
             guard += 1;
         }
 

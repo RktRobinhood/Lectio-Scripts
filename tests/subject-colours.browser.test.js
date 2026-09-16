@@ -56,6 +56,12 @@ test('subject colours are learned from a repeating timetable and keep their own 
 
         const lockedDark = await runFixture('locked');
         assert.match(lockedDark, /data-test-result="pass"/, lockedDark);
+
+        // A built-in theme whose own text colour is too middling to ever
+        // clear the contrast bar (Solarized Light) must not be able to wash
+        // every class out to the same white block.
+        const solarized = await runFixture('solarized');
+        assert.match(solarized, /data-test-result="pass"/, solarized);
     } finally {
         await rm(profileDirectory, { recursive: true, force: true });
     }
