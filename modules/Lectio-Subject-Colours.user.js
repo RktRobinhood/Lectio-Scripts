@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Subject Colours
 // @namespace    https://www.lectio.dk/
-// @version      0.1.1
+// @version      0.1.2
 // @description  Learns which classes are actually yours from your own timetable and gives each one its own colour, with a separate muted spectrum for one-off activities like assemblies and meetings.
 // @match        https://www.lectio.dk/lectio/*
 // @grant        none
@@ -15,7 +15,7 @@
 
     const MODULE_ID = 'subject-colours';
     const MODULE_NAME = 'Lectio - Subject Colours';
-    const MODULE_VERSION = '0.1.1';
+    const MODULE_VERSION = '0.1.2';
     const LOG = '[Lectio Subject Colours]';
     const STYLE_ID = 'lectio-subject-colours-styles';
 
@@ -97,6 +97,17 @@
     // activity is called, and without this a changed one-off is filed under
     // the word Ændret!.
     const STATUS_PATTERN = /^\s*(ændret|aendret|changed|flyttet|moved)\s*!*\s*$/i;
+    // Lectio uses a hold for school-wide groupings as well as for classes:
+    // Alle Laerere, Alle 1i-elever, Alle Matematik-laerere. Danish "alle" is
+    // "everyone", and a hold that means everyone is by definition not one of
+    // your own subjects. They also recur far more reliably than any lesson, so
+    // left alone the staff hold becomes the most frequent thing in a teacher's
+    // timetable and takes the first colour ahead of every real class.
+    const EVERYONE_HOLD_PATTERN = /^\s*alle\b/i;
+    // A lesson belongs to a class or two; a block listing half the school's
+    // year groups at once is an assembly, whatever its holds are called.
+    const MAX_CLASS_HOLDS = 3;
+
     const HOLD_FIELD_PATTERN = /^(?:Hold|Team|Class)\s*:\s*(.+)$/i;
     const TOOLTIP_DATE_PATTERN = /(\d{1,2})\/(\d{1,2})-(\d{4})(?:\s+(\d{1,2}):(\d{2}))?/;
 
@@ -534,6 +545,8 @@
         const entry = store.entries[key];
         if (!entry) return 'other';
         if (!entry.hold) return 'other';
+        if (entry.ids.length > MAX_CLASS_HOLDS || entry.names.length > MAX_CLASS_HOLDS) return 'other';
+        if (entry.names.length && entry.names.every(name => EVERYONE_HOLD_PATTERN.test(name))) return 'other';
 
         const limits = thresholds();
         return (weeksSeenOf(entry) >= limits.minWeeks && occurrencesOf(entry) >= limits.minOccurrences)

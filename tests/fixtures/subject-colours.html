@@ -133,6 +133,13 @@
                 ...(secondWeek ? [] : [
                     { id: 'rare-1', holdId: 'HE999', holdName: '3z Bio', dayOffset: 2, time: '13:00 til 14:10' }
                 ]),
+                // Lectio's school-wide holds recur more reliably than any
+                // lesson, so they clear every threshold a class has to. They
+                // are still not this person's subjects. Names taken from a
+                // real teacher timetable.
+                { id: 'staff-1', holdId: 'HE777', holdName: 'Alle Laerere', dayOffset: 1, time: '07:45 til 08:10' },
+                { id: 'staff-2', holdId: 'HE777', holdName: 'Alle Laerere', dayOffset: 3, time: '07:45 til 08:10' },
+                { id: 'staff-3', holdId: 'HE777', holdName: 'Alle Laerere', dayOffset: 4, time: '07:45 til 08:10' },
                 // No hold at all: the assembly/meeting case.
                 { id: 'assembly-1', title: 'Fællessamling i festsalen', dayOffset: 1, time: '11:15 til 11:45' },
                 // A cancelled lesson must never be counted or coloured.
@@ -212,6 +219,9 @@
                 if (kindOf('cancelled-1') !== null) throw new Error('a cancelled lesson was coloured');
                 // An activity with no hold is never a class, in any phase.
                 if (kindOf('assembly-1') !== 'other') throw new Error('an assembly was not treated as a one-off');
+                // A hold that means everyone is never one of your classes,
+                // however faithfully it recurs.
+                if (kindOf('staff-1') !== 'other') throw new Error('a school-wide staff hold was coloured as a class');
                 // Decoration wearing the lesson-block class is not a lesson.
                 if (kindOf('decoration-1') !== null) throw new Error('a decorative .s2skemabrik was coloured as an activity');
                 if (JSON.stringify(learned().entries).includes('t:aktivitet')) {
