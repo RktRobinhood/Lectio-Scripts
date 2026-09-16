@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Subject Colours
 // @namespace    https://www.lectio.dk/
-// @version      0.2.2
+// @version      0.3.0
 // @description  Learns which classes are actually yours from your own timetable and gives each one its own colour, with a separate muted spectrum for one-off activities like assemblies and meetings.
 // @match        https://www.lectio.dk/lectio/*
 // @grant        none
@@ -15,7 +15,7 @@
 
     const MODULE_ID = 'subject-colours';
     const MODULE_NAME = 'Lectio - Subject Colours';
-    const MODULE_VERSION = '0.2.2';
+    const MODULE_VERSION = '0.3.0';
     const LOG = '[Lectio Subject Colours]';
     const STYLE_ID = 'lectio-subject-colours-styles';
 
@@ -25,6 +25,13 @@
     const KIND_ATTRIBUTE = 'data-lectio-subject';
     const KEY_ATTRIBUTE = 'data-lectio-subject-key';
     const STYLE_ATTRIBUTE = 'data-lectio-subject-style';
+
+    // The on-page colour legend: a small floating strip, not part of any
+    // Lectio table, so it works the same on every page this module paints
+    // rather than depending on one page's row structure.
+    const LEGEND_ID = 'lectio-subject-colours-legend';
+    const LEGEND_PANEL_ID = 'lectio-subject-colours-legend-panel';
+    const HIGHLIGHT_CLASS = 'lectio-subject-colours-highlight';
 
     const SETTINGS_KEY = 'lectioSubjectColours.settings.v1';
     // Learned schedule data is scoped per school: the same browser can be
@@ -74,6 +81,7 @@
         regularity: 'balanced',
         scanWeeks: 8,
         colourOther: true,
+        showLegend: true,
         lockColours: false,
         lockedTheme: null,
         overrides: {}
@@ -123,6 +131,7 @@
     // something to hold onto by the time anything gets painted.
     ensureLockedTheme();
     let previewStyle = null;
+    let legendExpanded = false;
     let scanning = false;
     let applyHandle = 0;
     let themeHandle = 0;
@@ -157,6 +166,9 @@
             colourOther: typeof saved.colourOther === 'boolean'
                 ? saved.colourOther
                 : DEFAULT_SETTINGS.colourOther,
+            showLegend: typeof saved.showLegend === 'boolean'
+                ? saved.showLegend
+                : DEFAULT_SETTINGS.showLegend,
             lockColours: typeof saved.lockColours === 'boolean'
                 ? saved.lockColours
                 : DEFAULT_SETTINGS.lockColours,
@@ -910,6 +922,7 @@
         if (!settings.enabled) {
             root.removeAttribute(STYLE_ATTRIBUTE);
             blockElements(document).forEach(clearBlock);
+            removeLegend();
             return;
         }
 
@@ -950,6 +963,7 @@
             paintBlock(element, paletteFor(key, kind), kind);
         }
 
+        renderLegend();
         flushStore();
     }
 
@@ -990,8 +1004,420 @@
             html[${STYLE_ATTRIBUTE}="both"] .s2skemabrik[${KIND_ATTRIBUTE}] * {
                 color: inherit !important;
             }
+
+            .s2skemabrik[${KIND_ATTRIBUTE}].${HIGHLIGHT_CLASS} {
+                outline: 2px solid var(--lectio-subject-line, currentColor) !important;
+                outline-offset: -2px;
+            }
+
+            #${LEGEND_ID} {
+                bottom: 14px;
+                font: 400 12px/1.3 Roboto, Arial, sans-serif;
+                position: fixed;
+                right: 14px;
+                z-index: 900;
+            }
+
+            #${LEGEND_ID} .lectio-subject-colours-legend__toggle {
+                align-items: center;
+                background: var(--lectio-theme-surface, #ffffff);
+                border: 1px solid var(--lectio-theme-muted, #d6dde0);
+                border-radius: 999px;
+                box-shadow: 0 2px 10px color-mix(in srgb, var(--lectio-theme-muted, #5e6870) 30%, transparent);
+                color: var(--lectio-theme-text, #10201e);
+                cursor: pointer;
+                display: flex;
+                gap: 6px;
+                padding: 6px 12px;
+            }
+
+            #${LEGEND_ID} .lectio-subject-colours-legend__toggle:hover,
+            #${LEGEND_ID} .lectio-subject-colours-legend__toggle:focus-visible {
+                border-color: var(--lectio-theme-accent, #0f6f6f);
+                outline: none;
+            }
+
+            #${LEGEND_ID} .lectio-subject-colours-legend__swatches {
+                display: flex;
+                gap: 3px;
+            }
+
+            #${LEGEND_ID} .lectio-subject-colours-legend__dot {
+                border-radius: 50%;
+                height: 10px;
+                width: 10px;
+            }
+
+            #${LEGEND_ID} .lectio-subject-colours-legend__chevron {
+                color: var(--lectio-theme-muted, #5e6870);
+                font-size: 10px;
+            }
+
+            #${LEGEND_PANEL_ID} {
+                background: var(--lectio-theme-surface, #ffffff);
+                border: 1px solid var(--lectio-theme-muted, #d6dde0);
+                border-radius: max(6px, var(--lectio-theme-radius, 10px));
+                bottom: calc(100% + 8px);
+                box-shadow: 0 10px 28px color-mix(in srgb, var(--lectio-theme-muted, #5e6870) 28%, transparent);
+                max-height: 60vh;
+                max-width: min(280px, calc(100vw - 28px));
+                overflow: auto;
+                padding: 8px;
+                position: absolute;
+                right: 0;
+            }
+
+            #${LEGEND_PANEL_ID}[hidden] {
+                display: none;
+            }
+
+            .lectio-subject-colours-legend__header {
+                align-items: center;
+                color: var(--lectio-theme-muted, #5e6870);
+                display: flex;
+                font-size: 11px;
+                justify-content: space-between;
+                margin-bottom: 4px;
+                padding: 0 2px;
+                text-transform: uppercase;
+            }
+
+            .lectio-subject-colours-legend__close {
+                background: none;
+                border: none;
+                border-radius: 4px;
+                color: inherit;
+                cursor: pointer;
+                font-size: 14px;
+                line-height: 1;
+                padding: 2px 5px;
+            }
+
+            .lectio-subject-colours-legend__close:hover,
+            .lectio-subject-colours-legend__close:focus-visible {
+                background: var(--lectio-theme-surface-alt, #eef1f2);
+                outline: none;
+            }
+
+            .lectio-subject-colours-legend__list {
+                display: grid;
+                gap: 2px;
+                list-style: none;
+                margin: 0;
+                padding: 0;
+            }
+
+            .lectio-subject-colours-legend__entry {
+                align-items: center;
+                background: none;
+                border: none;
+                border-radius: 5px;
+                color: var(--lectio-theme-text, #10201e);
+                cursor: pointer;
+                display: flex;
+                gap: 8px;
+                padding: 4px 6px;
+                text-align: left;
+                width: 100%;
+            }
+
+            .lectio-subject-colours-legend__entry:hover,
+            .lectio-subject-colours-legend__entry:focus-visible,
+            .lectio-subject-colours-legend__row.is-hover .lectio-subject-colours-legend__entry {
+                background: var(--lectio-theme-surface-alt, #eef1f2);
+                outline: none;
+            }
+
+            .lectio-subject-colours-legend__swatch {
+                background: var(--entry-fill);
+                border: 1px solid var(--entry-line);
+                border-radius: 4px;
+                flex: none;
+                height: 14px;
+                width: 14px;
+            }
+
+            .lectio-subject-colours-legend__label {
+                flex: 1;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+            .lectio-subject-colours-legend__row .lectio-subject-colours-legend__picker {
+                height: 1px;
+                left: -9999px;
+                opacity: 0;
+                position: absolute;
+                width: 1px;
+            }
         `;
         (document.head || document.documentElement).appendChild(style);
+    }
+
+    // ============================================================
+    // LEGEND
+    // ============================================================
+    //
+    // A compact, collapsed-by-default key listing the classes actually on
+    // screen — a floating strip rather than a row injected into a schedule
+    // table, so it works the same on every page this module paints instead
+    // of depending on one page's layout. Rebuilt only when the visible set
+    // of classes or their colours actually changes, so an unrelated page
+    // mutation does not interrupt someone mid-hover.
+
+    let legendSignature = '';
+
+    function legendLabels() {
+        const language = (document.documentElement.lang || '').toLowerCase();
+        const english = language.startsWith('en');
+
+        return english
+            ? {
+                toggle: count => `Colours · ${count}`,
+                show: 'Show colour key',
+                hide: 'Hide colour key',
+                heading: 'Colour key'
+            }
+            : {
+                toggle: count => `Farver · ${count}`,
+                show: 'Vis farvenøgle',
+                hide: 'Skjul farvenøgle',
+                heading: 'Farvenøgle'
+            };
+    }
+
+    // Only a class already painted on the page counts: a quiet week with two
+    // classes shows two entries, not every class ever learned.
+    function visibleClassKeys() {
+        const seen = new Set();
+
+        for (const element of blockElements(document)) {
+            if (element.getAttribute(KIND_ATTRIBUTE) !== 'class') continue;
+            const key = element.getAttribute(KEY_ATTRIBUTE);
+            if (key) seen.add(key);
+        }
+
+        return classKeys().filter(key => seen.has(key));
+    }
+
+    function setBlocksHighlighted(key, on) {
+        for (const element of blockElements(document)) {
+            if (element.getAttribute(KEY_ATTRIBUTE) === key) {
+                element.classList.toggle(HIGHLIGHT_CLASS, on);
+            }
+        }
+    }
+
+    function setEntryHighlighted(key, on) {
+        const container = document.getElementById(LEGEND_ID);
+        if (!container) return;
+
+        for (const row of container.querySelectorAll('.lectio-subject-colours-legend__row')) {
+            if (row.dataset.key === key) row.classList.toggle('is-hover', on);
+        }
+    }
+
+    function setLegendExpanded(container, expanded) {
+        const toggle = container.querySelector('.lectio-subject-colours-legend__toggle');
+        const panel = document.getElementById(LEGEND_PANEL_ID);
+        const chevron = container.querySelector('.lectio-subject-colours-legend__chevron');
+        const strings = legendLabels();
+        if (!toggle || !panel) return;
+
+        toggle.setAttribute('aria-expanded', String(expanded));
+        toggle.setAttribute('aria-label', expanded ? strings.hide : strings.show);
+        panel.hidden = !expanded;
+        if (chevron) chevron.textContent = expanded ? '▾' : '▴';
+    }
+
+    function updateLegendToggleLabel(container, count) {
+        const label = container.querySelector('.lectio-subject-colours-legend__toggle-label');
+        if (label) label.textContent = legendLabels().toggle(count);
+    }
+
+    // Recolouring straight from the legend, with no trip through the
+    // Manager: a native colour input sits right next to the swatch, and
+    // clicking the entry opens it directly.
+    function applyLegendOverride(key, value) {
+        if (!isHexColour(value)) return;
+
+        settings.overrides[key] = String(value).toLowerCase();
+        saveSettings();
+        invalidate();
+        applyAll();
+        announce();
+    }
+
+    function buildLegendRow(key) {
+        const entry = store.entries[key];
+        const palette = paletteFor(key, 'class');
+
+        const row = document.createElement('li');
+        row.className = 'lectio-subject-colours-legend__row';
+        row.dataset.key = key;
+
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'lectio-subject-colours-legend__entry';
+        button.title = entry?.label || key;
+
+        const swatch = document.createElement('span');
+        swatch.className = 'lectio-subject-colours-legend__swatch';
+        swatch.style.setProperty('--entry-fill', palette.fill);
+        swatch.style.setProperty('--entry-line', palette.line);
+        swatch.setAttribute('aria-hidden', 'true');
+
+        const label = document.createElement('span');
+        label.className = 'lectio-subject-colours-legend__label';
+        label.textContent = entry?.label || key;
+
+        const picker = document.createElement('input');
+        picker.type = 'color';
+        picker.className = 'lectio-subject-colours-legend__picker';
+        picker.tabIndex = -1;
+        picker.setAttribute('aria-hidden', 'true');
+        picker.value = isHexColour(palette.fill) ? palette.fill : '#808080';
+
+        button.append(swatch, label);
+
+        button.addEventListener('click', () => picker.click(), { signal: lifecycle.signal });
+        button.addEventListener('mouseenter', () => setBlocksHighlighted(key, true), { signal: lifecycle.signal });
+        button.addEventListener('mouseleave', () => setBlocksHighlighted(key, false), { signal: lifecycle.signal });
+        button.addEventListener('focus', () => setBlocksHighlighted(key, true), { signal: lifecycle.signal });
+        button.addEventListener('blur', () => setBlocksHighlighted(key, false), { signal: lifecycle.signal });
+        picker.addEventListener('change', () => applyLegendOverride(key, picker.value), { signal: lifecycle.signal });
+
+        row.append(button, picker);
+        return row;
+    }
+
+    function ensureLegendContainer() {
+        const existing = document.getElementById(LEGEND_ID);
+        if (existing) return existing;
+
+        const strings = legendLabels();
+        const container = document.createElement('div');
+        container.id = LEGEND_ID;
+
+        const toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.className = 'lectio-subject-colours-legend__toggle';
+        toggle.setAttribute('aria-expanded', 'false');
+        toggle.setAttribute('aria-controls', LEGEND_PANEL_ID);
+        toggle.setAttribute('aria-label', strings.show);
+
+        const label = document.createElement('span');
+        label.className = 'lectio-subject-colours-legend__toggle-label';
+
+        const swatches = document.createElement('span');
+        swatches.className = 'lectio-subject-colours-legend__swatches';
+        swatches.setAttribute('aria-hidden', 'true');
+
+        const chevron = document.createElement('span');
+        chevron.className = 'lectio-subject-colours-legend__chevron';
+        chevron.setAttribute('aria-hidden', 'true');
+        chevron.textContent = '▴';
+
+        toggle.append(swatches, label, chevron);
+        toggle.addEventListener('click', () => {
+            legendExpanded = !legendExpanded;
+            setLegendExpanded(container, legendExpanded);
+        }, { signal: lifecycle.signal });
+
+        const panel = document.createElement('div');
+        panel.id = LEGEND_PANEL_ID;
+        panel.hidden = true;
+
+        const header = document.createElement('div');
+        header.className = 'lectio-subject-colours-legend__header';
+
+        const heading = document.createElement('span');
+        heading.textContent = strings.heading;
+
+        const close = document.createElement('button');
+        close.type = 'button';
+        close.className = 'lectio-subject-colours-legend__close';
+        close.setAttribute('aria-label', strings.hide);
+        close.textContent = '×';
+        close.addEventListener('click', () => {
+            legendExpanded = false;
+            setLegendExpanded(container, false);
+        }, { signal: lifecycle.signal });
+
+        header.append(heading, close);
+
+        const list = document.createElement('ul');
+        list.className = 'lectio-subject-colours-legend__list';
+
+        panel.append(header, list);
+        container.append(toggle, panel);
+        (document.body || document.documentElement).appendChild(container);
+        setLegendExpanded(container, legendExpanded);
+
+        return container;
+    }
+
+    function removeLegend() {
+        const container = document.getElementById(LEGEND_ID);
+        if (container) container.remove();
+        legendSignature = '';
+    }
+
+    function renderLegend() {
+        if (!settings.showLegend) {
+            removeLegend();
+            return;
+        }
+
+        const keys = visibleClassKeys();
+        if (!keys.length) {
+            removeLegend();
+            return;
+        }
+
+        const container = ensureLegendContainer();
+        const signature = keys.map(key => `${key}:${paletteFor(key, 'class').fill}`).join('|');
+
+        if (signature !== legendSignature) {
+            legendSignature = signature;
+
+            const swatches = container.querySelector('.lectio-subject-colours-legend__swatches');
+            swatches.textContent = '';
+            for (const key of keys.slice(0, 4)) {
+                const dot = document.createElement('span');
+                dot.className = 'lectio-subject-colours-legend__dot';
+                dot.style.background = paletteFor(key, 'class').fill;
+                swatches.appendChild(dot);
+            }
+
+            const list = container.querySelector('.lectio-subject-colours-legend__list');
+            list.textContent = '';
+            for (const key of keys) list.appendChild(buildLegendRow(key));
+        }
+
+        updateLegendToggleLabel(container, keys.length);
+    }
+
+    // Delegated once for the whole page rather than per block, so blocks
+    // that come and go with a week change never need their own listeners
+    // attached or torn down.
+    function watchLegendHover() {
+        let hoveredBlock = null;
+
+        document.addEventListener('mouseover', (event) => {
+            const block = event.target.closest?.(`.s2skemabrik[${KIND_ATTRIBUTE}="class"]`);
+            if (!block || block === hoveredBlock) return;
+            hoveredBlock = block;
+            setEntryHighlighted(block.getAttribute(KEY_ATTRIBUTE), true);
+        }, { signal: lifecycle.signal });
+
+        document.addEventListener('mouseout', (event) => {
+            const block = event.target.closest?.(`.s2skemabrik[${KIND_ATTRIBUTE}="class"]`);
+            if (!block || block.contains(event.relatedTarget)) return;
+            if (block === hoveredBlock) hoveredBlock = null;
+            setEntryHighlighted(block.getAttribute(KEY_ATTRIBUTE), false);
+        }, { signal: lifecycle.signal });
     }
 
     // ============================================================
@@ -1149,6 +1575,14 @@
                 description: 'Give assemblies, meetings and trips a muted grey-toned colour of their own.'
             },
             {
+                key: 'showLegend',
+                type: 'toggle',
+                label: 'Show colour key on the schedule',
+                section: 'Colours',
+                description: 'A small, collapsed-by-default key on the page listing the classes currently on screen. '
+                    + 'Hover an entry to highlight its blocks, or click its swatch to recolour it there and then.'
+            },
+            {
                 key: 'regularity',
                 type: 'select',
                 label: 'What counts as a class',
@@ -1211,6 +1645,7 @@
             style: settings.style,
             intensity: settings.intensity,
             colourOther: settings.colourOther,
+            showLegend: settings.showLegend,
             lockColours: settings.lockColours,
             regularity: settings.regularity,
             scanWeeks: settings.scanWeeks
@@ -1254,6 +1689,8 @@
             settings.intensity = clamp(Math.round(Number(value) || DEFAULT_SETTINGS.intensity), 60, 140);
         } else if (key === 'colourOther' && typeof value === 'boolean') {
             settings.colourOther = value;
+        } else if (key === 'showLegend' && typeof value === 'boolean') {
+            settings.showLegend = value;
         } else if (key === 'lockColours' && typeof value === 'boolean') {
             settings.lockColours = value;
             // Turning the lock off drops the freeze, so a later lock starts
@@ -1316,6 +1753,8 @@
     // ============================================================
 
     function watchPage() {
+        watchLegendHover();
+
         // Lectio re-renders the schedule table in place when a week is changed,
         // so new blocks arrive without a page load. Both observers are torn down
         // with the page rather than left to accumulate across navigations.

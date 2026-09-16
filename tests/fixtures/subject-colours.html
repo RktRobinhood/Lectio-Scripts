@@ -58,6 +58,7 @@
             regularity: 'balanced',
             scanWeeks: 0,
             colourOther: true,
+            showLegend: phase !== 'legend-off',
             // The locked phase pins one class to a colour of its own and asks
             // for it back exactly, under a dark theme it would otherwise be
             // re-derived by.
@@ -382,6 +383,45 @@
                     if (fillOf('math-1') === '#ffffff') throw new Error('a marginal-contrast theme washed a class out to white');
                     if (fillOf('psyc-1') === fillOf('math-1')) {
                         throw new Error('a marginal-contrast theme collapsed two different classes to one colour');
+                    }
+                }
+
+                if (phase === 'legend') {
+                    // Both classes are established by now from earlier phases
+                    // in this same profile, and both are on screen, so the key
+                    // should list exactly the two of them.
+                    const legend = document.getElementById('lectio-subject-colours-legend');
+                    if (!legend) throw new Error('the colour key did not appear with classes on screen');
+
+                    const rows = [...legend.querySelectorAll('.lectio-subject-colours-legend__row')];
+                    if (rows.length !== 2) throw new Error(`the colour key listed ${rows.length} classes instead of 2`);
+
+                    const labelOf = (row) => row.querySelector('.lectio-subject-colours-legend__label').textContent;
+                    const labels = rows.map(labelOf);
+                    if (!labels.includes('1i Psyc HL') || !labels.includes('2b Mat A')) {
+                        throw new Error(`the colour key did not list the visible classes (${labels.join(', ')})`);
+                    }
+
+                    const panel = document.getElementById('lectio-subject-colours-legend-panel');
+                    if (!panel || !panel.hidden) throw new Error('the colour key panel was not collapsed by default');
+
+                    // Picking a colour straight from the key overrides that
+                    // class immediately, with no trip through the Manager.
+                    const mathRow = rows.find((row) => row.dataset.key === 'h:HE222');
+                    if (!mathRow) throw new Error('the colour key had no entry for the second class');
+
+                    const picker = mathRow.querySelector('.lectio-subject-colours-legend__picker');
+                    picker.value = '#336699';
+                    picker.dispatchEvent(new Event('change', { bubbles: true }));
+
+                    if (fillOf('math-1') !== '#336699') {
+                        throw new Error(`picking a colour from the key did not override the class (${fillOf('math-1')})`);
+                    }
+                }
+
+                if (phase === 'legend-off') {
+                    if (document.getElementById('lectio-subject-colours-legend')) {
+                        throw new Error('the colour key stayed on screen with its setting turned off');
                     }
                 }
 

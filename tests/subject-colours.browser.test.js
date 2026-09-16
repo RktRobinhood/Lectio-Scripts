@@ -62,6 +62,15 @@ test('subject colours are learned from a repeating timetable and keep their own 
         // every class out to the same white block.
         const solarized = await runFixture('solarized');
         assert.match(solarized, /data-test-result="pass"/, solarized);
+
+        // The on-page colour key lists exactly the classes on screen, starts
+        // collapsed, and lets a class be recoloured directly from it.
+        const legend = await runFixture('legend');
+        assert.match(legend, /data-test-result="pass"/, legend);
+
+        // Turning the key off in settings removes it from the page entirely.
+        const legendOff = await runFixture('legend-off');
+        assert.match(legendOff, /data-test-result="pass"/, legendOff);
     } finally {
         await rm(profileDirectory, { recursive: true, force: true });
     }
