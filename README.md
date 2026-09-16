@@ -73,6 +73,7 @@ All modules are designed for Lectio and are intended to work across Lectio insta
 | **[Chairs Up](modules/Lectio-Chairs-Up.user.js)** | Marks a lesson when it is the **last booking of the day in that room**. | Teachers |
 | **[Schedule Summary](modules/Lectio-Schedule-Summary.user.js)** | Collapses the schedule's tall **week-information row** into a compact strip; hover to preview it or click to expand it. | Students and staff |
 | **[Unread Message Notifications](modules/Lectio-Unread-Message-Notifications.user.js)** | Shows an unread-message badge beside **Beskeder / Messages**. Currently limited to Lectio school `223`. | Students and staff at that school |
+| **[Subject Colours](modules/Lectio-Subject-Colours.user.js)** | Works out which classes are really yours from your own timetable and gives each one its own colour, keeping one-off activities in a separate muted spectrum. | Students and staff |
 | **[Lectio Theming](modules/Lectio-Theming.user.js)** | Applies a soft, translucent glass shell with **44 built-in colour schemes** (Catppuccin, Nord, Dracula, Cyberpunk, plus sports, social-app and Danish-landscape palettes), each with its own distinct background photo, or build your own: pick the key colours yourself, derive them from an **image or website URL**, and use **your own picture** as the background. | Students and staff |
 
 You can install one, several, or all of them, either through the Manager or by copying a file directly (see below).
@@ -98,6 +99,14 @@ For Lectio Theming, open the **Theme** dropdown and hover any option to preview 
 The **Background** section is independent of all of that. **Choose picture** puts a picture from your device behind Lectio whichever colour theme is selected; it is scaled down, stored in this browser only, and never uploaded. **Background tint** controls how much of the theme's page colour is laid over it — raise it if text is hard to read — and **Remove background picture** hands the selected theme its own background back. Large pictures are re-encoded smaller automatically, and if there is no room left in browser storage the module says so and keeps the background you already had.
 
 Unread Message Notifications includes a **Bubble size** setting from 75% to 175%. Its count text automatically switches between light and dark text as themes change so the badge remains readable.
+
+A hold that Lectio uses to mean everyone — **Alle Lærere**, **Alle 1i-elever** and the like — is never treated as one of your classes, however reliably it recurs, and neither is a block that lists more than three holds at once. Subject Colours has nothing to set up: it reads your own timetable, works out which holds keep coming back week after week, and gives each of those its own colour. Everything else on your schedule — assemblies, meetings, trips, a lesson you covered once — is deliberately kept out of that colour space and marked instead in a muted grey-toned spectrum with a broken edge line, so a glance separates "one of my classes" from "something else today" without having to read anything. Under **Colours** you can switch between filling a lesson block, marking only its leading edge, or both; set how strong the colours are; and turn the one-off marking off entirely. Under **Detection**, **What counts as a class** decides how much evidence a hold needs before it earns a colour, **Weeks to learn from** sets how much of your timetable is read in the background (0 means it only learns from pages you open yourself), and **Read my timetable again** starts a fresh scan. Every class it has found is listed under **Your classes** with a colour picker, so you can overrule any colour you don't like; **Reset chosen colours** hands them all back. The colours themselves are derived from whatever theme is active, so installing Lectio Theming or switching its scheme re-derives them to suit — a dark scheme gets deep colours with light text, a light one gets soft colours with dark text, and text is contrast-checked against its own block either way. If you would rather a colour you picked stayed exactly as you picked it, **Keep my colours exactly** stops the theme having any say in it: the colour and the edge line and the text that goes with it are all worked out from that one colour and stay put whichever scheme is running. It applies only to classes you have picked a colour for — everything else carries on following the theme. Text is still contrast-checked, because a colour nobody can read on is not what anyone is asking for.
+
+> [!NOTE]
+> A class needs to be seen in more than one week before it earns a colour, so a freshly installed Subject Colours has some learning to do. It does most of that in the background within a few seconds of opening your schedule; the class list in Settings is built when the module registers, so reopen **Settings** after a scan to see newly found classes.
+
+> [!TIP]
+> Already running **Lectio Farver**, **Lectio i farver** or **Lectio Colors++**? Both Subject Colours and Lectio Theming now leave any lesson block those extensions have coloured exactly as they left it, instead of painting over it. Lectio Theming used to overwrite them silently — that is fixed. You can keep using whichever you prefer; you just shouldn't expect two colouring extensions to agree about the same block.
 
 ### Manual: copy-paste a single module
 
@@ -508,6 +517,10 @@ Lectio Theming only contacts a palette-source URL when you press **Import**. Tha
 
 A picture you choose with **Choose image** or **Choose picture**, by contrast, never leaves the device at all: it is read by the page, resized in a canvas, and — for a background picture — kept in this browser's own storage for lectio.dk. Nothing uploads it, and clearing your browser's site data for Lectio removes it.
 
+### Subject Colours and your timetable
+
+Subject Colours learns from your own Lectio schedule pages, which it reads the same way your browser already does — a signed-in request to `www.lectio.dk` for your own timetable, a handful of weeks at a time, spaced out and capped. It contacts no other host, declares no `@connect` permission, and has no code path that sends anything anywhere. What it works out (your holds, how often each appears, and the colour assigned to each) is kept in this browser's storage for lectio.dk and nowhere else; clearing your site data for Lectio removes it, as does **Forget what was learned** in its settings. Set **Weeks to learn from** to 0 if you would rather it made no background requests at all and learned only from pages you open yourself.
+
 ### GitHub Issues are public
 
 Assume anything attached to an Issue can be seen publicly. Redact screenshots and diagnostic output before posting.
@@ -526,6 +539,8 @@ Lectio-Scripts/
 │   ├── Lectio-English-Mode.user.js
 │   ├── Lectio-Chairs-Up.user.js
 │   ├── Lectio-Schedule-Summary.user.js
+│   ├── Lectio-Subject-Colours.user.js
+│   ├── Lectio-Theming.user.js
 │   └── Lectio-Unread-Message-Notifications.user.js
 ├── assets/
 ├── .github/                         Issue templates

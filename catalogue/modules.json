@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-09-14T12:00:00Z",
+  "generatedAt": "2026-09-15T22:30:00Z",
   "modules": [
     {
       "id": "english-mode",
@@ -53,8 +53,19 @@
       "category": "Interface",
       "audience": ["student", "teacher"],
       "status": "experimental",
-      "version": "0.16.0",
+      "version": "0.17.0",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Theming.user.js",
+      "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues"
+    },
+    {
+      "id": "subject-colours",
+      "name": "Subject Colours",
+      "description": "Learns which classes are really yours from your own timetable and gives each one its own colour, with a separate muted spectrum for one-off activities like assemblies and meetings.",
+      "category": "Timetable",
+      "audience": ["student", "teacher"],
+      "status": "experimental",
+      "version": "0.2.0",
+      "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Subject-Colours.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues"
     }
   ]

@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio Subject Colours fixture</title>
+    <style>
+        /* Lectio Theming fades a lesson block's colours over 140ms, and a
+           computed style read mid-transition is the interpolated colour rather
+           than the one either module asked for. Nothing here is being measured
+           for its animation, so the fixture holds every colour still. */
+        *, *::before, *::after {
+            transition: none !important;
+            animation: none !important;
+        }
+
+        /* What Lectio itself paints for a lesson block without any module. */
+        .s2skemabrik {
+            background: #ffffff;
+            color: #000000;
+            display: block;
+            padding: 2px;
+        }
+    </style>
+    <script>
+        // Both modules are plain userscripts here; only Lectio Theming reaches
+        // for Tampermonkey's own API, and only for the Manager-side plumbing.
+        window.GM_getValue = (key, fallback) => fallback;
+        window.GM_setValue = () => {};
+        window.GM_xmlhttpRequest = () => {};
+
+        window.registrations = new Map();
+        window.addEventListener('lectio-module:register', (event) => {
+            window.registrations.set(event.detail.id, event.detail);
+        });
+
+        const phase = new URLSearchParams(location.search).get('phase') || 'first';
+
+        // The opening phase is the clean slate every later phase builds on.
+        if (phase === 'first') {
+            localStorage.clear();
+        }
+
+        // Background scanning is switched off: this fixture is about what the
+        // module learns from the pages it is actually shown.
+        localStorage.setItem('lectioSubjectColours.settings.v1', JSON.stringify({
+            enabled: true,
+            style: 'fill',
+            intensity: 100,
+            regularity: 'balanced',
+            scanWeeks: 0,
+            colourOther: true,
+            // The locked phase pins one class to a colour of its own and asks
+            // for it back exactly, under a dark theme it would otherwise be
+            // re-derived by.
+            lockColours: phase.startsWith('locked'),
+            overrides: phase.startsWith('locked') ? { 'h:HE111': '#7b1fa2' } : {}
+        }));
+
+        localStorage.setItem('lectioTheming.settings.v2', JSON.stringify({
+            enabled: true,
+            preset: (phase === 'dark' || phase === 'locked') ? 'catppuccin-mocha' : 'catppuccin-latte',
+            mode: (phase === 'dark' || phase === 'locked') ? 'dark' : 'light',
+            blur: false
+        }));
+    </script>
+</head>
+<body>
+    <main id="masterContent">
+        <table id="s_m_Content_Content_SkemaNyMedNavigation_skema_skematabel">
+            <tbody id="schedule-body">
+                <tr class="s2dayHeader"><td></td><td>Mandag</td><td>Tirsdag</td></tr>
+            </tbody>
+        </table>
+    </main>
+
+    <script>
+        // The schedule is built before either module loads, so both see it the
+        // way they would see a server-rendered Lectio page.
+        (() => {
+            const phase = new URLSearchParams(location.search).get('phase') || 'first';
+            const weeksBack = { first: 14, second: 7, dark: 7, foreign: 7, room: 21 }[phase] ?? 7;
+            const secondWeek = weeksBack !== 14;
+            const today = new Date();
+            const base = new Date(
+                today.getFullYear(),
+                today.getMonth(),
+                today.getDate() - weeksBack
+            );
+
+            const isoDate = (offset) => {
+                const day = new Date(base.getFullYear(), base.getMonth(), base.getDate() + offset);
+                return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
+            };
+            const shortDate = (offset) => {
+                const day = new Date(base.getFullYear(), base.getMonth(), base.getDate() + offset);
+                return `${day.getDate()}/${day.getMonth() + 1}-${day.getFullYear()}`;
+            };
+
+            const block = ({ id, holdId, holdName, title, dayOffset, time, cancelled, inlineStyle }) => {
+                const anchor = document.createElement('a');
+                anchor.id = id;
+                anchor.className = `s2skemabrik s2brik s2normal${cancelled ? ' s2cancelled' : ''}`;
+                anchor.setAttribute(
+                    'data-tooltip',
+                    [
+                        cancelled ? 'Aflyst!' : '',
+                        `${shortDate(dayOffset)} ${time}`,
+                        holdName ? `Hold: ${holdName}` : '',
+                        title || '',
+                        'Lærer: Matthew Pilley (MP)',
+                        'Lokale: 205'
+                    ].filter(Boolean).join('\n')
+                );
+
+                if (inlineStyle) anchor.setAttribute('style', inlineStyle);
+
+                if (holdId) {
+                    const span = document.createElement('span');
+                    span.setAttribute('data-lectiocontextcard', holdId);
+                    span.textContent = holdName;
+                    anchor.append(document.createTextNode(`${time} `), span);
+                } else {
+                    anchor.textContent = `${time} ${title}`;
+                }
+
+                return anchor;
+            };
+
+            const rows = [
+                // Two regular classes, each taught twice a week, every week.
+                { id: 'psyc-1', holdId: 'HE111', holdName: '1i Psyc HL', dayOffset: 1, time: '08:15 til 09:25' },
+                { id: 'psyc-2', holdId: 'HE111', holdName: '1i Psyc HL', dayOffset: 2, time: '09:40 til 10:50' },
+                { id: 'math-1', holdId: 'HE222', holdName: '2b Mat A', dayOffset: 1, time: '10:00 til 11:10' },
+                { id: 'math-2', holdId: 'HE222', holdName: '2b Mat A', dayOffset: 3, time: '11:20 til 12:30' },
+                // A hold seen once and never again: evidence of a stand-in
+                // lesson, not of a class of one's own.
+                ...(secondWeek ? [] : [
+                    { id: 'rare-1', holdId: 'HE999', holdName: '3z Bio', dayOffset: 2, time: '13:00 til 14:10' }
+                ]),
+                // Lectio's school-wide holds recur more reliably than any
+                // lesson, so they clear every threshold a class has to. They
+                // are still not this person's subjects. Names taken from a
+                // real teacher timetable.
+                { id: 'staff-1', holdId: 'HE777', holdName: 'Alle Laerere', dayOffset: 1, time: '07:45 til 08:10' },
+                { id: 'staff-2', holdId: 'HE777', holdName: 'Alle Laerere', dayOffset: 3, time: '07:45 til 08:10' },
+                { id: 'staff-3', holdId: 'HE777', holdName: 'Alle Laerere', dayOffset: 4, time: '07:45 til 08:10' },
+                // No hold at all: the assembly/meeting case.
+                { id: 'assembly-1', title: 'Fællessamling i festsalen', dayOffset: 1, time: '11:15 til 11:45' },
+                // A cancelled lesson must never be counted or coloured.
+                { id: 'cancelled-1', holdId: 'HE111', holdName: '1i Psyc HL', dayOffset: 4, time: '08:15 til 09:25', cancelled: true }
+            ];
+
+            if (phase === 'foreign') {
+                // What a third-party colouring extension leaves behind.
+                rows.push({
+                    id: 'foreign-1',
+                    holdId: 'HE222',
+                    holdName: '2b Mat A',
+                    dayOffset: 4,
+                    time: '14:20 til 15:30',
+                    inlineStyle: 'background-color: rgb(255, 0, 0);'
+                });
+            }
+
+            const body = document.getElementById('schedule-body');
+
+            // Lectio wears the lesson-block class decoratively too: an activity
+            // page's table-of-contents entry is a plain div carrying
+            // .s2skemabrik for the icon alone, with no tooltip behind it. It is
+            // not a lesson and must never be painted or learned from. Taken
+            // from the real markup of an activity front page.
+            const decoration = document.createElement('div');
+            decoration.id = 'decoration-1';
+            decoration.className = 'prepend-fonticon-activity s2skemabrik ';
+            document.body.appendChild(decoration);
+
+            for (const row of rows) {
+                const tr = document.createElement('tr');
+                const label = document.createElement('td');
+                const cell = document.createElement('td');
+                const container = document.createElement('div');
+
+                label.textContent = row.time;
+                cell.setAttribute('data-date', isoDate(row.dayOffset));
+                container.className = 's2skemabrikcontainer';
+                container.appendChild(block(row));
+                cell.appendChild(container);
+                tr.append(label, cell);
+                body.appendChild(tr);
+            }
+        })();
+    </script>
+    <script src="../../modules/Lectio-Theming.user.js"></script>
+    <script src="../../modules/Lectio-Subject-Colours.user.js"></script>
+    <script>
+        window.addEventListener('load', () => {
+            const result = document.createElement('pre');
+            result.id = 'test-result';
+
+            const phase = new URLSearchParams(location.search).get('phase') || 'first';
+            const kindOf = (id) => document.getElementById(id).getAttribute('data-lectio-subject');
+            const learned = () => JSON.parse(localStorage.getItem('lectioSubjectColours.schedule.v1.unknown') || '{"entries":{}}');
+            const fillOf = (id) => document.getElementById(id).style.getPropertyValue('--lectio-subject-fill').trim();
+            const paintedTriple = (id) => ['fill', 'line', 'text']
+                .map(part => document.getElementById(id).style.getPropertyValue(`--lectio-subject-${part}`).trim())
+                .join(' ');
+            const channel = (value) => {
+                const part = value / 255;
+                return part <= 0.04045 ? part / 12.92 : ((part + 0.055) / 1.055) ** 2.4;
+            };
+            const luminance = (colour) => {
+                const [red, green, blue] = colour.match(/[\d.]+/g).map(Number);
+                return channel(red) * 0.2126 + channel(green) * 0.7152 + channel(blue) * 0.0722;
+            };
+            const contrast = (a, b) => {
+                const first = luminance(a);
+                const second = luminance(b);
+                return (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
+            };
+
+            try {
+                const registration = window.registrations.get('subject-colours');
+                if (!registration) throw new Error('module did not register with the Manager');
+
+                // A cancelled lesson is never evidence and never coloured.
+                if (kindOf('cancelled-1') !== null) throw new Error('a cancelled lesson was coloured');
+                // An activity with no hold is never a class, in any phase.
+                if (kindOf('assembly-1') !== 'other') throw new Error('an assembly was not treated as a one-off');
+                // A hold that means everyone is never one of your classes,
+                // however faithfully it recurs.
+                if (kindOf('staff-1') !== 'other') throw new Error('a school-wide staff hold was coloured as a class');
+                // Decoration wearing the lesson-block class is not a lesson.
+                if (kindOf('decoration-1') !== null) throw new Error('a decorative .s2skemabrik was coloured as an activity');
+                if (JSON.stringify(learned().entries).includes('t:aktivitet')) {
+                    throw new Error('a decorative .s2skemabrik was learned from');
+                }
+
+                if (phase === 'first') {
+                    if (kindOf('psyc-1') !== 'other') throw new Error('one week of evidence was enough to call a hold a class');
+                    if (registration.settingsSchema.some(control => control.key.startsWith('class:'))) {
+                        throw new Error('classes were offered for recolouring before they were established');
+                    }
+
+                    result.dataset.testResult = 'pass';
+                    result.textContent = 'PASS';
+                    document.body.appendChild(result);
+                    return;
+                }
+
+                // Every later phase runs on the same browser profile, so the
+                // first phase's week is still remembered: a second week of the
+                // same holds is what turns them into classes.
+                if (kindOf('psyc-1') !== 'class') throw new Error('a twice-weekly hold was not recognised as a class');
+                if (kindOf('psyc-2') !== 'class') throw new Error('a class was coloured inconsistently within a week');
+                if (kindOf('math-1') !== 'class') throw new Error('a second twice-weekly hold was not recognised as a class');
+                if (fillOf('psyc-1') !== fillOf('psyc-2')) throw new Error('the same class got two different colours');
+                if (fillOf('psyc-1') === fillOf('math-1')) throw new Error('two different classes share one colour');
+                if (fillOf('math-1') === fillOf('assembly-1')) throw new Error('a one-off shares the class colour space');
+
+                const classColours = registration.settingsSchema.filter(control => control.key.startsWith('class:'));
+                if (classColours.length !== 2) throw new Error('the Manager was not offered one colour control per class');
+                if (classColours.some(control => control.type !== 'color' || control.section !== 'Your classes')) {
+                    throw new Error('class colour controls are not grouped colour pickers');
+                }
+                if (classColours.some(control => !/^#[0-9a-f]{6}$/i.test(registration.currentValues[control.key] || ''))) {
+                    throw new Error('a class colour was not reported to the Manager as #rrggbb');
+                }
+
+                const lesson = document.getElementById('psyc-1');
+                const lessonStyle = getComputedStyle(lesson);
+                const painted = lessonStyle.backgroundColor;
+                const expected = fillOf('psyc-1')
+                    .slice(1)
+                    .match(/../g)
+                    .map(part => Number.parseInt(part, 16));
+
+                // Lectio Theming paints .s2skemabrik with an !important rule of
+                // its own, so the block actually being painted the subject
+                // colour is the proof that the two compose rather than fight.
+                if (painted !== `rgb(${expected.join(', ')})`) {
+                    throw new Error(`the subject colour did not reach the lesson block (${painted})`);
+                }
+                if (contrast(painted, lessonStyle.color) < 4.5) {
+                    throw new Error('lesson text is not readable on its subject colour');
+                }
+
+                if (phase === 'dark') {
+                    // The same class, under a dark theme, has to come back dark:
+                    // the palette follows the theme rather than being fixed.
+                    if (luminance(painted) > 0.25) throw new Error('a dark theme still produced a light subject colour');
+                    const saved = JSON.parse(localStorage.getItem('lectio-subject-colours-light-fill') || 'null');
+                    if (saved && saved === fillOf('psyc-1')) {
+                        throw new Error('the subject colour did not change with the theme');
+                    }
+                } else if (phase.startsWith('locked')) {
+                    if (fillOf('psyc-1') !== '#7b1fa2') {
+                        throw new Error(`a locked colour was not used as picked (${fillOf('psyc-1')})`);
+                    }
+                    if (painted !== 'rgb(123, 31, 162)') {
+                        throw new Error(`a locked colour did not reach the block (${painted})`);
+                    }
+                    // Locked is not a licence to be unreadable.
+                    if (contrast(painted, lessonStyle.color) < 4.5) {
+                        throw new Error('a locked colour left its text unreadable');
+                    }
+
+                    // The lock's actual promise. The picked fill was always kept
+                    // as written; what moved with the theme was everything paired
+                    // with it, so the test is that the whole triple is identical
+                    // under a light theme and a dark one.
+                    if (phase === 'locked-light') {
+                        localStorage.setItem('lectio-subject-colours-locked', paintedTriple('psyc-1'));
+                    } else {
+                        const saved = localStorage.getItem('lectio-subject-colours-locked');
+                        if (!saved) throw new Error('the light locked phase recorded nothing to compare against');
+                        if (saved !== paintedTriple('psyc-1')) {
+                            throw new Error(`a locked colour changed with the theme (${saved} -> ${paintedTriple('psyc-1')})`);
+                        }
+                        // A class nobody picked a colour for still follows the theme.
+                        const unpicked = `rgb(${fillOf('math-1').slice(1).match(/../g).map(part => parseInt(part, 16)).join(', ')})`;
+                        if (luminance(unpicked) > 0.25) {
+                            throw new Error(`the lock stopped an unpicked class following the theme (${unpicked})`);
+                        }
+                    }
+                } else {
+                    if (luminance(painted) < 0.4) throw new Error('a light theme produced a dark subject colour');
+                    localStorage.setItem('lectio-subject-colours-light-fill', JSON.stringify(fillOf('psyc-1')));
+                }
+
+                if (phase === 'room') {
+                    // Identity still works on somebody else's page — these are
+                    // the same holds — but a room's timetable is never evidence
+                    // about how often they are yours.
+                    const weeksCounted = Object.keys(learned().entries['h:HE111'].weekCounts).length;
+                    if (weeksCounted !== 2) {
+                        throw new Error(`a room's timetable was counted as evidence (${weeksCounted} weeks)`);
+                    }
+                }
+
+                if (phase === 'foreign') {
+                    // A block another extension has already coloured is left
+                    // exactly as that extension left it.
+                    const foreign = document.getElementById('foreign-1');
+                    if (foreign.getAttribute('data-lectio-subject') !== null) {
+                        throw new Error('a block coloured by another extension was overwritten');
+                    }
+                    if (getComputedStyle(foreign).backgroundColor !== 'rgb(255, 0, 0)') {
+                        throw new Error('another extension\'s lesson colour did not survive');
+                    }
+                }
+
+                result.dataset.testResult = 'pass';
+                result.textContent = 'PASS';
+                document.body.appendChild(result);
+            } catch (error) {
+                result.dataset.testResult = 'fail';
+                result.textContent = `FAIL: ${error.message}`;
+                document.body.appendChild(result);
+            }
+        });
+    </script>
+</body>
+</html>

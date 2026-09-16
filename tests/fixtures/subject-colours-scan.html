@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio Subject Colours scan fixture</title>
+    <script>
+        // The module only scans when it is on a real school path and can see a
+        // lesson block, so this fixture is served from /lectio/223/ by the
+        // test's own server rather than from a file:// URL.
+        localStorage.clear();
+        localStorage.setItem('lectioSubjectColours.settings.v1', JSON.stringify({
+            enabled: true,
+            style: 'fill',
+            intensity: 100,
+            regularity: 'balanced',
+            scanWeeks: 4,
+            colourOther: true,
+            overrides: {}
+        }));
+    </script>
+</head>
+<body>
+    <table>
+        <tr class="s2dayHeader"><th>Fixture week</th></tr>
+        <tr>
+            <td data-date="2026-09-15">
+                <a class="s2skemabrik s2brik s2normal" data-tooltip="15/9-2026 09:40 til 10:50&#10;Hold: 1i Psyc HL">
+                    <span data-lectiocontextcard="HE111">1i Psyc HL</span>
+                </a>
+            </td>
+        </tr>
+    </table>
+
+    <script src="/modules/Lectio-Subject-Colours.user.js"></script>
+    <script>
+        // The scan starts on a timer and then walks its weeks, so what the
+        // module ended up believing is posted back once it has settled. The
+        // test does the judging: it is the side that knows which week it
+        // answered with an error page.
+        setTimeout(() => {
+            const store = localStorage.getItem('lectioSubjectColours.schedule.v1.223');
+            fetch('/verdict', { method: 'POST', body: store || 'null' });
+        }, 6000);
+    </script>
+</body>
+</html>
