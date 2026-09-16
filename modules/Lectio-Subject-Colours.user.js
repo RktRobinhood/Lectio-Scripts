@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Subject Colours
 // @namespace    https://www.lectio.dk/
-// @version      0.1.0
+// @version      0.1.1
 // @description  Learns which classes are actually yours from your own timetable and gives each one its own colour, with a separate muted spectrum for one-off activities like assemblies and meetings.
 // @match        https://www.lectio.dk/lectio/*
 // @grant        none
@@ -15,7 +15,7 @@
 
     const MODULE_ID = 'subject-colours';
     const MODULE_NAME = 'Lectio - Subject Colours';
-    const MODULE_VERSION = '0.1.0';
+    const MODULE_VERSION = '0.1.1';
     const LOG = '[Lectio Subject Colours]';
     const STYLE_ID = 'lectio-subject-colours-styles';
 
