@@ -42,6 +42,15 @@
 
         // Background scanning is switched off: this fixture is about what the
         // module learns from the pages it is actually shown.
+        //
+        // Real usage only ever rewrites the one setting a person just
+        // changed, so a theme the module froze earlier survives into the next
+        // page load. This fixture instead rewrites the whole settings object
+        // per phase, so it carries `lockedTheme` forward by hand across the
+        // two locked phases to model that same persistence, the way it would
+        // actually work with the toggle switched on once and left alone.
+        const previousSettings = JSON.parse(localStorage.getItem('lectioSubjectColours.settings.v1') || 'null');
+        const lockColours = phase.startsWith('locked');
         localStorage.setItem('lectioSubjectColours.settings.v1', JSON.stringify({
             enabled: true,
             style: 'fill',
@@ -52,8 +61,9 @@
             // The locked phase pins one class to a colour of its own and asks
             // for it back exactly, under a dark theme it would otherwise be
             // re-derived by.
-            lockColours: phase.startsWith('locked'),
-            overrides: phase.startsWith('locked') ? { 'h:HE111': '#7b1fa2' } : {}
+            lockColours,
+            lockedTheme: lockColours && previousSettings?.lockColours ? previousSettings.lockedTheme : null,
+            overrides: lockColours ? { 'h:HE111': '#7b1fa2' } : {}
         }));
 
         localStorage.setItem('lectioTheming.settings.v2', JSON.stringify({
@@ -310,16 +320,19 @@
                     // under a light theme and a dark one.
                     if (phase === 'locked-light') {
                         localStorage.setItem('lectio-subject-colours-locked', paintedTriple('psyc-1'));
+                        localStorage.setItem('lectio-subject-colours-locked-unpicked', fillOf('math-1'));
                     } else {
                         const saved = localStorage.getItem('lectio-subject-colours-locked');
                         if (!saved) throw new Error('the light locked phase recorded nothing to compare against');
                         if (saved !== paintedTriple('psyc-1')) {
                             throw new Error(`a locked colour changed with the theme (${saved} -> ${paintedTriple('psyc-1')})`);
                         }
-                        // A class nobody picked a colour for still follows the theme.
-                        const unpicked = `rgb(${fillOf('math-1').slice(1).match(/../g).map(part => parseInt(part, 16)).join(', ')})`;
-                        if (luminance(unpicked) > 0.25) {
-                            throw new Error(`the lock stopped an unpicked class following the theme (${unpicked})`);
+                        // The lock holds every class steady, not only the ones
+                        // someone has hand-picked a colour for.
+                        const savedUnpicked = localStorage.getItem('lectio-subject-colours-locked-unpicked');
+                        if (!savedUnpicked) throw new Error('the light locked phase recorded no unpicked colour to compare against');
+                        if (savedUnpicked !== fillOf('math-1')) {
+                            throw new Error(`the lock let an unpicked class follow the theme (${savedUnpicked} -> ${fillOf('math-1')})`);
                         }
                     }
                 } else {

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Subject Colours
 // @namespace    https://www.lectio.dk/
-// @version      0.2.0
+// @version      0.2.1
 // @description  Learns which classes are actually yours from your own timetable and gives each one its own colour, with a separate muted spectrum for one-off activities like assemblies and meetings.
 // @match        https://www.lectio.dk/lectio/*
 // @grant        none
@@ -15,7 +15,7 @@
 
     const MODULE_ID = 'subject-colours';
     const MODULE_NAME = 'Lectio - Subject Colours';
-    const MODULE_VERSION = '0.2.0';
+    const MODULE_VERSION = '0.2.1';
     const LOG = '[Lectio Subject Colours]';
     const STYLE_ID = 'lectio-subject-colours-styles';
 
@@ -75,6 +75,7 @@
         scanWeeks: 8,
         colourOther: true,
         lockColours: false,
+        lockedTheme: null,
         overrides: {}
     });
 
@@ -116,6 +117,11 @@
     let settings = loadSettings();
     let store = loadStore();
     let theme = readTheme();
+    // A page can load with the lock already on from a previous session (or
+    // from settings written before this freeze existed) and no theme ever
+    // captured for it. Catching that here, once, means the freeze always has
+    // something to hold onto by the time anything gets painted.
+    ensureLockedTheme();
     let previewStyle = null;
     let scanning = false;
     let applyHandle = 0;
@@ -154,8 +160,19 @@
             lockColours: typeof saved.lockColours === 'boolean'
                 ? saved.lockColours
                 : DEFAULT_SETTINGS.lockColours,
+            lockedTheme: isValidLockedTheme(saved.lockedTheme) ? saved.lockedTheme : DEFAULT_SETTINGS.lockedTheme,
             overrides
         };
+    }
+
+    function isValidLockedTheme(value) {
+        return Boolean(value)
+            && typeof value === 'object'
+            && typeof value.dark === 'boolean'
+            && Number.isFinite(value.accentHue)
+            && Number.isFinite(value.mutedHue)
+            && isHexColour(value.bg) && isHexColour(value.text)
+            && isHexColour(value.accent) && isHexColour(value.muted);
     }
 
     function saveSettings() {
@@ -703,15 +720,41 @@
     // number of classes, and for every prefix of that sequence — which is what
     // makes a stable slot number safe to hand out before anyone knows how many
     // classes there will end up being.
+    // Locking freezes the hue every auto-derived colour is built from, not
+    // just the ones someone has hand-picked: the lock is against the theme
+    // moving colours out from under a class, and a class nobody has picked a
+    // colour of their own for is otherwise still riding the live theme.
+    //
+    // Lectio is a page-at-a-time site, not a single page app: almost every
+    // click reloads this module from scratch. Freezing the theme only in
+    // memory would mean the very next navigation re-derives it from whatever
+    // theme happens to be active by then — silently re-opening the door the
+    // lock was meant to close. Saving it here is what makes the freeze
+    // outlive the page it was set on.
+    function ensureLockedTheme() {
+        if (settings.lockColours && !settings.lockedTheme) {
+            settings.lockedTheme = { ...theme };
+            saveSettings();
+        }
+    }
+
+    // What every colour in this module is actually built from: the live
+    // theme normally, or the one frozen the moment the lock went on, for as
+    // long as it stays on.
+    function effectiveTheme() {
+        return settings.lockColours && settings.lockedTheme ? settings.lockedTheme : theme;
+    }
+
     function classHue(slot) {
-        return (theme.accentHue + 40 + slot * 137.508) % 360;
+        return (effectiveTheme().accentHue + 40 + slot * 137.508) % 360;
     }
 
     function otherHue(slot) {
-        return (theme.mutedHue + ((slot % 5) - 2) * 14 + 360) % 360;
+        return (effectiveTheme().mutedHue + ((slot % 5) - 2) * 14 + 360) % 360;
     }
 
     function paletteFor(key, kind) {
+        const activeTheme = effectiveTheme();
         const intensity = settings.intensity / 100;
         const slot = slotFor(key, kind);
         const override = settings.overrides[key];
@@ -720,16 +763,16 @@
 
         if (kind === 'class') {
             const hue = classHue(slot);
-            fill = theme.dark
+            fill = activeTheme.dark
                 ? hslHex(hue, clamp(38 * intensity, 12, 70), clamp(24 + (intensity - 1) * 10, 14, 40))
                 : hslHex(hue, clamp(55 * intensity, 16, 92), clamp(88 - (intensity - 1) * 14, 64, 95));
-            line = hslHex(hue, clamp(64 * intensity, 20, 96), theme.dark ? 60 : 42);
+            line = hslHex(hue, clamp(64 * intensity, 20, 96), activeTheme.dark ? 60 : 42);
         } else {
             const hue = otherHue(slot);
-            fill = theme.dark
+            fill = activeTheme.dark
                 ? hslHex(hue, clamp(9 * intensity, 0, 22), 22)
                 : hslHex(hue, clamp(12 * intensity, 0, 26), 92);
-            line = hslHex(hue, clamp(18 * intensity, 0, 34), theme.dark ? 48 : 62);
+            line = hslHex(hue, clamp(18 * intensity, 0, 34), activeTheme.dark ? 48 : 62);
         }
 
         const chosen = isHexColour(override);
@@ -745,7 +788,7 @@
             line = locked
                 ? hslHex(hue, clamp(saturation + 18, 18, 96),
                     clamp(lightness < 50 ? lightness + 28 : lightness - 28, 0, 100))
-                : hslHex(hue, clamp(saturation + 18, 18, 96), theme.dark ? 62 : 40);
+                : hslHex(hue, clamp(saturation + 18, 18, 96), activeTheme.dark ? 62 : 40);
         }
 
         // The theme's own text colour is kept wherever it can be read, because
@@ -753,12 +796,12 @@
         // Only when it cannot is the block's own fill moved out of the way —
         // and never when the fill is a colour someone picked by hand, where the
         // text is the only side of the pair this module still gets to choose.
-        let text = theme.text;
+        let text = activeTheme.text;
         let guard = 0;
 
         while (!chosen && contrastRatio(text, fill) < 4.5 && guard < 10) {
             const [hue, saturation, lightness] = rgbToHsl(parseColour(fill));
-            fill = hslHex(hue, saturation, clamp(lightness + (theme.dark ? -5 : 5), 0, 100));
+            fill = hslHex(hue, saturation, clamp(lightness + (activeTheme.dark ? -5 : 5), 0, 100));
             guard += 1;
         }
 
@@ -1133,8 +1176,8 @@
                     type: 'toggle',
                     label: 'Keep my colours exactly',
                     section: 'Your classes',
-                    description: 'Use the colours you pick as they are, instead of tuning them to the current theme. '
-                        + 'Classes you have not picked a colour for still follow the theme.'
+                    description: 'Freeze every class colour, picked or not, so switching Lectio Theming\'s colour scheme '
+                        + 'never reshuffles them. You can still change a class\'s colour by hand at any time.'
                 }, {
                     key: 'resetColours',
                     type: 'button',
@@ -1206,6 +1249,11 @@
             settings.colourOther = value;
         } else if (key === 'lockColours' && typeof value === 'boolean') {
             settings.lockColours = value;
+            // Turning the lock off drops the freeze, so a later lock starts
+            // from whatever the theme looks like then rather than a stale
+            // reading from last time; turning it on captures a fresh one.
+            settings.lockedTheme = null;
+            ensureLockedTheme();
         } else if (key === 'regularity' && hasOption(REGULARITY_OPTIONS, value)) {
             settings.regularity = value;
         } else if (key === 'scanWeeks') {
