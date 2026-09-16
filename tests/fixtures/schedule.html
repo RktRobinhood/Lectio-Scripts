@@ -73,8 +73,8 @@
                 if (schemaByKey.hoverPreview?.type !== 'toggle') throw new Error('hover-preview setting is missing');
                 if (schemaByKey.initialState?.type !== 'select') throw new Error('initial-state setting is missing');
                 if (!styleText.includes('@media (pointer: coarse)')) throw new Error('touch target sizing is missing');
-                if (!styleText.includes('[data-hover-preview="true"]:not(.is-expanded):hover')) {
-                    throw new Error('pointer hover is not gated by the hover-preview setting');
+                if (!styleText.includes('[data-hover-preview="true"][data-hover-armed="true"]:not(.is-expanded):hover')) {
+                    throw new Error('pointer hover is not gated by the hover-preview setting and the hover-armed state');
                 }
                 if (parseFloat(availableTeamsStyle.width) > 20 || parseFloat(availableTeamsStyle.height) > 20) {
                     throw new Error('schedule checkbox was stretched by theming');
@@ -99,11 +99,16 @@
                     if (toggle.getAttribute('aria-expanded') !== 'true') throw new Error('restored expanded state is not announced');
 
                     toggle.click();
-                    if (!informationRow.hidden) throw new Error('click-to-collapse stopped working with hover preview disabled');
+                    if (informationRow.classList.contains('lectio-schedule-summary__info--visible')) {
+                        throw new Error('click-to-collapse stopped working with hover preview disabled');
+                    }
                     if (toggle.getAttribute('aria-expanded') !== 'false') throw new Error('collapsed state is not announced');
 
                     toggle.click();
                     if (informationRow.hidden) throw new Error('click-to-expand stopped working with hover preview disabled');
+                    if (!informationRow.classList.contains('lectio-schedule-summary__info--visible')) {
+                        throw new Error('click-to-expand did not start the reveal animation');
+                    }
                     if (toggle.getAttribute('aria-expanded') !== 'true') throw new Error('expanded state is not announced');
 
                     result.dataset.testResult = 'pass';
@@ -117,6 +122,23 @@
                 if (registration.currentValues.stripSize !== 'compact') throw new Error('compact is not the default strip size');
                 if (registration.currentValues.hoverPreview !== true) throw new Error('hover preview is not enabled by default');
                 if (registration.currentValues.initialState !== 'collapsed') throw new Error('collapsed is not the default initial state');
+
+                if (summaryRow.dataset.hoverArmed !== 'true') throw new Error('hover preview is not armed by default');
+                toggle.click();
+                if (toggle.getAttribute('aria-expanded') !== 'true') throw new Error('click did not expand the tray');
+                if (summaryRow.dataset.hoverArmed !== 'true') throw new Error('hover preview should stay armed while expanding');
+                toggle.click();
+                if (toggle.getAttribute('aria-expanded') !== 'false') throw new Error('click did not collapse the tray');
+                if (informationRow.classList.contains('lectio-schedule-summary__info--visible')) {
+                    throw new Error('click-to-close did not start the collapse animation');
+                }
+                if (summaryRow.dataset.hoverArmed !== 'false') {
+                    throw new Error('hover preview was not disarmed on click-to-close, so it can pop back up under the pointer');
+                }
+                summaryRow.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }));
+                if (summaryRow.dataset.hoverArmed !== 'true') {
+                    throw new Error('hover preview did not re-arm once the pointer actually left the tray');
+                }
 
                 const compactHeight = parseFloat(getComputedStyle(toggle).minHeight);
                 if (compactHeight > 24) throw new Error('default summary control is too tall');
@@ -141,7 +163,7 @@
                 if (summaryRow.dataset.hoverPreview !== 'false') throw new Error('hover preview was not disabled immediately');
 
                 toggle.focus();
-                if (getComputedStyle(tooltip).display === 'none') throw new Error('keyboard preview was lost when hover preview was disabled');
+                if (parseFloat(getComputedStyle(tooltip).opacity) === 0) throw new Error('keyboard preview was lost when hover preview was disabled');
                 const originalInformationCell = informationRow.querySelector('td:nth-child(2)');
                 const tooltipFontSize = parseFloat(getComputedStyle(tooltip).fontSize);
                 const originalFontSize = parseFloat(getComputedStyle(originalInformationCell).fontSize);

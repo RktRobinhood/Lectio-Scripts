@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Schedule Summary
 // @namespace    https://www.lectio.dk/
-// @version      0.2.0
+// @version      0.2.1
 // @description  Collapses the schedule's week information into a compact, previewable summary strip.
 // @match        https://www.lectio.dk/lectio/*/SkemaNy.aspx*
 // @grant        none
@@ -15,7 +15,7 @@
 
     const MODULE_ID = 'schedule-summary';
     const MODULE_NAME = 'Lectio - Schedule Summary';
-    const MODULE_VERSION = '0.2.0';
+    const MODULE_VERSION = '0.2.1';
     const STYLE_ID = 'lectio-schedule-summary-styles';
     const ENHANCED_ATTRIBUTE = 'data-lectio-schedule-summary';
     const SETTINGS_KEY = 'lectioScheduleSummary.settings.v1';
@@ -33,8 +33,10 @@
         hoverPreview: true,
         initialState: 'collapsed'
     });
+    const INFO_ANIMATION_MS = 160;
     const lifecycle = new AbortController();
     let settings = loadSettings();
+    let collapseTimeoutId = null;
 
     function announce() {
         window.dispatchEvent(new CustomEvent('lectio-module:register', {
@@ -103,7 +105,7 @@
         return options.some(option => option.value === value);
     }
 
-    function setExpanded(summaryRow, informationRow, expanded) {
+    function setExpanded(summaryRow, informationRow, expanded, { animate = true } = {}) {
         const toggle = summaryRow?.querySelector('.lectio-schedule-summary__toggle');
         const chevron = summaryRow?.querySelector('.lectio-schedule-summary__chevron');
         if (!summaryRow || !informationRow || !toggle || !chevron) return;
@@ -114,9 +116,33 @@
             'aria-label',
             `${expanded ? localizedLabels.hide : localizedLabels.show} ${localizedLabels.summary.toLowerCase()}`
         );
-        informationRow.hidden = !expanded;
         summaryRow.classList.toggle('is-expanded', expanded);
         chevron.textContent = expanded ? '▴' : '▾';
+
+        if (collapseTimeoutId !== null) {
+            window.clearTimeout(collapseTimeoutId);
+            collapseTimeoutId = null;
+        }
+
+        if (!animate) {
+            informationRow.hidden = !expanded;
+            informationRow.classList.toggle('lectio-schedule-summary__info--visible', expanded);
+            return;
+        }
+
+        if (expanded) {
+            informationRow.hidden = false;
+            // Force a reflow so the browser registers the collapsed state
+            // before the visible class is added, letting the fade-in run.
+            void informationRow.offsetHeight;
+            informationRow.classList.add('lectio-schedule-summary__info--visible');
+        } else {
+            informationRow.classList.remove('lectio-schedule-summary__info--visible');
+            collapseTimeoutId = window.setTimeout(() => {
+                informationRow.hidden = true;
+                collapseTimeoutId = null;
+            }, INFO_ANIMATION_MS);
+        }
     }
 
     function applyDisplaySettings() {
@@ -130,7 +156,7 @@
     function applyInitialState() {
         const informationRow = document.querySelector(`[${ENHANCED_ATTRIBUTE}]`);
         const summaryRow = document.querySelector('.lectio-schedule-summary__row');
-        setExpanded(summaryRow, informationRow, settings.initialState === 'expanded');
+        setExpanded(summaryRow, informationRow, settings.initialState === 'expanded', { animate: false });
     }
 
     function handleSetting(event) {
@@ -333,23 +359,29 @@
                 border-radius: max(4px, var(--lectio-theme-radius, 10px));
                 box-shadow: 0 10px 28px color-mix(in srgb, var(--lectio-theme-muted, #5e6870) 28%, transparent);
                 color: var(--lectio-theme-text, #10201e);
-                display: none;
+                display: grid;
                 font-size: 80%;
                 gap: 10px;
+                grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
                 left: 0;
                 line-height: 1.2;
+                opacity: 0;
                 padding: 10px;
+                pointer-events: none;
                 position: absolute;
                 right: 0;
                 text-align: left;
                 top: calc(100% + 4px);
+                transform: translateY(-4px);
+                transition: opacity 140ms ease, transform 140ms ease;
                 z-index: 1000;
             }
 
-            .lectio-schedule-summary__row[data-hover-preview="true"]:not(.is-expanded):hover .lectio-schedule-summary__tooltip,
+            .lectio-schedule-summary__row[data-hover-preview="true"][data-hover-armed="true"]:not(.is-expanded):hover .lectio-schedule-summary__tooltip,
             .lectio-schedule-summary__row:not(.is-expanded):focus-within .lectio-schedule-summary__tooltip {
-                display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+                opacity: 1;
+                pointer-events: auto;
+                transform: translateY(0);
             }
 
             .lectio-schedule-summary__tooltip section {
@@ -380,6 +412,24 @@
                 .lectio-schedule-summary__tooltip {
                     max-height: 60vh;
                     overflow: auto;
+                }
+            }
+
+            tr[${ENHANCED_ATTRIBUTE}] {
+                opacity: 0;
+                transform: translateY(-6px);
+                transition: opacity ${INFO_ANIMATION_MS}ms ease, transform ${INFO_ANIMATION_MS}ms ease;
+            }
+
+            tr[${ENHANCED_ATTRIBUTE}].lectio-schedule-summary__info--visible {
+                opacity: 1;
+                transform: translateY(0);
+            }
+
+            @media (prefers-reduced-motion: reduce) {
+                .lectio-schedule-summary__tooltip,
+                tr[${ENHANCED_ATTRIBUTE}] {
+                    transition: none;
                 }
             }
         `;
@@ -425,12 +475,22 @@
         summaryRow.appendChild(summaryCell);
         informationRow.parentNode.insertBefore(summaryRow, informationRow);
         informationRow.setAttribute(ENHANCED_ATTRIBUTE, 'true');
+        summaryRow.dataset.hoverArmed = 'true';
         applyDisplaySettings();
-        setExpanded(summaryRow, informationRow, settings.initialState === 'expanded');
+        setExpanded(summaryRow, informationRow, settings.initialState === 'expanded', { animate: false });
 
         toggle.addEventListener('click', () => {
             const expanded = toggle.getAttribute('aria-expanded') === 'true';
-            setExpanded(summaryRow, informationRow, !expanded);
+            const nextExpanded = !expanded;
+            // Disarm the hover preview on close so it doesn't pop back up
+            // while the pointer is still resting on the toggle; re-armed
+            // below once the pointer actually leaves and comes back.
+            summaryRow.dataset.hoverArmed = String(nextExpanded);
+            setExpanded(summaryRow, informationRow, nextExpanded);
+        }, { signal: lifecycle.signal });
+
+        summaryRow.addEventListener('mouseleave', () => {
+            summaryRow.dataset.hoverArmed = 'true';
         }, { signal: lifecycle.signal });
     }
 
