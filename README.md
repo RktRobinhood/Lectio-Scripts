@@ -38,6 +38,7 @@ They run locally in your browser while you use Lectio. Install only the modules 
 - caches the catalogue locally and refreshes it automatically at most once every 24 hours, with a manual refresh button whenever you want the latest list,
 - opens on a compact **Installed** tab, with a counted **Available** tab for discovering modules you have not installed yet; its audience and category filters narrow only that available set, and an installed module never appears in both,
 - sorts either tab by Category or Name immediately, without interrupting navigation,
+- explains a setting when you click the small **ⓘ** next to it, instead of always showing that text, so a module's settings panel doesn't read as more overwhelming than it needs to; and keeps a settings group most people will never need — such as Lectio Theming's **Custom palette** — collapsed behind a click, so the built-in themes stay what you see first,
 - has one **wrench button** in the header that opens Tampermonkey's own dashboard directly, for disabling, updating, or removing any script — since that dashboard already lists everything installed, there's no need for a separate button per module,
 - has a **Report a bug or idea** link at the bottom of the panel, straight to this repository's GitHub Issue templates.
 

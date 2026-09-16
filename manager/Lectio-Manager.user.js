@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.13.1
+// @version      1.13.2
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules from one small gear panel.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
@@ -1074,9 +1074,38 @@
         }
     }
 
+    // A section renders collapsed behind a click when every control placed in
+    // it opts in with `advanced: true` — for settings (like a custom colour
+    // palette) most people should never need, so the panel doesn't read as
+    // more overwhelming than the system defaults most people actually use.
+    function findAdvancedSections(schema) {
+        const grouped = new Map();
+
+        for (const control of schema) {
+            if (!control || !isNonEmptyString(control.key) || !isNonEmptyString(control.type)) {
+                continue;
+            }
+
+            const sectionName = isNonEmptyString(control.section) ? control.section.trim() : '';
+            if (!sectionName) continue;
+
+            if (!grouped.has(sectionName)) grouped.set(sectionName, []);
+            grouped.get(sectionName).push(control);
+        }
+
+        const advanced = new Set();
+        for (const [sectionName, controls] of grouped) {
+            if (controls.every((control) => control.advanced === true)) {
+                advanced.add(sectionName);
+            }
+        }
+        return advanced;
+    }
+
     function renderSettingsControls(container, module, registration) {
         container.innerHTML = '';
         const sections = new Map();
+        const advancedSections = findAdvancedSections(registration.settingsSchema);
 
         for (const control of registration.settingsSchema) {
             if (!control || !isNonEmptyString(control.key) || !isNonEmptyString(control.type)) {
@@ -1087,11 +1116,12 @@
             let section = sections.get(sectionName);
 
             if (!section) {
-                section = document.createElement('section');
+                const isAdvanced = sectionName && advancedSections.has(sectionName);
+                section = document.createElement(isAdvanced ? 'details' : 'section');
                 section.className = 'lectio-manager-settings-section';
 
                 if (sectionName) {
-                    const heading = document.createElement('h3');
+                    const heading = document.createElement(isAdvanced ? 'summary' : 'h3');
                     heading.className = 'lectio-manager-settings-section-heading';
                     heading.textContent = sectionName;
                     section.appendChild(heading);
@@ -1110,15 +1140,38 @@
             const copy = document.createElement('div');
             copy.className = 'lectio-manager-setting-copy';
 
+            const labelRow = document.createElement('div');
+            labelRow.className = 'lectio-manager-setting-label-row';
+
             const label = document.createElement('label');
             label.className = 'lectio-manager-setting-label';
             label.textContent = control.label || control.key;
-            copy.appendChild(label);
+            labelRow.appendChild(label);
+            copy.appendChild(labelRow);
 
             if (isNonEmptyString(control.description)) {
+                const descriptionId = `lectio-manager-setting-desc-${module.id}-${control.key}`
+                    .replace(/[^a-zA-Z0-9_-]/g, '-');
+
                 const description = document.createElement('span');
+                description.id = descriptionId;
                 description.className = 'lectio-manager-setting-description';
                 description.textContent = control.description;
+                description.hidden = true;
+
+                const infoBtn = document.createElement('button');
+                infoBtn.type = 'button';
+                infoBtn.className = 'lectio-manager-setting-info';
+                infoBtn.setAttribute('aria-expanded', 'false');
+                infoBtn.setAttribute('aria-controls', descriptionId);
+                infoBtn.setAttribute('aria-label', `What does “${control.label || control.key}” do?`);
+                infoBtn.innerHTML = helpSvg();
+                infoBtn.addEventListener('click', () => {
+                    const expanded = infoBtn.getAttribute('aria-expanded') === 'true';
+                    infoBtn.setAttribute('aria-expanded', String(!expanded));
+                    description.hidden = expanded;
+                });
+                labelRow.appendChild(infoBtn);
                 copy.appendChild(description);
             }
 
@@ -2100,6 +2153,52 @@
                 font-weight: 800;
                 letter-spacing: .07em;
                 text-transform: uppercase;
+            }
+
+            summary.lectio-manager-settings-section-heading {
+                cursor: pointer;
+                user-select: none;
+            }
+
+            summary.lectio-manager-settings-section-heading::-webkit-details-marker {
+                color: var(--lectio-theme-accent, #176766);
+            }
+
+            .lectio-manager-setting-label-row {
+                display: flex;
+                align-items: center;
+                gap: 5px;
+            }
+
+            .lectio-manager-setting-info {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                width: 15px;
+                height: 15px;
+                padding: 0;
+                border: none;
+                border-radius: 50%;
+                background: transparent;
+                color: var(--lectio-theme-muted, #8a969b);
+                cursor: pointer;
+                flex: none;
+            }
+
+            .lectio-manager-setting-info svg {
+                width: 100%;
+                height: 100%;
+                fill: none;
+                stroke: currentColor;
+                stroke-width: 2;
+                stroke-linecap: round;
+                stroke-linejoin: round;
+            }
+
+            .lectio-manager-setting-info:hover,
+            .lectio-manager-setting-info:focus-visible,
+            .lectio-manager-setting-info[aria-expanded='true'] {
+                color: var(--lectio-theme-accent, #176766);
             }
 
             .lectio-manager-settings-section-rows {

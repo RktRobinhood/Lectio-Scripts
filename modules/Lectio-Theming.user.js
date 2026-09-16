@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Theming
 // @namespace    https://www.lectio.dk/
-// @version      0.17.0
+// @version      0.17.1
 // @description  Gives Lectio a soft, translucent glass shell with 44 built-in colour schemes (Catppuccin, Nord, Dracula, Cyberpunk, sports, social-app and Danish-landscape palettes and more), each with its own distinct background photo, and can derive a scheme from a website or image, take its background from your own picture, and let you hand-pick every key colour.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-start
@@ -16,7 +16,7 @@
 
     const MODULE_ID = 'lectio-theming';
     const MODULE_NAME = 'Lectio Theming';
-    const MODULE_VERSION = '0.17.0';
+    const MODULE_VERSION = '0.17.1';
     const STORAGE_KEY = 'lectioTheming.settings.v2';
     // The chosen background picture lives in its own entry rather than in the
     // settings blob: it is orders of magnitude larger than every other setting
@@ -401,7 +401,7 @@
                         options: PRESET_OPTIONS
                     },
                     {
-                        key: 'mode', type: 'select', label: 'Light or dark base', section: 'Custom palette',
+                        key: 'mode', type: 'select', label: 'Light or dark base', section: 'Custom palette', advanced: true,
                         description: 'The starting point for the custom palette — built-in themes keep their own light or dark look.',
                         options: [
                             { value: 'light', label: 'Light' },
@@ -409,35 +409,35 @@
                         ]
                     },
                     {
-                        key: 'colourBackground', type: 'color', label: 'Page colour', section: 'Custom palette',
+                        key: 'colourBackground', type: 'color', label: 'Page colour', section: 'Custom palette', advanced: true,
                         description: 'Pick the colour behind everything. Choosing any colour here switches to the custom palette.'
                     },
                     {
-                        key: 'colourText', type: 'color', label: 'Text colour', section: 'Custom palette',
+                        key: 'colourText', type: 'color', label: 'Text colour', section: 'Custom palette', advanced: true,
                         description: 'Darkened or lightened automatically if the pair would be hard to read.'
                     },
                     {
-                        key: 'colourAccent', type: 'color', label: 'Accent colour', section: 'Custom palette',
+                        key: 'colourAccent', type: 'color', label: 'Accent colour', section: 'Custom palette', advanced: true,
                         description: 'Links, buttons, highlights and focus rings.'
                     },
                     {
-                        key: 'colourAccentAlt', type: 'color', label: 'Second accent', section: 'Custom palette',
+                        key: 'colourAccentAlt', type: 'color', label: 'Second accent', section: 'Custom palette', advanced: true,
                         description: 'Secondary highlights, lesson stripes and background gradients.'
                     },
                     {
-                        key: 'sourceUrl', type: 'text', label: 'Palette source', section: 'Custom palette',
+                        key: 'sourceUrl', type: 'text', label: 'Palette source', section: 'Custom palette', advanced: true,
                         description: 'Paste an https image or website URL.'
                     },
                     {
-                        key: 'applySource', type: 'button', label: 'Import colours', section: 'Custom palette',
+                        key: 'applySource', type: 'button', label: 'Import colours', section: 'Custom palette', advanced: true,
                         description: 'Sample the image or colours used by the website.', buttonLabel: 'Import'
                     },
                     {
-                        key: 'chooseImage', type: 'button', label: 'Local image', section: 'Custom palette',
+                        key: 'chooseImage', type: 'button', label: 'Local image', section: 'Custom palette', advanced: true,
                         description: 'Take the two accents from an image on this device. It never leaves the browser.', buttonLabel: 'Choose image'
                     },
                     {
-                        key: 'resetColours', type: 'button', label: 'Reset custom colours', section: 'Custom palette',
+                        key: 'resetColours', type: 'button', label: 'Reset custom colours', section: 'Custom palette', advanced: true,
                         description: 'Drop the hand-picked and imported colours and go back to the neutral base.', buttonLabel: 'Reset colours'
                     },
                     {
