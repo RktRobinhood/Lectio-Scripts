@@ -64,7 +64,7 @@
       "category": "Timetable",
       "audience": ["student", "teacher"],
       "status": "experimental",
-      "version": "0.5.0",
+      "version": "0.6.0",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Subject-Colours.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues"
     }

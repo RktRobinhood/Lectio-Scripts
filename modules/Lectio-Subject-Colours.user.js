@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Subject Colours
 // @namespace    https://www.lectio.dk/
-// @version      0.5.0
+// @version      0.6.0
 // @description  Learns which classes are actually yours from your own timetable and gives each one its own colour, with a separate muted spectrum for one-off activities like assemblies and meetings.
 // @match        https://www.lectio.dk/lectio/*
 // @grant        none
@@ -15,7 +15,7 @@
 
     const MODULE_ID = 'subject-colours';
     const MODULE_NAME = 'Lectio - Subject Colours';
-    const MODULE_VERSION = '0.5.0';
+    const MODULE_VERSION = '0.6.0';
     const LOG = '[Lectio Subject Colours]';
     const STYLE_ID = 'lectio-subject-colours-styles';
 
@@ -35,6 +35,11 @@
     // point of being legible on a bad projector, which is the one case this
     // exists for.
     const SHAPE_COUNT = 5;
+    // The base mark size at 100% scale. An 8px mark tested as too small to
+    // read at a glance and got lost against the busy top-right corner of a
+    // block (times, teacher initials); this is that size roughly 2.5x over,
+    // moved to the quieter bottom-right corner instead.
+    const SHAPE_BASE_SIZE = 20;
 
     // The on-page colour legend: a small floating strip, not part of any
     // Lectio table, so it works the same on every page this module paints
@@ -93,6 +98,7 @@
         colourOther: true,
         showLegend: false,
         patternMarkers: false,
+        patternScale: 100,
         lockColours: false,
         lockedTheme: null,
         overrides: {}
@@ -183,6 +189,7 @@
             patternMarkers: typeof saved.patternMarkers === 'boolean'
                 ? saved.patternMarkers
                 : DEFAULT_SETTINGS.patternMarkers,
+            patternScale: clamp(Math.round(Number(saved.patternScale) || DEFAULT_SETTINGS.patternScale), 50, 200),
             lockColours: typeof saved.lockColours === 'boolean'
                 ? saved.lockColours
                 : DEFAULT_SETTINGS.lockColours,
@@ -1089,6 +1096,7 @@
         }
 
         root.setAttribute(STYLE_ATTRIBUTE, effectiveStyle());
+        root.style.setProperty('--lectio-subject-shape-size', `${SHAPE_BASE_SIZE * (settings.patternScale / 100)}px`);
 
         for (const element of blockElements(document)) {
             if (Number(element.dataset.lectioSubjectRev) === revision) continue;
@@ -1181,26 +1189,30 @@
                 outline-offset: -2px;
             }
 
-            /* The non-colour channel from issue #19: a small corner mark, in
-               the class's own line colour, ringed in its text colour so the
+            /* The non-colour channel from issue #19: a corner mark, in the
+               class's own line colour, ringed in its text colour so the
                shape itself — not a colour comparison — is what carries the
                distinction. Text colour is already guaranteed to read against
                the block's fill, so the ring stays visible whatever the fill
-               turned out to be. */
+               turned out to be. Sized off a root custom property so the scale
+               setting can resize every mark on the page without rebuilding
+               this stylesheet, and anchored bottom-right: a block's top edge
+               already carries its time and teacher initials, and the mark got
+               lost fighting that at 8px in the corner it started in. */
             .s2skemabrik[${SHAPE_ATTRIBUTE}] {
                 position: relative;
             }
 
             .s2skemabrik[${SHAPE_ATTRIBUTE}]::after {
                 background: var(--lectio-subject-line);
+                bottom: 2px;
                 box-shadow: 0 0 0 1px var(--lectio-subject-text);
                 content: '';
-                height: 8px;
+                height: var(--lectio-subject-shape-size, ${SHAPE_BASE_SIZE}px);
                 pointer-events: none;
                 position: absolute;
-                right: 3px;
-                top: 3px;
-                width: 8px;
+                right: 2px;
+                width: var(--lectio-subject-shape-size, ${SHAPE_BASE_SIZE}px);
             }
 
             .s2skemabrik[${SHAPE_ATTRIBUTE}="0"]::after {
@@ -1802,11 +1814,24 @@
                 key: 'patternMarkers',
                 type: 'toggle',
                 label: 'Mark each class with a shape too',
-                section: 'Colours',
-                description: 'Off by default. Adds a small corner mark to each class block, in addition to its colour, so '
+                section: 'Accessibility',
+                description: 'Off by default. Adds a corner mark to each class block, in addition to its colour, so '
                     + 'classes can still be told apart on a washed-out projector, in bright sunlight, or without colour '
                     + 'vision at all. One-off activities keep their own dashed edge instead.'
             },
+            ...(settings.patternMarkers
+                ? [{
+                    key: 'patternScale',
+                    type: 'range',
+                    label: 'Shape marker size',
+                    section: 'Accessibility',
+                    description: 'How big the corner mark is.',
+                    min: 50,
+                    max: 200,
+                    step: 10,
+                    suffix: '%'
+                }]
+                : []),
             {
                 key: 'regularity',
                 type: 'select',
@@ -1872,6 +1897,7 @@
             colourOther: settings.colourOther,
             showLegend: settings.showLegend,
             patternMarkers: settings.patternMarkers,
+            patternScale: settings.patternScale,
             lockColours: settings.lockColours,
             regularity: settings.regularity,
             scanWeeks: settings.scanWeeks
@@ -1919,6 +1945,8 @@
             settings.showLegend = value;
         } else if (key === 'patternMarkers' && typeof value === 'boolean') {
             settings.patternMarkers = value;
+        } else if (key === 'patternScale') {
+            settings.patternScale = clamp(Math.round(Number(value) || DEFAULT_SETTINGS.patternScale), 50, 200);
         } else if (key === 'lockColours' && typeof value === 'boolean') {
             settings.lockColours = value;
             // Turning the lock off drops the freeze, so a later lock starts

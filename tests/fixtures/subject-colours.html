@@ -59,7 +59,8 @@
             scanWeeks: 0,
             colourOther: true,
             showLegend: phase !== 'legend-off',
-            patternMarkers: phase === 'pattern',
+            patternMarkers: phase === 'pattern' || phase === 'pattern-scale',
+            patternScale: phase === 'pattern-scale' ? 150 : 100,
             // The locked phase pins one class to a colour of its own and asks
             // for it back exactly, under a dark theme it would otherwise be
             // re-derived by.
@@ -241,6 +242,24 @@
             try {
                 const registration = window.registrations.get('subject-colours');
                 if (!registration) throw new Error('module did not register with the Manager');
+
+                // The shape-marker toggle lives in its own Accessibility
+                // section, in every phase.
+                const patternToggle = registration.settingsSchema.find(control => control.key === 'patternMarkers');
+                if (!patternToggle || patternToggle.section !== 'Accessibility') {
+                    throw new Error('the shape marker toggle was not offered under Accessibility');
+                }
+
+                // The scale slider only appears once the marker itself is on
+                // — nothing to size when there is nothing drawn.
+                const scaleControl = registration.settingsSchema.find(control => control.key === 'patternScale');
+                if (phase === 'pattern' || phase === 'pattern-scale') {
+                    if (!scaleControl || scaleControl.section !== 'Accessibility') {
+                        throw new Error('the shape marker scale control was not offered under Accessibility once enabled');
+                    }
+                } else if (scaleControl) {
+                    throw new Error('the shape marker scale control was offered while the marker itself was off');
+                }
 
                 // A cancelled lesson is never evidence and never coloured.
                 if (kindOf('cancelled-1') !== null) throw new Error('a cancelled lesson was coloured');
@@ -428,13 +447,13 @@
 
                 // Off by default: no other phase in this run turns the
                 // setting on, so nothing should ever carry the attribute.
-                if (phase !== 'pattern') {
+                if (phase !== 'pattern' && phase !== 'pattern-scale') {
                     if (document.getElementById('psyc-1').hasAttribute('data-lectio-subject-shape')) {
                         throw new Error('a shape marker appeared with the setting off');
                     }
                 }
 
-                if (phase === 'pattern') {
+                if (phase === 'pattern' || phase === 'pattern-scale') {
                     const shapeOf = (id) => document.getElementById(id).getAttribute('data-lectio-subject-shape');
 
                     if (shapeOf('psyc-1') === null) throw new Error('a class block got no shape marker with the setting on');
@@ -455,6 +474,17 @@
                     const marker = getComputedStyle(document.getElementById('psyc-1'), '::after');
                     if (marker.content === 'none' || marker.content === '') {
                         throw new Error('the shape marker was not actually rendered on the block');
+                    }
+
+                    // Anchored to the bottom-right corner, not the busier
+                    // top-right one, and sized off the scale setting (100% ==
+                    // 20px, 150% == 30px) rather than a fixed pixel size.
+                    if (marker.bottom !== '2px') throw new Error(`the shape marker was not anchored to the bottom edge (bottom: ${marker.bottom})`);
+                    if (marker.right !== '2px') throw new Error(`the shape marker was not anchored to the right edge (right: ${marker.right})`);
+
+                    const expectedSize = phase === 'pattern-scale' ? '30px' : '20px';
+                    if (marker.width !== expectedSize || marker.height !== expectedSize) {
+                        throw new Error(`the shape marker was not sized off the scale setting (${marker.width} x ${marker.height}, expected ${expectedSize})`);
                     }
                 }
 
