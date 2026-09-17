@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>Issue #20 verification fixture</title>
+    <script>
+        window.GM_getValue = (key, fallback) => key === 'lectioEnglish.mode' ? 'en' : fallback;
+        window.GM_setValue = () => {};
+        window.GM_xmlhttpRequest = () => {};
+        window.registrations = new Map();
+        window.addEventListener('lectio-module:register', (event) => {
+            window.registrations.set(event.detail.id, event.detail);
+        });
+    </script>
+</head>
+<body>
+    <div style="position: relative; top: 0;">
+        <a href="#" title="Genvej: Alt+O">Forside<span class="shortcutletter"></span></a>
+        <a href="#" title="Genvej: Alt+M">Skema<span class="shortcutletter"></span></a>
+        <a href="#" title="Genvej: Alt+S">Studieplan<span class="shortcutletter"></span></a>
+        <a href="#" title="Genvej: Alt+K">Karakterer<span class="shortcutletter"></span></a>
+        <a href="#" title="Genvej: Alt+B">Beskeder<span class="shortcutletter"></span></a>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th><a id="elevtid">Elev&shy;tid</a></th>
+                <th><a id="notdelivered">Ikke<br>afleveret</a></th>
+                <th><a id="awaitingteacher">Afventer<br>lærer</a></th>
+            </tr>
+        </thead>
+    </table>
+
+    <a id="editBtn"><span class="ls-fonticon ls-fonticon-fill">edit</span><span class="shortcutletter">R</span>ediger</a>
+
+    <script src="../../modules/Lectio-English-Mode.user.js"></script>
+    <script>
+        function assert(condition, message) {
+            if (!condition) throw new Error(message);
+        }
+
+        window.addEventListener('load', () => {
+            try {
+                const nav = Array.from(document.querySelectorAll('div a'));
+                for (const a of nav) {
+                    assert(!/^Genvej:/.test(a.title), `Nav title still Danish: "${a.title}"`);
+                }
+                const forside = nav.find(a => a.textContent.trim().startsWith('Overview'));
+                assert(forside, 'Nav label was not translated to Overview');
+                assert(forside.title === 'Shortcut: Alt+O', `Expected "Shortcut: Alt+O", got "${forside.title}"`);
+
+                assert(document.getElementById('elevtid').textContent.trim() === 'Student Workload',
+                    `Elevtid header: "${document.getElementById('elevtid').textContent}"`);
+                assert(document.getElementById('notdelivered').textContent === 'NotSubmitted',
+                    `Not delivered header: "${document.getElementById('notdelivered').textContent}"`);
+                assert(document.getElementById('awaitingteacher').textContent === 'AwaitingTeacher',
+                    `Awaiting teacher header: "${document.getElementById('awaitingteacher').textContent}"`);
+
+                assert(document.getElementById('editBtn').textContent.replace('edit', '').trim() === 'Edit',
+                    `Edit button text: "${document.getElementById('editBtn').textContent}"`);
+
+                document.documentElement.dataset.testResult = 'pass';
+            } catch (error) {
+                document.documentElement.dataset.testResult = `fail: ${error.message}`;
+            }
+        });
+    </script>
+</body>
+</html>

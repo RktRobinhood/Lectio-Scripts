@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio English Mode
 // @namespace    lectio-english-mode
-// @version      1.9.0
+// @version      1.9.1
 // @description  Context-aware English layer for Lectio with instant core UI translation, persistent cache and Google fallback.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-start
@@ -888,6 +888,17 @@
         return String(
             text ?? ''
         )
+            /*
+             * Lectio hyphenates some headers with a soft hyphen
+             * (U+00AD, invisible unless the browser wraps the
+             * line) e.g. "Elev\u00adtid" for "Elevtid" (issue #20).
+             * Strip it so exact-match dictionary lookups aren't
+             * defeated by an invisible character in the source.
+             */
+            .replace(
+                /\u00ad/g,
+                ''
+            )
             .replace(
                 /\u00a0/g,
                 ' '
@@ -1263,6 +1274,32 @@
                         );
                     }
                 );
+
+        /*
+         * Every top-nav item carries a hidden "Genvej: Alt+X"
+         * (Shortcut: Alt+X) tooltip that the generic attribute
+         * pipeline never reaches: processAttr/processElement both
+         * skip elements matched by isFixedNav, which is exactly
+         * these anchors once their label is repaired below
+         * (issue #20). Fix the title directly here instead.
+         */
+        for (const anchor of anchors) {
+            const title =
+                anchor.getAttribute('title');
+
+            if (
+                title &&
+                /^Genvej:/.test(title)
+            ) {
+                anchor.setAttribute(
+                    'title',
+                    title.replace(
+                        /^Genvej:/,
+                        'Shortcut:'
+                    )
+                );
+            }
+        }
 
         const rows = [];
 
@@ -2136,6 +2173,25 @@
         }
 
         /*
+         * The "skriftlig" (written) grade-type suffix renders
+         * inconsistently across the Grades table depending on
+         * whether it resolves locally (translateStructured's
+         * "skriftlig" -> "written") or falls through to the
+         * Google fallback, which instead renders it as "in
+         * writing" (issue #20 audit, cosmetic finding). Only one
+         * wording should ever reach the page.
+         */
+        if (
+            lower.includes('skriftlig')
+        ) {
+            result =
+                result.replace(
+                    /\bin writing\b/gi,
+                    'written'
+                );
+        }
+
+        /*
          * Defence in depth for the "1i" class-code corruption
          * (issue #9 audit): a string that legitimately needs the
          * Google fallback (e.g. "1i aktivitet/4", which contains
@@ -2997,6 +3053,128 @@
         }
     }
 
+    /*
+     * ============================================================
+     * SPLIT-NODE PHRASES
+     * ============================================================
+     *
+     * Lectio sometimes splits a single dictionary phrase across
+     * more than one DOM node for its own layout/markup reasons,
+     * which defeats an exact-match lookup that only ever sees one
+     * node's text at a time (issue #20). Two known shapes:
+     *
+     * - A table header wraps at a literal <br> inside one <a>,
+     *   e.g. "Ikke<br>afleveret" (OpgaveListe.aspx). The two
+     *   words are two separate text nodes.
+     * - Lectio's own keyboard-accesskey markup wraps the first
+     *   letter of a word in <span class="shortcutletter">,
+     *   e.g. <span class="shortcutletter">R</span>ediger, so the
+     *   full word "Rediger" never exists in one text node.
+     *
+     * Both are joined here, looked up as one phrase, and the
+     * translation is redistributed back across the original
+     * nodes so the pipeline's normal per-node processing (which
+     * still needs to visit them) sees already-English text and
+     * leaves it alone.
+     */
+
+    function fixBrSplitPhrase(element) {
+        if (
+            element.children.length !== 1 ||
+            element.children[0].tagName !== 'BR'
+        ) {
+            return;
+        }
+
+        const br =
+            element.children[0];
+
+        const before =
+            br.previousSibling;
+
+        const after =
+            br.nextSibling;
+
+        if (
+            !before ||
+            !after ||
+            before.nodeType !== Node.TEXT_NODE ||
+            after.nodeType !== Node.TEXT_NODE ||
+            before.previousSibling ||
+            after.nextSibling
+        ) {
+            return;
+        }
+
+        const combined =
+            `${normalize(before.nodeValue)} ${
+                normalize(after.nodeValue)
+            }`;
+
+        const translated =
+            exactCore(combined);
+
+        if (!translated) {
+            return;
+        }
+
+        const splitAt =
+            translated.indexOf(' ');
+
+        if (splitAt === -1) {
+            before.nodeValue = translated;
+            after.nodeValue = '';
+
+        } else {
+            before.nodeValue =
+                translated.slice(0, splitAt);
+
+            after.nodeValue =
+                translated.slice(splitAt + 1);
+        }
+    }
+
+    function fixShortcutLetterSplit(element) {
+        const letterSpan =
+            element.querySelector(
+                ':scope > .shortcutletter'
+            );
+
+        const rest =
+            letterSpan?.nextSibling;
+
+        if (
+            !letterSpan ||
+            !rest ||
+            rest.nodeType !== Node.TEXT_NODE
+        ) {
+            return;
+        }
+
+        const letter =
+            normalize(letterSpan.textContent);
+
+        const remainder =
+            normalize(rest.nodeValue);
+
+        if (!letter || !remainder) {
+            return;
+        }
+
+        const translated =
+            exactCore(letter + remainder);
+
+        if (!translated) {
+            return;
+        }
+
+        letterSpan.textContent =
+            translated.slice(0, 1);
+
+        rest.nodeValue =
+            translated.slice(1);
+    }
+
     function processElement(element) {
         if (
             mode !== MODE_EN ||
@@ -3009,6 +3187,9 @@
         ) {
             return;
         }
+
+        fixBrSplitPhrase(element);
+        fixShortcutLetterSplit(element);
 
         for (
             const name

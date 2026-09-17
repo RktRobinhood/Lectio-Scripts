@@ -6,12 +6,11 @@ with English Mode active (its own `DA/EN` toggle in the top-right, which is how 
 module itself was confirmed to be installed and running). No consequential action
 (absence recording, message sending, grade entry, etc.) was submitted at any point.
 
-**Status: findings 1, 2, 3, 5, 6, 7, and part of 8 ("Ændret") have been fixed in
-`modules/Lectio-English-Mode.user.js` (v1.9.0)**, each with its exact root cause identified —
-see "Fix status" under each finding below. Finding 4 was re-assessed and is likely not a real
-bug (probably just needed a longer wait, per the "Dato" evidence in finding 3) — no code
-change was made there. The "Rediger" and "Genvej" cases in finding 8 were investigated but
-left unfixed; see their notes.
+**Status: all findings are now fixed in `modules/Lectio-English-Mode.user.js`.** Findings 1, 2,
+3, 5, 6, 7, and part of 8 ("Ændret") were fixed in v1.9.0; findings 4, the "Rediger" and
+"Genvej" cases in finding 8, and the finding-2 "skriftlig" wording cosmetic were fixed in
+v1.9.1 following a live re-verification pass for issue #20 — see "Fix status" under each
+finding below for the root cause of each.
 
 ## Screens checked (teacher role)
 
@@ -55,7 +54,7 @@ Verified with a standalone harness that evaluates the real (modified) `hasDanish
 
 On the Grades page (`Grades/teacher_listgrades.aspx`), the row label rendered as **"Point of view final - in writing"**. The dictionary (`modules/Lectio-English-Mode.user.js:438`) already maps the exact string `Standpunktskarakter` → `Current Grade`, but the actual DOM text is `Standpunktskarakter afsl.` (with a suffix), which doesn't match the dictionary key exactly. It falls through to the Google Translate fallback, which renders the Danish grading term "Standpunktskarakter" (an interim/standing grade) as if it were the unrelated English idiom "point of view" — actively misleading for a teacher scanning grade-entry deadlines.
 
-- Same row also shows the "skriftlig" (written) suffix rendered three different ways across the table: `- written`, `- in writing`, and `not final. - in writing` — inconsistent phrasing for what should be the same recurring suffix. Not addressed (cosmetic, and the suffix itself is handled by a separate regex pass than the piece before it — the two never run in strict lockstep character-for-character, but it doesn't affect correctness now that the base label resolves correctly).
+- Same row also shows the "skriftlig" (written) suffix rendered three different ways across the table: `- written`, `- in writing`, and `not final. - in writing` — inconsistent phrasing for what should be the same recurring suffix. **Fixed in v1.9.1 (issue #20).** `translateStructured()`'s local regex pass already renders "skriftlig" as "written" consistently; "in writing" only ever appeared when a row's exact phrasing missed the local pass and fell through to the Google fallback instead, which chose different wording for the same word. Rather than chase every row shape that can reach MT, `postCorrect()` now normalizes any Google-fallback `"in writing"` back to `"written"` whenever the source contains "skriftlig", so one wording reaches the page regardless of which pipeline produced it.
 - Screenshot: `screenshot-1789572768194-2.jpg`
 
 **Fix status: FIXED in v1.9.0.** `exactCore()` now also matches when the text is a known CORE key plus a trailing `afsl.` or `ikke afsl.` qualifier, resolving to the dictionary's own translation of the base term plus `(finalized)` / `(not yet finalized)` — so `Standpunktskarakter afsl.` → `Current Grade (finalized)` and `Årskarakter ikke afsl.` → `Final Course Grade (not yet finalized)`, both handled locally without ever reaching the Google fallback (which is what produced "Point of view" in the first place). This generically covers every grade-type key already in `CORE` (Standpunktskarakter, Terminskarakter, Årskarakter, Eksamenskarakter), not just the one observed on screen.
@@ -89,7 +88,12 @@ Note this table's **"Dato" → "Date"** header sits in the exact same header row
 
 On `OpgaveListe.aspx`, column headers **"Elevtid"** and **"Afventer lærer"** stayed in Danish, and **"Ikke afleveret"** rendered as **"Not delivered"** — even though the dictionary already defines all three correctly (`Elevtid` → `Student Workload`, `Afventer lærer` → `Awaiting Teacher`, `Ikke afleveret` → `Not Submitted`, at `modules/Lectio-English-Mode.user.js:360,408,411`). `Antal` and `Holdelement` have no dictionary entry at all (also seen as headers on this page and on Grades; fixed as part of finding 3).
 
-**Fix status: NOT FIXED — downgraded from "selector-coverage bug" to unconfirmed.** After finding the "Dato" evidence in finding 3 (a `<th>` in a materially identical table translates fine the instant a dictionary entry exists), a genuine selector/coverage bug here looks unlikely. The more probable explanation is the same async-timing behaviour documented elsewhere in this audit (e.g. Messages' "Ændret" and "Egne beskeder" both looked broken on a quick check and then resolved after a longer wait) — this page just wasn't re-checked with a longer wait before I recorded it as broken. No code change was made for this specific finding. Follow-up: re-open `OpgaveListe.aspx`, wait 4–5s, and re-check `Elevtid`/`Afventer lærer`/`Ikke afleveret` before doing any further work here.
+**Fix status: FIXED in v1.9.1 (issue #20).** Re-verified live on `OpgaveListe.aspx` with a 5s wait per the follow-up instructions — the headers were still broken, so the "just async timing" theory from the original pass was wrong. Root-caused by inspecting the live DOM directly:
+
+- `Elevtid` is not the plain word it appears to be — Lectio's own markup is `Elev­tid`, with a soft hyphen (U+00AD, invisible) spliced in for line-wrap hinting. `normalize()` stripped ` ` but not `­`, so the exact-match lookup compared `"Elev­tid"` against the dictionary's plain `"Elevtid"` key and never matched. Fixed by stripping `­` in `normalize()`.
+- `Ikke afleveret` and `Afventer lærer` are genuinely split across a literal `<br>` inside the `<a>` (`Ikke<br>afleveret`, confirmed by toggling back to Danish and reading the raw DOM), so the two words are two separate text nodes and the whole-phrase dictionary key can never match either fragment alone — each word fell through independently, translating fine word-by-word but never resolving to the dictionary's precise `Not Submitted` / `Awaiting Teacher`. Added a `fixBrSplitPhrase()` pass that joins the two text nodes around a single `<br>`, looks the combined phrase up in `CORE`, and redistributes the translation back across the original two nodes (preserving the line break).
+
+Verified against a fixture reproducing the exact live DOM shapes (`tests/fixtures/issue-20-verify.html`, `tests/issue-20-verify.browser.test.js`) and re-checked live.
 
 ### 5. Mixed-language heading: "Select Hold Favorites"
 
@@ -130,9 +134,9 @@ Navigating to a non-existent Lectio path produces Lectio's own "page not found" 
 
 - **"Rediger"** (Edit) link on the lesson/activity detail popup (`aktivitet/aktivitetforside2.aspx`) stayed as Danish even though `Rediger` → `Edit` exists in the dictionary (line 504).
 
-  **Fix status: NOT FIXED — investigated, root cause inconclusive.** This one is *not* the same async-timing pattern as finding 4. Using the live page's own devtools (`document.createTreeWalker`), the actual text node under that link is `"ediger"` — missing the leading "R" — while the pencil icon and the word render as one legible "Rediger" on screen. There's no iframe, no shadow root, and no `<a>`/`<button>` anywhere in the top document with the exact text "Rediger" (confirmed by direct query). So the dictionary's exact-match on `"Rediger"` genuinely cannot fire against this element, because the live DOM text is not that string. I did not find where the missing "R" goes (possibly a Lectio-side rendering quirk, or two adjacent text nodes split by something not yet identified) and chose not to ship a speculative fix (e.g. "retry the dictionary lookup after stripping one leading character") without understanding the real cause — that kind of heuristic is exactly how the `"1i"` → `"1 in"` bug happened in the first place. Left open for follow-up with more DOM inspection time.
+  **Fix status: FIXED in v1.9.1 (issue #20).** Found the missing "R": it isn't missing at all, it's in its own text node. `document.createTreeWalker` over the `<a>` (id `s_m_Content_Content_tocAndToolbar_editModeBtn`) shows three child nodes — a `<span class="ls-fonticon ls-fonticon-fill">` (the pencil icon glyph, textContent `"edit"`), then a `<span class="shortcutletter">R</span>`, then a bare text node `"ediger"`. The `shortcutletter` span is Lectio's own native keyboard-accesskey markup (the same class appears, empty, on the top-nav items) — it wraps a word's mnemonic letter separately so the browser can style it, so the DOM never contains the contiguous string `"Rediger"` for the dictionary's exact-match to find. Not a Lectio rendering quirk and not the same shape as finding 1's corruption — a second instance of the same "phrase split across nodes" problem as finding 4's `<br>`-split headers. Fixed with `fixShortcutLetterSplit()`, which joins the `shortcutletter` span's letter with the following text node, looks up the combined word, and writes the translation's first character back into the span and the remainder into the text node.
 
-- **"Genvej: Alt+G"** / **"Genvej: Alt+K"** etc. — hidden keyboard-shortcut labels attached to every top-nav item are in Danish ("Genvej" = "Shortcut"); low visual impact (not usually shown) but will read oddly to a screen reader or on hover-tooltip. **Not fixed** — the exact Danish source for these wasn't captured precisely enough (need the surrounding phrase, not just the word "Genvej", to add a safe dictionary entry) — follow-up.
+- **"Genvej: Alt+G"** / **"Genvej: Alt+K"** etc. — hidden keyboard-shortcut labels attached to every top-nav item are in Danish ("Genvej" = "Shortcut"); low visual impact (not usually shown) but will read oddly to a screen reader or on hover-tooltip. **Fixed in v1.9.1 (issue #20).** Captured the exact live attribute directly (`title="Genvej: Alt+O"`, `"Genvej: Alt+M"`, `"Genvej: Alt+Æ"`, `"Genvej: Alt+G"`, `"Genvej: Alt+K"`, one per top-nav anchor). Root cause: these anchors get `data-lectio-en-fixed-nav="1"` from `repairNavigation()` once their label is translated, and both `processElement()` and `processAttr()` skip any element matched by `isFixedNav()` — by design, so the generic pipeline doesn't fight with the nav-repair system over the anchor's text — but that guard incidentally also blocked the `title` attribute, which nothing else was translating either. Fixed by translating `Genvej:` → `Shortcut:` directly inside `repairNavigation()`, which already owns these exact anchors.
 - **"Ændret"** column header on Messages (`beskeder2.aspx`). **Fixed in v1.9.0** — added as a `CORE` entry (shared with the Documents "Ændret af" fix in finding 3).
 - **"Info · 5 dage"** schedule toolbar label is Danish on first paint, resolves to "Info · 5 days" after ~1s — timing-only, confirmed not a bug, no fix needed.
 
@@ -142,12 +146,13 @@ Since this repo has no unit tests for the translation dictionary/logic itself (o
 
 This confirms the logic is correct in isolation. It does **not** replace re-checking the live site after this update ships and Tampermonkey picks up the new version (`@updateURL` points at `main`), since some of what's fixed here (the async translator pipeline, `postCorrect`'s interaction with the real Google fallback) can only be fully exercised against the real page.
 
+### Issue #20 follow-up (v1.9.1)
+
+Each of the four root causes above (the soft hyphen, the two `<br>`-split headers, the `shortcutletter`-split "Rediger", and the `Genvej:` title) was confirmed directly against the live DOM in a computer-use session (teacher role) — reading `outerHTML`/`childNodes` with `document.createTreeWalker`, and for the `<br>`-split headers, toggling back to Danish to read the raw pre-translation markup. The fixes themselves were verified against a new fixture (`tests/fixtures/issue-20-verify.html`, run via `tests/issue-20-verify.browser.test.js`) that reproduces the exact live DOM shapes byte-for-byte and asserts the module resolves each of them correctly in a real headless-Chrome page, plus `node --check` and the existing DA/EN switch test — all pass. As with v1.9.0, this doesn't replace a final live re-check once Tampermonkey picks up the new version.
+
 ## Suggested follow-up issue batches (remaining, after this update)
 
-1. **Re-verify finding 4** (`Elevtid`/`Afventer lærer`/`Ikke afleveret` on `OpgaveListe.aspx`) with a longer wait before assuming it needs a code change — likely just async timing, per the "Dato" evidence in finding 3.
-2. **Investigate the "Rediger" DOM anomaly** (finding 8) — find where the leading "R" goes before attempting a fix.
-3. **Translate the "Genvej: Alt+X" shortcut labels** (finding 8) — need the exact surrounding Danish phrase captured first.
-4. **Cosmetic**: standardize the "skriftlig" suffix wording across grade-type rows (currently "written" in some places, "in writing" in others — noted in finding 2).
+None remaining from this audit — all four items filed as issue #20 were resolved in v1.9.1 (see each finding's "Fix status" above). Any further gaps (e.g. the student-role and Study Plan/Surveys/Course Plan coverage noted above as not sampled) would need their own fresh audit pass.
 
 ## Screenshots saved this session
 
