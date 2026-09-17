@@ -60,11 +60,11 @@
     {
       "id": "subject-colours",
       "name": "Subject Colours",
-      "description": "Learns which classes are really yours from your own timetable and gives each one its own colour, with a separate muted spectrum for one-off activities like assemblies and meetings.",
+      "description": "Learns which classes are really yours from your own timetable and gives each one its own colour, with a separate muted spectrum for one-off activities like assemblies and meetings. An optional per-class shape marker helps when colour alone is not enough.",
       "category": "Timetable",
       "audience": ["student", "teacher"],
       "status": "experimental",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Subject-Colours.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues"
     }

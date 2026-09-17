@@ -71,6 +71,11 @@ test('subject colours are learned from a repeating timetable and keep their own 
         // Turning the key off in settings removes it from the page entirely.
         const legendOff = await runFixture('legend-off');
         assert.match(legendOff, /data-test-result="pass"/, legendOff);
+
+        // The optional per-class shape marker (issue #19): off by default,
+        // and never applied to a one-off when it is switched on.
+        const pattern = await runFixture('pattern');
+        assert.match(pattern, /data-test-result="pass"/, pattern);
     } finally {
         await rm(profileDirectory, { recursive: true, force: true });
     }

@@ -59,6 +59,7 @@
             scanWeeks: 0,
             colourOther: true,
             showLegend: phase !== 'legend-off',
+            patternMarkers: phase === 'pattern',
             // The locked phase pins one class to a colour of its own and asks
             // for it back exactly, under a dark theme it would otherwise be
             // re-derived by.
@@ -422,6 +423,38 @@
                 if (phase === 'legend-off') {
                     if (document.getElementById('lectio-subject-colours-legend')) {
                         throw new Error('the colour key stayed on screen with its setting turned off');
+                    }
+                }
+
+                // Off by default: no other phase in this run turns the
+                // setting on, so nothing should ever carry the attribute.
+                if (phase !== 'pattern') {
+                    if (document.getElementById('psyc-1').hasAttribute('data-lectio-subject-shape')) {
+                        throw new Error('a shape marker appeared with the setting off');
+                    }
+                }
+
+                if (phase === 'pattern') {
+                    const shapeOf = (id) => document.getElementById(id).getAttribute('data-lectio-subject-shape');
+
+                    if (shapeOf('psyc-1') === null) throw new Error('a class block got no shape marker with the setting on');
+                    if (shapeOf('psyc-1') !== shapeOf('psyc-2')) {
+                        throw new Error('the same class got two different shape markers');
+                    }
+                    if (shapeOf('psyc-1') === shapeOf('math-1')) {
+                        throw new Error('two different classes share one shape marker');
+                    }
+
+                    // A one-off already has its own dashed-edge signal, so it
+                    // never also gets a shape marker — the two channels must
+                    // not collide on the same block.
+                    if (shapeOf('assembly-1') !== null) {
+                        throw new Error('a one-off activity was given a shape marker');
+                    }
+
+                    const marker = getComputedStyle(document.getElementById('psyc-1'), '::after');
+                    if (marker.content === 'none' || marker.content === '') {
+                        throw new Error('the shape marker was not actually rendered on the block');
                     }
                 }
 

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Subject Colours
 // @namespace    https://www.lectio.dk/
-// @version      0.4.0
+// @version      0.5.0
 // @description  Learns which classes are actually yours from your own timetable and gives each one its own colour, with a separate muted spectrum for one-off activities like assemblies and meetings.
 // @match        https://www.lectio.dk/lectio/*
 // @grant        none
@@ -15,7 +15,7 @@
 
     const MODULE_ID = 'subject-colours';
     const MODULE_NAME = 'Lectio - Subject Colours';
-    const MODULE_VERSION = '0.4.0';
+    const MODULE_VERSION = '0.5.0';
     const LOG = '[Lectio Subject Colours]';
     const STYLE_ID = 'lectio-subject-colours-styles';
 
@@ -25,6 +25,16 @@
     const KIND_ATTRIBUTE = 'data-lectio-subject';
     const KEY_ATTRIBUTE = 'data-lectio-subject-key';
     const STYLE_ATTRIBUTE = 'data-lectio-subject-style';
+    // Written only on a class block, and only when the shape-marker setting is
+    // on — a one-off already has its own dashed-edge signal, so the two never
+    // have to be told apart on the same block.
+    const SHAPE_ATTRIBUTE = 'data-lectio-subject-shape';
+    // A small, fixed vocabulary of corner marks. Five is plenty to keep
+    // neighbouring classes visually distinct at the sizes Lectio actually
+    // renders blocks at; beyond that the marks would need to shrink past the
+    // point of being legible on a bad projector, which is the one case this
+    // exists for.
+    const SHAPE_COUNT = 5;
 
     // The on-page colour legend: a small floating strip, not part of any
     // Lectio table, so it works the same on every page this module paints
@@ -82,6 +92,7 @@
         scanWeeks: 8,
         colourOther: true,
         showLegend: false,
+        patternMarkers: false,
         lockColours: false,
         lockedTheme: null,
         overrides: {}
@@ -169,6 +180,9 @@
             showLegend: typeof saved.showLegend === 'boolean'
                 ? saved.showLegend
                 : DEFAULT_SETTINGS.showLegend,
+            patternMarkers: typeof saved.patternMarkers === 'boolean'
+                ? saved.patternMarkers
+                : DEFAULT_SETTINGS.patternMarkers,
             lockColours: typeof saved.lockColours === 'boolean'
                 ? saved.lockColours
                 : DEFAULT_SETTINGS.lockColours,
@@ -998,6 +1012,7 @@
 
         element.removeAttribute(KIND_ATTRIBUTE);
         element.removeAttribute(KEY_ATTRIBUTE);
+        element.removeAttribute(SHAPE_ATTRIBUTE);
         delete element.dataset.lectioSubjectRev;
 
         if (!wasPainted) return;
@@ -1108,6 +1123,15 @@
             element.setAttribute(KEY_ATTRIBUTE, key);
             element.dataset.lectioSubjectRev = String(revision);
             paintBlock(element, paletteFor(key, kind), kind);
+
+            // A one-off already carries its own dashed-edge signal, so the
+            // shape marker is class-only: the two channels never collide on
+            // the same block.
+            if (settings.patternMarkers && kind === 'class') {
+                element.setAttribute(SHAPE_ATTRIBUTE, String(slotFor(key, kind) % SHAPE_COUNT));
+            } else {
+                element.removeAttribute(SHAPE_ATTRIBUTE);
+            }
         }
 
         renderLegend();
@@ -1155,6 +1179,51 @@
             .s2skemabrik[${KIND_ATTRIBUTE}].${HIGHLIGHT_CLASS} {
                 outline: 2px solid var(--lectio-subject-line, currentColor) !important;
                 outline-offset: -2px;
+            }
+
+            /* The non-colour channel from issue #19: a small corner mark, in
+               the class's own line colour, ringed in its text colour so the
+               shape itself — not a colour comparison — is what carries the
+               distinction. Text colour is already guaranteed to read against
+               the block's fill, so the ring stays visible whatever the fill
+               turned out to be. */
+            .s2skemabrik[${SHAPE_ATTRIBUTE}] {
+                position: relative;
+            }
+
+            .s2skemabrik[${SHAPE_ATTRIBUTE}]::after {
+                background: var(--lectio-subject-line);
+                box-shadow: 0 0 0 1px var(--lectio-subject-text);
+                content: '';
+                height: 8px;
+                pointer-events: none;
+                position: absolute;
+                right: 3px;
+                top: 3px;
+                width: 8px;
+            }
+
+            .s2skemabrik[${SHAPE_ATTRIBUTE}="0"]::after {
+                border-radius: 50%;
+            }
+
+            .s2skemabrik[${SHAPE_ATTRIBUTE}="1"]::after {
+                border-radius: 0;
+            }
+
+            .s2skemabrik[${SHAPE_ATTRIBUTE}="2"]::after {
+                clip-path: polygon(50% 0%, 0% 100%, 100% 100%);
+            }
+
+            .s2skemabrik[${SHAPE_ATTRIBUTE}="3"]::after {
+                clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+            }
+
+            .s2skemabrik[${SHAPE_ATTRIBUTE}="4"]::after {
+                clip-path: polygon(
+                    35% 0%, 65% 0%, 65% 35%, 100% 35%, 100% 65%, 65% 65%,
+                    65% 100%, 35% 100%, 35% 65%, 0% 65%, 0% 35%, 35% 35%
+                );
             }
 
             #${LEGEND_ID} {
@@ -1730,6 +1799,15 @@
                     + 'Hover an entry to highlight its blocks, or click its swatch to recolour it there and then.'
             },
             {
+                key: 'patternMarkers',
+                type: 'toggle',
+                label: 'Mark each class with a shape too',
+                section: 'Colours',
+                description: 'Off by default. Adds a small corner mark to each class block, in addition to its colour, so '
+                    + 'classes can still be told apart on a washed-out projector, in bright sunlight, or without colour '
+                    + 'vision at all. One-off activities keep their own dashed edge instead.'
+            },
+            {
                 key: 'regularity',
                 type: 'select',
                 label: 'What counts as a class',
@@ -1793,6 +1871,7 @@
             intensity: settings.intensity,
             colourOther: settings.colourOther,
             showLegend: settings.showLegend,
+            patternMarkers: settings.patternMarkers,
             lockColours: settings.lockColours,
             regularity: settings.regularity,
             scanWeeks: settings.scanWeeks
@@ -1838,6 +1917,8 @@
             settings.colourOther = value;
         } else if (key === 'showLegend' && typeof value === 'boolean') {
             settings.showLegend = value;
+        } else if (key === 'patternMarkers' && typeof value === 'boolean') {
+            settings.patternMarkers = value;
         } else if (key === 'lockColours' && typeof value === 'boolean') {
             settings.lockColours = value;
             // Turning the lock off drops the freeze, so a later lock starts
