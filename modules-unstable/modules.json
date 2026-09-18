@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "channel": "unstable",
+  "generatedAt": "2026-09-18T18:05:00Z",
+  "modules": [
+    {
+      "id": "unstable-channel-test",
+      "name": "Unstable Channel Test",
+      "description": "Harmless diagnostic module used to verify that the Lectio Manager unstable channel is working.",
+      "category": "Testing",
+      "audience": [
+        "student",
+        "teacher"
+      ],
+      "status": "unstable",
+      "version": "0.1.1-beta.1",
+      "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Unstable-Channel-Test.user.js",
+      "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues"
+    },
+    {
+      "id": "message-notifications",
+      "aliases": [
+        "unread-message-notifications",
+        "unread-messages",
+        "messages",
+        "notifications",
+        "message-notification",
+        "unread-notifications"
+      ],
+      "name": "Unread Message Notifications — Experimental",
+      "description": "Upgrade/downgrade test copy of Unread Message Notifications. The feature logic is intentionally unchanged; the version is deliberately very high so channel switching is easy to verify.",
+      "category": "Testing",
+      "audience": [
+        "student",
+        "teacher"
+      ],
+      "status": "unstable",
+      "version": "99.0.0-beta.1",
+      "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Unread-Message-Notifications.user.js",
+      "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues"
+    }
+  ]
+}
