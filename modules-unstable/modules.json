@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "channel": "unstable",
-  "generatedAt": "2026-09-18T19:18:00Z",
+  "generatedAt": "2026-09-18T19:37:26Z",
   "modules": [
     {
       "id": "unstable-channel-test",
@@ -32,7 +32,7 @@
         "teacher"
       ],
       "status": "unstable",
-      "version": "0.2.0-beta.1",
+      "version": "0.2.0-beta.2",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Change-Radar.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues"
     }
