@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://github.com/RktRobinhood/Lectio-Scripts
-// @version      2.1.0
+// @version      2.1.1
 // @description  Discover, configure and manage Lectio userscript modules with Stable and Unstable release channels.
 // @author       RktRobinhood
 // @match        https://www.lectio.dk/lectio/*
@@ -19,7 +19,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '2.1.0';
+  const VERSION = '2.1.1';
   const REPO_RAW = 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main';
   const STABLE_CATALOGUE_URL = `${REPO_RAW}/catalogue/modules.json`;
   const UNSTABLE_CATALOGUE_URL = `${REPO_RAW}/modules-unstable/modules.json`;
@@ -1236,13 +1236,13 @@
   function iconSvg(name) {
     const icons = {
       tools: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Zm8 4.2v-1.4l-2-.7a7 7 0 0 0-.6-1.4l.9-1.9-1-1-1.9.9a7 7 0 0 0-1.4-.6l-.7-2h-1.4l-.7 2a7 7 0 0 0-1.4.6l-1.9-.9-1 1 .9 1.9a7 7 0 0 0-.6 1.4l-2 .7v1.4l2 .7c.1.5.3 1 .6 1.4l-.9 1.9 1 1 1.9-.9c.4.3.9.5 1.4.6l.7 2h1.4l.7-2c.5-.1 1-.3 1.4-.6l1.9.9 1-1-.9-1.9c.3-.4.5-.9.6-1.4l2-.7Z"/></svg>',
-      settings: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Zm8 4.2v-1.4l-2-.7a7 7 0 0 0-.6-1.4l.9-1.9-1-1-1.9.9a7 7 0 0 0-1.4-.6l-.7-2h-1.4l-.7 2a7 7 0 0 0-1.4.6l-1.9-.9-1 1 .9 1.9a7 7 0 0 0-.6 1.4l-2 .7v1.4l2 .7c.1.5.3 1 .6 1.4l-.9 1.9 1 1 1.9-.9c.4.3.9.5 1.4.6l.7 2h1.4l.7-2c.5-.1 1-.3 1.4-.6l1.9.9 1-1-.9-1.9c.3-.4.5-.9.6-1.4l2-.7Z"/></svg>',
+      settings: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.25"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.86 2.86-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 1.55V21h-4v-.05a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.88.34l-.06.06-2.86-2.86.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3v-4h.05A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.88l-.06-.06L7.06 4.2l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.55V3h4v.05a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.88-.34l.06-.06 2.86 2.86-.06.06A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 1.55 1H21v4h-.05a1.7 1.7 0 0 0-1.55 1Z"/></svg>',
       help: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.8 9a2.4 2.4 0 0 1 4.6 1c0 1.9-2.4 2.1-2.4 4"/><path d="M12 17h.01"/></svg>',
       refresh: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5"/><path d="M19 11a7 7 0 1 0 1 4"/></svg>',
       close: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>',
-      pause: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6v12M16 6v12"/></svg>',
-      play: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 9 6-9 6Z"/></svg>',
-      trash: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg>'
+      pause: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6.5" y="5" width="4.5" height="14" rx="1.1" fill="currentColor" stroke="none"/><rect x="13" y="5" width="4.5" height="14" rx="1.1" fill="currentColor" stroke="none"/></svg>',
+      play: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l10-6.5-10-6.5Z" fill="currentColor" stroke="none"/></svg>',
+      trash: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4.5h6V7M7 7l1 13h8l1-13"/><path d="M10 10.5v6M14 10.5v6" stroke-width="2.4"/></svg>'
     };
     return icons[name] || icons.help;
   }
@@ -1260,12 +1260,12 @@
       }
       #${ID.launcher} svg { width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
       #${ID.backdrop} {
-        position: fixed; inset: 0; z-index: 2147482800; display: flex; align-items: center; justify-content: center;
-        padding: 18px; box-sizing: border-box; background: rgba(20,30,40,.20);
+        position: fixed; inset: 0; z-index: 2147482800; display: flex; align-items: flex-end; justify-content: flex-end;
+        padding: 18px 18px 18px 18px; box-sizing: border-box; background: transparent;
       }
       #${ID.backdrop}[hidden] { display: none !important; }
       #${ID.panel} {
-        width: min(430px, calc(100vw - 24px)); height: min(704px, calc(100vh - 32px));
+        width: min(430px, calc(100vw - 28px)); height: min(704px, calc(100vh - 36px));
         overflow: hidden; display: flex; flex-direction: column; border: 1px solid #5f8195; border-radius: 12px;
         background: #f8fafb; color: #26343d; box-shadow: 0 18px 60px rgba(0,0,0,.24);
         font: 13px/1.35 Arial, Helvetica, sans-serif;
@@ -1280,7 +1280,7 @@
         width: 30px; height: 30px; padding: 6px; border: 0; border-radius: 6px; background: transparent; color: #fff; cursor: pointer;
       }
       .lm-icon-button:hover, .lm-icon-button.is-active { background: rgba(255,255,255,.13); }
-      .lm-icon-button svg, .lm-console-button svg, .lm-subdialog header button svg { width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+      .lm-icon-button svg, .lm-console-button svg, .lm-subdialog header button svg { width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 2.1; stroke-linecap: round; stroke-linejoin: round; }
       .lm-icon-button.is-spinning svg { animation: lm-spin .9s linear infinite; }
       @keyframes lm-spin { to { transform: rotate(360deg); } }
       .lm-tabs { flex: 0 0 auto; display: grid; grid-template-columns: 1fr 1fr; background: #fff; border-bottom: 1px solid #829aa9; }
@@ -1328,11 +1328,22 @@
       .lm-installed-update.is-downgrade { color: #855b16; }
       .lm-module-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 7px; }
       .lm-text-action { border: 1px solid #2b7898; border-radius: 7px; background: #fff; color: #24718f; padding: 5px 9px; font-weight: 800; font-size: 10px; cursor: pointer; }
-      .lm-action-console { display: inline-flex; gap: 3px; align-items: center; padding-left: 2px; }
-      .lm-console-button { width: 28px; height: 28px; padding: 5px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: #4b7184; cursor: pointer; }
-      .lm-console-button:hover { border-color: #aac0cc; background: #eef5f8; color: #216b87; }
-      .lm-console-button.is-danger:hover { border-color: #e0aaa3; background: #fff0ed; color: #a33b2e; }
-      .lm-console-button:disabled { opacity: .28; cursor: not-allowed; }
+      .lm-action-console {
+        display: inline-flex; gap: 3px; align-items: center; padding: 3px;
+        border: 1px solid #b6c8d2; border-radius: 8px; background: #f5fafc;
+        box-shadow: inset 0 1px 0 rgba(255,255,255,.75);
+      }
+      .lm-console-button {
+        width: 30px; height: 30px; padding: 5px; display: inline-flex; align-items: center; justify-content: center;
+        border: 1px solid transparent; border-radius: 6px; background: #fff; color: #2b6f8a; cursor: pointer;
+      }
+      .lm-console-button svg { width: 18px; height: 18px; stroke-width: 2.2; }
+      .lm-console-button:hover { border-color: #7ea7ba; background: #e8f3f7; color: #155f7d; }
+      .lm-console-button.is-danger { color: #7d4a45; }
+      .lm-console-button.is-danger:hover { border-color: #d89a92; background: #fff0ed; color: #a12f23; }
+      .lm-console-button:disabled {
+        opacity: .58; color: #71828b; background: #f3f5f6; border-color: transparent; cursor: help;
+      }
       .lm-empty { display: flex; flex-direction: column; gap: 4px; border: 1px dashed #c9d3db; border-radius: 8px; padding: 18px; text-align: center; color: #63717b; }
       .lm-settings-section { border: 1px solid #c7d4dc; border-radius: 9px; background: #fff; padding: 13px; }
       .lm-settings-heading { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
@@ -1364,7 +1375,7 @@
       .lm-setting-copy small { color: #71808a; font-size: 9px; }
       .lm-setting-row select, .lm-setting-row input[type="text"], .lm-setting-row input[type="number"] { max-width: 150px; border: 1px solid #aebfc9; border-radius: 6px; padding: 5px 7px; background: #fff; color: #26343d; }
       @media (max-width: 620px) {
-        #${ID.backdrop} { padding: 0; align-items: stretch; }
+        #${ID.backdrop} { padding: 0; align-items: stretch; justify-content: stretch; background: rgba(20,30,40,.20); }
         #${ID.panel} { width: 100vw; height: 100vh; border: 0; border-radius: 0; }
         .lm-header { padding-left: 14px; }
         .lm-module-card { align-items: flex-start; }
