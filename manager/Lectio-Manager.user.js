@@ -1,1207 +1,2715 @@
 // ==UserScript==
 // @name         Lectio Manager
-// @namespace    https://github.com/RktRobinhood/Lectio-Scripts
-// @version      2.0.0
-// @description  Discover and manage Lectio userscript modules with Stable and Unstable release channels.
-// @author       RktRobinhood
+// @namespace    https://www.lectio.dk/
+// @version      1.14.0
+// @description  Discover, install, and manage independent Lectio Tampermonkey modules from one small gear panel, with an optional experimental mode.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_xmlhttpRequest
 // @connect      raw.githubusercontent.com
-// @homepageURL  https://github.com/RktRobinhood/Lectio-Scripts
-// @supportURL   https://github.com/RktRobinhood/Lectio-Scripts/issues
 // @updateURL    https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/manager/Lectio-Manager.user.js
 // @downloadURL  https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/manager/Lectio-Manager.user.js
 // ==/UserScript==
 
 (() => {
-  'use strict';
+    'use strict';
 
-  const VERSION = '2.0.0';
-  const REPO_RAW = 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main';
-  const STABLE_CATALOGUE_URL = `${REPO_RAW}/catalogue/modules.json`;
-  const UNSTABLE_CATALOGUE_URL = `${REPO_RAW}/modules-unstable/modules.json`;
-  const REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
+    /*
+     * ============================================================
+     * NON-NEGOTIABLE BOUNDARY
+     * ============================================================
+     *
+     * This Manager only discovers, describes, opens installation
+     * routes, shows status, and hosts generic settings controls.
+     *
+     * It must never download and eval() module JavaScript, bundle
+     * feature code, or touch Tampermonkey's own enable/disable
+     * switches. Catalogue fields are rendered as text/links only.
+     */
 
-  const KEY = Object.freeze({
-    channel: 'lectioManager.releaseChannel.v1',
-    stableCatalogue: 'lectioManager.catalogue.stable.v1',
-    stableRefresh: 'lectioManager.catalogue.stable.refreshedAt.v1',
-    unstableCatalogue: 'lectioManager.catalogue.unstable.v1',
-    unstableRefresh: 'lectioManager.catalogue.unstable.refreshedAt.v1',
-    activeTab: 'lectioManager.activeTab.v1'
-  });
+    const CATALOGUE_URL =
+        'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/catalogue/modules.json';
 
-  const ID = Object.freeze({
-    launcher: 'lectio-manager-launcher',
-    backdrop: 'lectio-manager-backdrop',
-    panel: 'lectio-manager-panel',
-    style: 'lectio-manager-style'
-  });
+    // Experimental overlay. Only fetched while experimental mode is on, and it
+    // adds to or replaces entries in the stable catalogue -- it never becomes
+    // the catalogue, so turning the mode off restores the plain stable list.
+    const UNSTABLE_CATALOGUE_URL =
+        'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/modules.json';
 
-  const state = {
-    channel: normalizeChannel(GM_getValue(KEY.channel, 'stable')),
-    activeTab: normalizeTab(GM_getValue(KEY.activeTab, 'modules')),
-    stableCatalogue: readStoredCatalogue(KEY.stableCatalogue),
-    unstableCatalogue: readStoredCatalogue(KEY.unstableCatalogue),
-    stableRefreshedAt: Number(GM_getValue(KEY.stableRefresh, 0)) || 0,
-    unstableRefreshedAt: Number(GM_getValue(KEY.unstableRefresh, 0)) || 0,
-    registrations: new Map(),
-    panelOpen: false,
-    refreshInFlight: false,
-    statusMessage: '',
-    statusKind: 'info'
-  };
+    const APPROVED_HOST =
+        'raw.githubusercontent.com';
 
-  window.addEventListener('lectio-module:register', onModuleRegister);
+    const APPROVED_PATH_PREFIX =
+        '/RktRobinhood/Lectio-Scripts/';
 
-  installStyles();
-  installLauncher();
-  requestModuleDiscovery();
-  window.setTimeout(requestModuleDiscovery, 400);
-  window.setTimeout(requestModuleDiscovery, 1400);
+    const REFRESH_INTERVAL_MS =
+        24 * 60 * 60 * 1000;
 
-  // Refresh in the background only when needed. Cached data renders instantly.
-  void refreshIfNeeded();
+    const DISCOVER_EVENT = 'lectio-manager:discover';
+    const REGISTER_EVENT = 'lectio-module:register';
+    const SET_SETTING_EVENT = 'lectio-manager:set-setting';
+    const PREVIEW_SETTING_EVENT = 'lectio-manager:preview-setting';
+    const CLEAR_SETTING_PREVIEW_EVENT = 'lectio-manager:clear-setting-preview';
 
-  function normalizeChannel(value) {
-    return value === 'unstable' ? 'unstable' : 'stable';
-  }
+    const STORAGE_CATALOGUE = 'lectioManager.catalogue.v1';
+    const STORAGE_LAST_REFRESH = 'lectioManager.lastRefresh.v1';
+    const STORAGE_VIEW = 'lectioManager.view.v1';
+    const STORAGE_SORT_MODE = 'lectioManager.sortMode.v1';
+    const STORAGE_UPDATE_TIP_DISMISSED = 'lectioManager.updateTipDismissed.v1';
+    const STORAGE_INSTALLED = 'lectioManager.installed.v1';
+    const STORAGE_EXPERIMENTAL = 'lectioManager.experimental.v1';
+    const STORAGE_UNSTABLE_CATALOGUE = 'lectioManager.catalogue.unstable.v1';
 
-  function normalizeTab(value) {
-    return value === 'settings' ? 'settings' : 'modules';
-  }
+    const ISSUES_URL = 'https://github.com/RktRobinhood/Lectio-Scripts/issues/new/choose';
 
-  function readStoredCatalogue(key) {
-    const raw = GM_getValue(key, null);
-    if (!raw) return null;
-    try {
-      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
-      return validateCatalogue(parsed, { allowUnstableChannel: true });
-    } catch (_) {
-      return null;
-    }
-  }
+    const AUDIENCE_VIEW_PREFIX = 'audience:';
+    const CATEGORY_VIEW_PREFIX = 'category:';
 
-  function writeStoredCatalogue(key, catalogue) {
-    GM_setValue(key, JSON.stringify(catalogue));
-  }
+    const LOG = '[Lectio Manager]';
 
-  function onModuleRegister(event) {
-    const detail = event?.detail;
-    if (!detail || typeof detail !== 'object') return;
+    let catalogue = null;
+    let unstableCatalogue = null;
+    let experimentalMode = false;
+    let lastRefresh = 0;
+    let refreshing = false;
+    let elements = null;
+    let updatedLabelTimer = null;
+    let currentView = 'installed';
+    let sortMode = 'category';
+    let openSettingsModuleId = null;
+    let pendingSettingsRefresh = null;
 
-    const id = cleanString(detail.id);
-    const version = cleanString(detail.version);
-    if (!id || !version) return;
+    // Modules that registered on THIS page load. A module only registers where its
+    // own @match lets it run, so this is "active here", not "installed".
+    const detected = new Map();
 
-    const aliases = Array.isArray(detail.aliases)
-      ? detail.aliases.map(cleanString).filter(Boolean)
-      : [];
+    // Modules seen at least once on any Lectio page, persisted across page loads.
+    // This is what Installed/Available are counted from.
+    const installed = new Map();
 
-    state.registrations.set(id, {
-      id,
-      aliases,
-      name: cleanString(detail.name) || id,
-      version,
-      channel: normalizeRegisteredChannel(detail.channel),
-      settingsSchema: Array.isArray(detail.settingsSchema) ? detail.settingsSchema : [],
-      currentValues: detail.currentValues && typeof detail.currentValues === 'object'
-        ? detail.currentValues
-        : {}
-    });
+    // ============================================================
+    // BOOT
+    // ============================================================
 
-    if (state.panelOpen) renderPanelBody();
-  }
-
-  function normalizeRegisteredChannel(value) {
-    if (value === 'stable' || value === 'unstable') return value;
-    return 'unknown';
-  }
-
-  function requestModuleDiscovery() {
-    window.dispatchEvent(new CustomEvent('lectio-manager:discover', {
-      detail: { managerVersion: VERSION, channel: state.channel }
-    }));
-  }
-
-  async function refreshIfNeeded() {
-    const now = Date.now();
-    const stableStale = !state.stableCatalogue || now - state.stableRefreshedAt >= REFRESH_INTERVAL_MS;
-    const unstableStale = state.channel === 'unstable' &&
-      (!state.unstableCatalogue || now - state.unstableRefreshedAt >= REFRESH_INTERVAL_MS);
-
-    if (!stableStale && !unstableStale) return;
-    await refreshCatalogues({ force: false });
-  }
-
-  async function refreshCatalogues({ force }) {
-    if (state.refreshInFlight) return;
-    state.refreshInFlight = true;
-    state.statusMessage = 'Refreshing module catalogues...';
-    state.statusKind = 'info';
-    renderPanelBody();
-
-    const errors = [];
-
-    try {
-      if (force || !state.stableCatalogue || Date.now() - state.stableRefreshedAt >= REFRESH_INTERVAL_MS) {
-        try {
-          const stable = await fetchCatalogue(STABLE_CATALOGUE_URL, { force });
-          state.stableCatalogue = stable;
-          state.stableRefreshedAt = Date.now();
-          writeStoredCatalogue(KEY.stableCatalogue, stable);
-          GM_setValue(KEY.stableRefresh, state.stableRefreshedAt);
-        } catch (error) {
-          errors.push(`Stable catalogue: ${error.message}`);
-        }
-      }
-
-      if (state.channel === 'unstable' &&
-          (force || !state.unstableCatalogue || Date.now() - state.unstableRefreshedAt >= REFRESH_INTERVAL_MS)) {
-        try {
-          const unstable = await fetchCatalogue(UNSTABLE_CATALOGUE_URL, { force });
-          state.unstableCatalogue = unstable;
-          state.unstableRefreshedAt = Date.now();
-          writeStoredCatalogue(KEY.unstableCatalogue, unstable);
-          GM_setValue(KEY.unstableRefresh, state.unstableRefreshedAt);
-        } catch (error) {
-          errors.push(`Unstable overlay: ${error.message}`);
-        }
-      }
-    } finally {
-      state.refreshInFlight = false;
-    }
-
-    if (errors.length) {
-      const hasUsableStable = Boolean(state.stableCatalogue);
-      state.statusMessage = hasUsableStable
-        ? `Could not refresh everything. Using last known good data. ${errors.join(' | ')}`
-        : `Catalogue refresh failed. ${errors.join(' | ')}`;
-      state.statusKind = 'error';
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init, { once: true });
     } else {
-      state.statusMessage = 'Updated just now.';
-      state.statusKind = 'success';
+        init();
     }
 
-    requestModuleDiscovery();
-    renderPanelBody();
-  }
-
-  function fetchCatalogue(baseUrl, { force }) {
-    return new Promise((resolve, reject) => {
-      const url = force
-        ? `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}_=${Date.now()}`
-        : baseUrl;
-
-      GM_xmlhttpRequest({
-        method: 'GET',
-        url,
-        headers: {
-          Accept: 'application/json,text/plain;q=0.9,*/*;q=0.8',
-          'Cache-Control': force ? 'no-cache' : 'max-age=0'
-        },
-        timeout: 15000,
-        onload(response) {
-          if (response.status < 200 || response.status >= 300) {
-            reject(new Error(`HTTP ${response.status}`));
+    function init() {
+        if (!document.body) {
+            window.setTimeout(init, 50);
             return;
-          }
-
-          try {
-            const parsed = JSON.parse(response.responseText);
-            resolve(validateCatalogue(parsed, { allowUnstableChannel: true }));
-          } catch (error) {
-            reject(new Error(`Invalid JSON/catalogue: ${error.message}`));
-          }
-        },
-        onerror() {
-          reject(new Error('Network error'));
-        },
-        ontimeout() {
-          reject(new Error('Request timed out'));
         }
-      });
-    });
-  }
 
-  function validateCatalogue(input, { allowUnstableChannel }) {
-    if (!input || typeof input !== 'object') throw new Error('Catalogue is not an object');
-    if (Number(input.schemaVersion) !== 1) throw new Error(`Unsupported schemaVersion ${input.schemaVersion}`);
-    if (!Array.isArray(input.modules)) throw new Error('Catalogue modules must be an array');
+        catalogue = loadCachedCatalogue();
+        experimentalMode = GM_getValue(STORAGE_EXPERIMENTAL, false) === true;
+        unstableCatalogue = experimentalMode ? loadCachedUnstableCatalogue() : null;
+        lastRefresh = Number(GM_getValue(STORAGE_LAST_REFRESH, 0)) || 0;
+        currentView = normalizeView(GM_getValue(STORAGE_VIEW, 'installed'));
+        sortMode = normalizeSortMode(GM_getValue(STORAGE_SORT_MODE, 'category'));
+        loadInstalledRegistry();
 
-    if (input.channel && !allowUnstableChannel) {
-      throw new Error('Unexpected channel field');
+        buildUI();
+        renderModuleList();
+        updateRefreshedLabel({ justUpdated: false });
+
+        window.addEventListener(REGISTER_EVENT, handleModuleRegister);
+        requestDiscovery();
+
+        const age = Date.now() - lastRefresh;
+
+        if (!catalogue || age > REFRESH_INTERVAL_MS) {
+            refreshCatalogue();
+        }
     }
 
-    const ids = new Set();
-    const modules = input.modules.map((module, index) => validateModule(module, index));
+    // ============================================================
+    // CATALOGUE: CACHE
+    // ============================================================
 
-    for (const module of modules) {
-      if (ids.has(module.id)) throw new Error(`Duplicate module id: ${module.id}`);
-      ids.add(module.id);
+    function loadCachedCatalogue() {
+        const raw = GM_getValue(STORAGE_CATALOGUE, '');
+
+        if (!raw) {
+            return null;
+        }
+
+        try {
+            return validateCatalogue(raw);
+        } catch (error) {
+            console.warn(LOG, 'Discarding invalid cached catalogue:', error.message);
+            return null;
+        }
     }
 
-    return {
-      ...input,
-      schemaVersion: 1,
-      modules
-    };
-  }
-
-  function validateModule(input, index) {
-    if (!input || typeof input !== 'object') throw new Error(`Module ${index + 1} is invalid`);
-
-    const id = cleanString(input.id);
-    const name = cleanString(input.name);
-    const description = cleanString(input.description);
-    const version = cleanString(input.version);
-    const installUrl = cleanString(input.installUrl);
-
-    if (!id || !/^[a-z0-9][a-z0-9._-]*$/i.test(id)) throw new Error(`Invalid module id at ${index + 1}`);
-    if (!name) throw new Error(`Missing module name for ${id}`);
-    if (!version) throw new Error(`Missing version for ${id}`);
-    if (!isApprovedInstallUrl(installUrl)) throw new Error(`Unapproved install URL for ${id}`);
-
-    return {
-      ...input,
-      id,
-      name,
-      description,
-      version,
-      installUrl,
-      category: cleanString(input.category) || 'Other',
-      status: cleanString(input.status) || 'stable',
-      aliases: Array.isArray(input.aliases)
-        ? input.aliases.map(cleanString).filter(Boolean)
-        : [],
-      audience: Array.isArray(input.audience)
-        ? input.audience.map(cleanString).filter(Boolean)
-        : []
-    };
-  }
-
-  function isApprovedInstallUrl(value) {
-    try {
-      const url = new URL(value);
-      if (url.protocol !== 'https:') return false;
-      if (url.hostname === 'raw.githubusercontent.com') {
-        return url.pathname.startsWith('/RktRobinhood/Lectio-Scripts/');
-      }
-      if (url.hostname === 'github.com') {
-        return url.pathname.startsWith('/RktRobinhood/Lectio-Scripts/') &&
-          url.pathname.includes('/raw/');
-      }
-      return false;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  function cleanString(value) {
-    return typeof value === 'string' ? value.trim() : '';
-  }
-
-  function installLauncher() {
-    if (document.getElementById(ID.launcher)) return;
-
-    const button = document.createElement('button');
-    button.id = ID.launcher;
-    button.type = 'button';
-    button.setAttribute('aria-label', 'Open Lectio Manager');
-    button.title = 'Lectio Manager';
-    button.innerHTML = '<span aria-hidden="true">⚙</span>';
-    button.addEventListener('click', openPanel);
-
-    document.body.appendChild(button);
-  }
-
-  function openPanel() {
-    state.panelOpen = true;
-    requestModuleDiscovery();
-    window.setTimeout(requestModuleDiscovery, 250);
-
-    let backdrop = document.getElementById(ID.backdrop);
-    if (!backdrop) {
-      backdrop = document.createElement('div');
-      backdrop.id = ID.backdrop;
-      backdrop.addEventListener('click', event => {
-        if (event.target === backdrop) closePanel();
-      });
-      document.body.appendChild(backdrop);
+    function saveCatalogueCache(validatedCatalogue, timestamp) {
+        try {
+            GM_setValue(STORAGE_CATALOGUE, JSON.stringify(validatedCatalogue));
+            GM_setValue(STORAGE_LAST_REFRESH, timestamp);
+        } catch (error) {
+            console.warn(LOG, 'Could not persist catalogue cache:', error);
+        }
     }
 
-    backdrop.hidden = false;
-    renderPanel();
-  }
+    function loadCachedUnstableCatalogue() {
+        const raw = GM_getValue(STORAGE_UNSTABLE_CATALOGUE, '');
 
-  function closePanel() {
-    state.panelOpen = false;
-    const backdrop = document.getElementById(ID.backdrop);
-    if (backdrop) backdrop.hidden = true;
-  }
+        if (!raw) {
+            return null;
+        }
 
-  function renderPanel() {
-    const backdrop = document.getElementById(ID.backdrop);
-    if (!backdrop) return;
-
-    let panel = document.getElementById(ID.panel);
-    if (!panel) {
-      panel = document.createElement('section');
-      panel.id = ID.panel;
-      panel.setAttribute('role', 'dialog');
-      panel.setAttribute('aria-modal', 'true');
-      panel.setAttribute('aria-label', 'Lectio Manager');
-      backdrop.appendChild(panel);
+        try {
+            return validateCatalogue(raw);
+        } catch (error) {
+            console.warn(LOG, 'Discarding invalid cached experimental overlay:', error.message);
+            return null;
+        }
     }
 
-    panel.innerHTML = `
-      <header class="lm-header">
-        <div>
-          <div class="lm-title-row">
-            <h2>Lectio Manager</h2>
-            <span class="lm-channel-badge ${state.channel === 'unstable' ? 'is-unstable' : ''}">
-              ${state.channel === 'unstable' ? 'UNSTABLE' : 'STABLE'}
-            </span>
-          </div>
-          <div class="lm-version">Manager v${escapeHtml(VERSION)}</div>
-        </div>
-        <div class="lm-header-actions">
-          <button type="button" class="lm-icon-button" data-action="refresh" title="Refresh module catalogues now" aria-label="Refresh module catalogues">↻</button>
-          <button type="button" class="lm-icon-button" data-action="close" title="Close" aria-label="Close Lectio Manager">×</button>
-        </div>
-      </header>
-      <nav class="lm-tabs" aria-label="Lectio Manager sections">
-        <button type="button" data-tab="modules" class="${state.activeTab === 'modules' ? 'active' : ''}">Modules</button>
-        <button type="button" data-tab="settings" class="${state.activeTab === 'settings' ? 'active' : ''}">Settings</button>
-      </nav>
-      <div id="lectio-manager-panel-body" class="lm-body"></div>
-    `;
-
-    panel.querySelector('[data-action="close"]').addEventListener('click', closePanel);
-    panel.querySelector('[data-action="refresh"]').addEventListener('click', () => {
-      void refreshCatalogues({ force: true });
-    });
-
-    for (const tab of panel.querySelectorAll('[data-tab]')) {
-      tab.addEventListener('click', () => {
-        state.activeTab = normalizeTab(tab.dataset.tab);
-        GM_setValue(KEY.activeTab, state.activeTab);
-        renderPanel();
-      });
+    function saveUnstableCatalogueCache(validatedCatalogue) {
+        try {
+            GM_setValue(STORAGE_UNSTABLE_CATALOGUE, JSON.stringify(validatedCatalogue));
+        } catch (error) {
+            console.warn(LOG, 'Could not persist experimental overlay cache:', error);
+        }
     }
 
-    renderPanelBody();
-  }
+    // ============================================================
+    // CATALOGUE: FETCH + VALIDATE
+    // ============================================================
 
-  function renderPanelBody() {
-    if (!state.panelOpen) return;
-    const body = document.getElementById('lectio-manager-panel-body');
-    if (!body) return;
+    async function refreshCatalogue() {
+        if (refreshing) {
+            return;
+        }
 
-    body.innerHTML = '';
+        refreshing = true;
+        setRefreshingUI(true);
 
-    if (state.channel === 'unstable') {
-      body.appendChild(makeWarning(
-        'UNSTABLE CHANNEL',
-        'Experimental modules may contain bugs, incomplete features, or breaking changes. Nothing is installed automatically. You can switch back to Stable at any time.'
-      ));
+        try {
+            const raw = await fetchCatalogueText();
+            const validated = validateCatalogue(raw);
+
+            catalogue = validated;
+            lastRefresh = Date.now();
+
+            saveCatalogueCache(validated, lastRefresh);
+
+            // Best-effort: a missing or broken overlay must never take the
+            // stable list down with it.
+            if (experimentalMode) {
+                try {
+                    unstableCatalogue = validateCatalogue(await fetchCatalogueText(UNSTABLE_CATALOGUE_URL));
+                    saveUnstableCatalogueCache(unstableCatalogue);
+                } catch (error) {
+                    console.warn(LOG, 'Experimental overlay refresh failed:', error);
+                }
+            }
+
+            showError(null);
+            renderModuleList();
+            updateRefreshedLabel({ justUpdated: true });
+
+        } catch (error) {
+            console.warn(LOG, 'Catalogue refresh failed:', error);
+
+            showError(
+                lastRefresh
+                    ? `Could not refresh - showing data from ${formatTime(lastRefresh)}`
+                    : 'Could not load the module catalogue.'
+            );
+
+        } finally {
+            refreshing = false;
+            setRefreshingUI(false);
+        }
     }
 
-    if (state.statusMessage) {
-      const status = document.createElement('div');
-      status.className = `lm-status is-${state.statusKind}`;
-      status.textContent = state.statusMessage;
-      body.appendChild(status);
+    function fetchCatalogueText(source = CATALOGUE_URL) {
+        return new Promise((resolve, reject) => {
+            const url = `${source}?ts=${Date.now()}`;
+
+            GM_xmlhttpRequest({
+                method: 'GET',
+                url,
+                timeout: 15000,
+                headers: { 'Cache-Control': 'no-cache' },
+                onload: (response) => {
+                    if (response.status >= 200 && response.status < 300) {
+                        resolve(response.responseText);
+                    } else {
+                        reject(new Error(`HTTP ${response.status}`));
+                    }
+                },
+                onerror: () => reject(new Error('Network error')),
+                ontimeout: () => reject(new Error('Request timed out'))
+            });
+        });
     }
 
-    if (state.activeTab === 'settings') {
-      renderSettings(body);
-    } else {
-      renderModules(body);
-    }
-  }
+    function validateCatalogue(raw) {
+        let parsed;
 
-  function renderSettings(body) {
-    const section = document.createElement('section');
-    section.className = 'lm-settings-section';
-    section.innerHTML = `
-      <div class="lm-section-heading">
-        <div>
-          <h3>Release channel</h3>
-          <p>Choose which versions the Manager offers. Changing this setting never installs, upgrades, or downgrades a userscript by itself.</p>
-        </div>
-      </div>
-      <div class="lm-channel-options">
-        <label class="lm-channel-option ${state.channel === 'stable' ? 'selected' : ''}">
-          <input type="radio" name="lm-channel" value="stable" ${state.channel === 'stable' ? 'checked' : ''}>
-          <span class="lm-channel-copy">
-            <strong>Stable <span class="lm-help" title="Recommended. Uses production-tested module versions. Experimental versions are ignored. If a newer test build is installed, the Manager can offer a Downgrade button back to Stable.">?</span></strong>
-            <small>Recommended for normal use. Production-tested module versions.</small>
-          </span>
-        </label>
-        <label class="lm-channel-option is-danger ${state.channel === 'unstable' ? 'selected' : ''}">
-          <input type="radio" name="lm-channel" value="unstable" ${state.channel === 'unstable' ? 'checked' : ''}>
-          <span class="lm-channel-copy">
-            <strong>Unstable <span class="lm-help" title="Experimental. Shows modules and versions still being tested. They may break. Switching channels alone changes no installed code; each Install, Upgrade, or Downgrade still requires your explicit click and Tampermonkey confirmation.">?</span></strong>
-            <small>Experimental versions for testing. Bugs and regressions are possible.</small>
-          </span>
-        </label>
-      </div>
-      <div class="lm-explainer">
-        <strong>Important:</strong> the channel is a catalogue preference, not an automatic deployment switch. The Manager only changes installed code when you explicitly click an action such as <em>Upgrade</em> or <em>Downgrade</em> and then confirm it in Tampermonkey.
-      </div>
-      <div class="lm-refresh-info">
-        <div><strong>Stable catalogue:</strong> ${formatRefresh(state.stableRefreshedAt)}</div>
-        <div><strong>Unstable overlay:</strong> ${formatRefresh(state.unstableRefreshedAt)}</div>
-      </div>
-    `;
+        try {
+            parsed = JSON.parse(raw);
+        } catch (_) {
+            throw new Error('Malformed JSON');
+        }
 
-    for (const input of section.querySelectorAll('input[name="lm-channel"]')) {
-      input.addEventListener('change', () => {
-        void setChannel(input.value);
-      });
-    }
+        if (!parsed || typeof parsed !== 'object') {
+            throw new Error('Catalogue is not an object');
+        }
 
-    body.appendChild(section);
-  }
+        if (parsed.schemaVersion !== 1) {
+            throw new Error(`Unsupported schemaVersion: ${parsed.schemaVersion}`);
+        }
 
-  async function setChannel(nextValue) {
-    const next = normalizeChannel(nextValue);
-    if (next === state.channel) return;
+        if (!Array.isArray(parsed.modules)) {
+            throw new Error('Catalogue has no modules array');
+        }
 
-    if (next === 'unstable') {
-      const accepted = window.confirm(
-        'Switch Lectio Manager to the UNSTABLE channel?\n\n' +
-        'Unstable modules are experimental and may contain bugs or breaking changes. ' +
-        'Changing the channel does NOT install anything automatically.'
-      );
-      if (!accepted) {
-        renderPanel();
-        return;
-      }
-    }
+        const seenIds = new Set();
+        const modules = [];
 
-    state.channel = next;
-    GM_setValue(KEY.channel, state.channel);
-    state.statusMessage = next === 'unstable'
-      ? 'Unstable channel selected. No modules have been changed.'
-      : 'Stable channel selected. Installed test versions have not been changed; use Downgrade where offered.';
-    state.statusKind = 'success';
+        for (const entry of parsed.modules) {
+            if (!entry || typeof entry !== 'object') {
+                continue;
+            }
 
-    requestModuleDiscovery();
-    renderPanel();
+            const { id, name, description, version, installUrl } = entry;
 
-    if (next === 'unstable' && !state.unstableCatalogue) {
-      await refreshCatalogues({ force: true });
-    }
-  }
+            if (
+                !isNonEmptyString(id) ||
+                !isNonEmptyString(name) ||
+                !isNonEmptyString(description) ||
+                !isNonEmptyString(version) ||
+                !isNonEmptyString(installUrl)
+            ) {
+                console.warn(LOG, 'Skipping module with missing required fields:', entry);
+                continue;
+            }
 
-  function renderModules(body) {
-    if (!state.stableCatalogue) {
-      const empty = document.createElement('div');
-      empty.className = 'lm-empty';
-      empty.innerHTML = '<strong>Loading module catalogue...</strong><span>The Manager will keep the last valid catalogue when GitHub is temporarily unavailable.</span>';
-      body.appendChild(empty);
-      return;
+            if (seenIds.has(id)) {
+                console.warn(LOG, 'Skipping duplicate module id:', id);
+                continue;
+            }
+
+            if (!isApprovedInstallUrl(installUrl)) {
+                console.warn(LOG, 'Skipping module with disallowed installUrl:', id, installUrl);
+                continue;
+            }
+
+            seenIds.add(id);
+
+            modules.push({
+                id,
+                name,
+                description,
+                category: isNonEmptyString(entry.category) ? entry.category : 'General',
+                audience: Array.isArray(entry.audience) ? entry.audience.filter(isNonEmptyString) : [],
+                status: isNonEmptyString(entry.status) ? entry.status : 'stable',
+                aliases: Array.isArray(entry.aliases) ? entry.aliases.filter(isNonEmptyString) : [],
+                version,
+                installUrl,
+                supportUrl: isNonEmptyString(entry.supportUrl)
+                    ? entry.supportUrl
+                    : 'https://github.com/RktRobinhood/Lectio-Scripts/issues'
+            });
+        }
+
+        if (!modules.length) {
+            throw new Error('Catalogue contained no valid modules');
+        }
+
+        return {
+            schemaVersion: 1,
+            channel: parsed.channel === 'unstable' ? 'unstable' : 'stable',
+            generatedAt: isNonEmptyString(parsed.generatedAt) ? parsed.generatedAt : new Date().toISOString(),
+            modules
+        };
     }
 
-    const modules = buildEffectiveModules();
+    function isApprovedInstallUrl(value) {
+        try {
+            const url = new URL(value);
 
-    if (!modules.length) {
-      const empty = document.createElement('div');
-      empty.className = 'lm-empty';
-      empty.textContent = 'No modules are listed in this catalogue.';
-      body.appendChild(empty);
-      return;
+            return (
+                url.protocol === 'https:' &&
+                url.host === APPROVED_HOST &&
+                url.pathname.startsWith(APPROVED_PATH_PREFIX)
+            );
+        } catch (_) {
+            return false;
+        }
     }
 
-    const list = document.createElement('div');
-    list.className = 'lm-module-list';
-
-    for (const module of modules) {
-      list.appendChild(renderModuleCard(module));
+    function isNonEmptyString(value) {
+        return typeof value === 'string' && value.trim().length > 0;
     }
 
-    body.appendChild(list);
+    function normalizeView(value) {
+        if (value === 'all' || value === 'installed') {
+            return value;
+        }
 
-    const unmatched = getUnmatchedRegistrations(modules);
-    if (unmatched.length) {
-      const heading = document.createElement('h3');
-      heading.className = 'lm-subheading';
-      heading.textContent = 'Other detected modules';
-      body.appendChild(heading);
+        if (isNonEmptyString(value) && (value.startsWith(AUDIENCE_VIEW_PREFIX) || value.startsWith(CATEGORY_VIEW_PREFIX))) {
+            return value;
+        }
 
-      const note = document.createElement('div');
-      note.className = 'lm-status is-info';
-      note.textContent = state.channel === 'stable'
-        ? 'These running modules are not in the selected Stable catalogue. An unstable-only test module can appear here after you switch back to Stable.'
-        : 'These running modules did not match a catalogue entry.';
-      body.appendChild(note);
+        return 'all';
+    }
 
-      for (const registration of unmatched) {
-        const card = document.createElement('article');
-        card.className = 'lm-module-card is-outside';
-        card.innerHTML = `
-          <div class="lm-module-main">
-            <div class="lm-module-title-row">
-              <h3>${escapeHtml(registration.name)}</h3>
-              <span class="lm-tag">detected</span>
+    function normalizeSortMode(value) {
+        return ['category', 'name'].includes(value) ? value : 'category';
+    }
+
+    function getViewLabel(view) {
+        if (view === 'installed') {
+            return 'Installed';
+        }
+
+        if (view.startsWith(AUDIENCE_VIEW_PREFIX)) {
+            const audience = view.slice(AUDIENCE_VIEW_PREFIX.length);
+            return audience.charAt(0).toUpperCase() + audience.slice(1);
+        }
+
+        if (view.startsWith(CATEGORY_VIEW_PREFIX)) {
+            return view.slice(CATEGORY_VIEW_PREFIX.length);
+        }
+
+        return 'Available';
+    }
+
+    // ============================================================
+    // EXPERIMENTAL MODE
+    // ============================================================
+
+    function closePrefsPanel() {
+        if (!elements || !elements.prefsPanel) {
+            return;
+        }
+
+        elements.prefsPanel.hidden = true;
+        elements.prefsBtn.setAttribute('aria-expanded', 'false');
+    }
+
+    async function setExperimentalMode(enabled) {
+        experimentalMode = enabled === true;
+        GM_setValue(STORAGE_EXPERIMENTAL, experimentalMode);
+
+        if (!experimentalMode) {
+            unstableCatalogue = null;
+            renderModuleList();
+            return;
+        }
+
+        // Draw straight away from cache so the list does not sit empty while the
+        // overlay is fetched, then redraw once the fresh copy lands.
+        unstableCatalogue = loadCachedUnstableCatalogue();
+        renderModuleList();
+
+        try {
+            unstableCatalogue = validateCatalogue(await fetchCatalogueText(UNSTABLE_CATALOGUE_URL));
+            saveUnstableCatalogueCache(unstableCatalogue);
+            showError(null);
+        } catch (error) {
+            console.warn(LOG, 'Could not load the experimental overlay:', error);
+            showError('Could not load the experimental module list.');
+        }
+
+        renderModuleList();
+    }
+
+    // ============================================================
+    // MODULE LIST: STABLE + OPTIONAL EXPERIMENTAL OVERLAY
+    // ============================================================
+
+    // The stable catalogue is always the base list. With experimental mode on,
+    // an overlay entry either replaces the stable entry it matches -- keeping the
+    // stable id, so Installed detection and settings carry on working -- or is
+    // appended as an experimental-only module.
+    function getModules() {
+        const stable = catalogue ? catalogue.modules : [];
+
+        if (!experimentalMode || !unstableCatalogue) {
+            return stable;
+        }
+
+        const merged = stable.map((module) => ({ ...module, channel: 'stable' }));
+
+        for (const experimental of unstableCatalogue.modules) {
+            const index = merged.findIndex((module) => modulesMatch(module, experimental));
+            const base = index === -1 ? null : merged[index];
+
+            const entry = {
+                ...(base || {}),
+                ...experimental,
+                id: base ? base.id : experimental.id,
+                aliases: [...new Set([...(base ? base.aliases : []), ...experimental.aliases, experimental.id])],
+                channel: 'unstable',
+                stableVersion: base ? base.version : null
+            };
+
+            if (base) {
+                merged[index] = entry;
+            } else {
+                merged.push(entry);
+            }
+        }
+
+        return merged;
+    }
+
+    function modulesMatch(a, b) {
+        const aIds = new Set([a.id, ...(a.aliases || [])]);
+        return [b.id, ...(b.aliases || [])].some((id) => aIds.has(id));
+    }
+
+    // ============================================================
+    // INSTALLED REGISTRY
+    // ============================================================
+
+    function loadInstalledRegistry() {
+        const raw = GM_getValue(STORAGE_INSTALLED, '');
+
+        if (!raw) {
+            return;
+        }
+
+        try {
+            const parsed = JSON.parse(raw);
+
+            if (!parsed || typeof parsed !== 'object') {
+                return;
+            }
+
+            for (const [id, entry] of Object.entries(parsed)) {
+                if (!isNonEmptyString(id) || !entry || typeof entry !== 'object') {
+                    continue;
+                }
+
+                installed.set(id, {
+                    id,
+                    name: isNonEmptyString(entry.name) ? entry.name : id,
+                    version: isNonEmptyString(entry.version) ? entry.version : '',
+                    lastSeenAt: Number(entry.lastSeenAt) || 0
+                });
+            }
+        } catch (_) {
+            console.warn(LOG, 'Ignoring malformed installed registry');
+        }
+    }
+
+    function saveInstalledRegistry() {
+        const plain = {};
+
+        for (const [id, entry] of installed) {
+            plain[id] = { name: entry.name, version: entry.version, lastSeenAt: entry.lastSeenAt };
+        }
+
+        GM_setValue(STORAGE_INSTALLED, JSON.stringify(plain));
+    }
+
+    function rememberInstalled(registration) {
+        installed.set(registration.id, {
+            id: registration.id,
+            name: registration.name,
+            version: registration.version,
+            lastSeenAt: Date.now()
+        });
+
+        saveInstalledRegistry();
+    }
+
+    function forgetInstalled(moduleId) {
+        if (!installed.delete(moduleId)) {
+            return;
+        }
+
+        detected.delete(moduleId);
+        saveInstalledRegistry();
+        renderModuleList();
+    }
+
+    // A module is installed if it has ever registered, not merely if it is running
+    // on the page in front of us: Schedule Summary only matches SkemaNy.aspx, and
+    // Unread Message Notifications only matches one school.
+    function isInstalled(moduleId) {
+        return detected.has(moduleId) || installed.has(moduleId);
+    }
+
+    // The record to show on a card: the live registration when the module is running
+    // here, otherwise what we last persisted about it.
+    function getModuleRecord(moduleId) {
+        return detected.get(moduleId) || installed.get(moduleId) || null;
+    }
+
+    // ============================================================
+    // MODULE HANDSHAKE
+    // ============================================================
+
+    function requestDiscovery() {
+        window.dispatchEvent(new CustomEvent(DISCOVER_EVENT));
+    }
+
+    function handleModuleRegister(event) {
+        const detail = event?.detail;
+
+        if (!detail || !isNonEmptyString(detail.id)) {
+            return;
+        }
+
+        detected.set(detail.id, {
+            id: detail.id,
+            name: isNonEmptyString(detail.name) ? detail.name : detail.id,
+            version: isNonEmptyString(detail.version) ? detail.version : '',
+            settingsSchema: Array.isArray(detail.settingsSchema) ? detail.settingsSchema : [],
+            currentValues: (detail.currentValues && typeof detail.currentValues === 'object')
+                ? detail.currentValues
+                : {},
+            seenAt: Date.now()
+        });
+
+        rememberInstalled(detected.get(detail.id));
+        renderModuleList({ refreshFocusedSettings: detail.id === openSettingsModuleId });
+    }
+
+    function emitSettingChange(moduleId, key, value) {
+        window.dispatchEvent(new CustomEvent(SET_SETTING_EVENT, {
+            detail: { id: moduleId, key, value }
+        }));
+    }
+
+    function emitSettingPreview(moduleId, key, value) {
+        window.dispatchEvent(new CustomEvent(PREVIEW_SETTING_EVENT, {
+            detail: { id: moduleId, key, value }
+        }));
+    }
+
+    function clearSettingPreview(moduleId, key) {
+        window.dispatchEvent(new CustomEvent(CLEAR_SETTING_PREVIEW_EVENT, {
+            detail: { id: moduleId, key }
+        }));
+    }
+
+    // ============================================================
+    // UI: BUILD
+    // ============================================================
+
+    function buildUI() {
+        const root = document.createElement('div');
+        root.id = 'lectio-manager-root';
+
+        root.innerHTML = `
+            <button id="lectio-manager-toggle" type="button" title="Lectio Tools" aria-label="Lectio Tools">${gearSvg()}</button>
+            <div id="lectio-manager-panel" hidden>
+                <div class="lectio-manager-header">
+                    <span class="lectio-manager-title">Lectio Tools</span>
+                    <button type="button" class="lectio-manager-prefs" title="Manager settings" aria-label="Manager settings" aria-haspopup="true" aria-expanded="false">${gearSvg()}</button>
+                    <button type="button" class="lectio-manager-help" title="How to disable, update, or remove a script" aria-label="How to disable, update, or remove a script" aria-haspopup="true" aria-expanded="false">${helpSvg()}</button>
+                    <button type="button" class="lectio-manager-refresh" title="Refresh catalogue" aria-label="Refresh catalogue">${refreshSvg()}</button>
+                    <button type="button" class="lectio-manager-close" title="Close" aria-label="Close">${closeSvg()}</button>
+                </div>
+                <div class="lectio-manager-help-panel" hidden>
+                    The Manager shows available module updates and opens Tampermonkey's normal confirmation page. To disable, manually check, or remove a script, click the Tampermonkey icon in your browser toolbar and choose <strong>Dashboard</strong>.
+                </div>
+                <div class="lectio-manager-prefs-panel" hidden>
+                    <label class="lectio-manager-prefs-row">
+                        <input type="checkbox" class="lectio-manager-experimental-toggle">
+                        <span>
+                            <strong>Experimental mode</strong>
+                            <small>Show module versions that are still being tested. Nothing is installed automatically &mdash; you still confirm every install in Tampermonkey.</small>
+                        </span>
+                    </label>
+                </div>
+                <div id="lectio-manager-main-view" class="lectio-manager-main-view">
+                    <div class="lectio-manager-tip" hidden>
+                        <span class="lectio-manager-tip-text">Get automatic updates: open Tampermonkey &rarr; Settings &rarr; enable "Check for updates".</span>
+                        <button type="button" class="lectio-manager-tip-dismiss" aria-label="Dismiss tip">&times;</button>
+                    </div>
+                    <div class="lectio-manager-tabs" role="tablist" aria-label="Modules">
+                        <button type="button" class="lectio-manager-tab" data-primary-view="installed" role="tab" aria-controls="lectio-manager-main-view" aria-selected="true">
+                            Installed <span class="lectio-manager-installed-count"></span>
+                        </button>
+                        <button type="button" class="lectio-manager-tab" data-primary-view="all" role="tab" aria-controls="lectio-manager-main-view" aria-selected="false">
+                            Available <span class="lectio-manager-available-count"></span>
+                        </button>
+                    </div>
+                    <div class="lectio-manager-nav">
+                        <button type="button" class="lectio-manager-nav-trigger" aria-haspopup="true" aria-expanded="false">
+                            <span class="lectio-manager-nav-current">All modules</span>
+                            ${chevronSvg()}
+                        </button>
+                        <div class="lectio-manager-nav-menu" role="menu" hidden></div>
+                    </div>
+                    <div class="lectio-manager-error" hidden></div>
+                    <div class="lectio-manager-list-toolbar">
+                        <div class="lectio-manager-view-heading"></div>
+                        <div class="lectio-manager-sort" aria-label="Sort modules">
+                            <button type="button" data-sort="category">Category</button>
+                            <button type="button" data-sort="name">A&ndash;Z</button>
+                        </div>
+                    </div>
+                    <div class="lectio-manager-list"></div>
+                </div>
+                <div class="lectio-manager-settings-view" hidden>
+                    <div class="lectio-manager-settings-view-header">
+                        <button type="button" class="lectio-manager-settings-back">&larr; Installed</button>
+                        <div class="lectio-manager-settings-title-row">
+                            <div>
+                                <span class="lectio-manager-settings-category"></span>
+                                <strong class="lectio-manager-settings-title"></strong>
+                            </div>
+                            <span class="lectio-manager-settings-version"></span>
+                        </div>
+                    </div>
+                    <div class="lectio-manager-settings-body"></div>
+                </div>
+                <div class="lectio-manager-footer">
+                    <a class="lectio-manager-footer-link" href="${ISSUES_URL}" target="_blank" rel="noopener noreferrer">Report a bug or idea</a>
+                </div>
             </div>
-            <p>Running version ${escapeHtml(registration.version)} is outside the selected ${escapeHtml(capitalize(state.channel))} catalogue.</p>
-            <div class="lm-version-line">Installed: <strong>${escapeHtml(registration.version)}</strong></div>
-          </div>
         `;
-        body.appendChild(card);
-      }
-    }
 
-    const footer = document.createElement('div');
-    footer.className = 'lm-footer-note';
-    footer.innerHTML = `Last stable refresh: <strong>${escapeHtml(formatRefresh(state.stableRefreshedAt))}</strong>` +
-      (state.channel === 'unstable'
-        ? ` · Unstable overlay: <strong>${escapeHtml(formatRefresh(state.unstableRefreshedAt))}</strong>`
-        : '');
-    body.appendChild(footer);
-  }
+        document.body.appendChild(root);
+        injectStyles();
 
-  function buildEffectiveModules() {
-    const stable = state.stableCatalogue?.modules || [];
-    const byId = new Map(stable.map(module => [module.id, {
-      ...module,
-      selectedChannel: 'stable',
-      stableModule: module
-    }]));
+        const toggle = root.querySelector('#lectio-manager-toggle');
+        const panel = root.querySelector('#lectio-manager-panel');
+        const helpBtn = root.querySelector('.lectio-manager-help');
+        const helpPanel = root.querySelector('.lectio-manager-help-panel');
+        const prefsBtn = root.querySelector('.lectio-manager-prefs');
+        const prefsPanel = root.querySelector('.lectio-manager-prefs-panel');
+        const experimentalToggle = root.querySelector('.lectio-manager-experimental-toggle');
+        const refreshBtn = root.querySelector('.lectio-manager-refresh');
+        const closeBtn = root.querySelector('.lectio-manager-close');
+        const navTrigger = root.querySelector('.lectio-manager-nav-trigger');
+        const navMenu = root.querySelector('.lectio-manager-nav-menu');
+        const navCurrent = root.querySelector('.lectio-manager-nav-current');
+        const tipBanner = root.querySelector('.lectio-manager-tip');
+        const tipDismissBtn = root.querySelector('.lectio-manager-tip-dismiss');
+        const mainView = root.querySelector('.lectio-manager-main-view');
+        const settingsView = root.querySelector('.lectio-manager-settings-view');
 
-    if (state.channel !== 'unstable') {
-      return sortModules([...byId.values()]);
-    }
+        helpBtn.addEventListener('click', () => {
+            const willShow = helpPanel.hidden;
+            helpPanel.hidden = !willShow;
+            helpBtn.setAttribute('aria-expanded', String(willShow));
 
-    const overlay = state.unstableCatalogue?.modules || [];
-
-    for (const experimental of overlay) {
-      const stableMatch = findStableMatch(stable, experimental);
-      if (stableMatch) {
-        byId.set(stableMatch.id, {
-          ...stableMatch,
-          ...experimental,
-          id: stableMatch.id,
-          aliases: uniqueStrings([
-            ...(stableMatch.aliases || []),
-            ...(experimental.aliases || []),
-            experimental.id
-          ]),
-          selectedChannel: 'unstable',
-          stableModule: stableMatch,
-          unstableModule: experimental
+            if (willShow) {
+                closePrefsPanel();
+            }
         });
-      } else {
-        byId.set(experimental.id, {
-          ...experimental,
-          selectedChannel: 'unstable',
-          stableModule: null,
-          unstableModule: experimental
+
+        experimentalToggle.checked = experimentalMode;
+
+        prefsBtn.addEventListener('click', () => {
+            const willShow = prefsPanel.hidden;
+            prefsPanel.hidden = !willShow;
+            prefsBtn.setAttribute('aria-expanded', String(willShow));
+
+            if (willShow) {
+                helpPanel.hidden = true;
+                helpBtn.setAttribute('aria-expanded', 'false');
+            }
         });
-      }
-    }
 
-    return sortModules([...byId.values()]);
-  }
+        experimentalToggle.addEventListener('change', () => {
+            void setExperimentalMode(experimentalToggle.checked);
+        });
 
-  function findStableMatch(stableModules, experimental) {
-    const experimentalIds = new Set([experimental.id, ...(experimental.aliases || [])]);
-
-    return stableModules.find(stable => {
-      if (experimentalIds.has(stable.id)) return true;
-      const stableIds = new Set([stable.id, ...(stable.aliases || [])]);
-      if (stableIds.has(experimental.id)) return true;
-      return [...experimentalIds].some(id => stableIds.has(id));
-    }) || null;
-  }
-
-  function sortModules(modules) {
-    return modules.sort((a, b) => {
-      const category = String(a.category || '').localeCompare(String(b.category || ''));
-      if (category) return category;
-      return String(a.name || '').localeCompare(String(b.name || ''));
-    });
-  }
-
-  function renderModuleCard(module) {
-    const registration = findRegistrationForModule(module);
-    const action = determineAction(module, registration);
-
-    const card = document.createElement('article');
-    card.className = `lm-module-card ${module.selectedChannel === 'unstable' ? 'is-unstable' : ''}`;
-
-    const statusLabel = module.selectedChannel === 'unstable'
-      ? '<span class="lm-tag is-unstable">experimental</span>'
-      : '<span class="lm-tag">stable</span>';
-
-    card.innerHTML = `
-      <div class="lm-module-main">
-        <div class="lm-module-title-row">
-          <h3>${escapeHtml(module.name)}</h3>
-          ${statusLabel}
-        </div>
-        <p>${escapeHtml(module.description || '')}</p>
-        <div class="lm-version-line">
-          Target: <strong>${escapeHtml(module.version)}</strong>
-          ${registration ? ` · Installed: <strong>${escapeHtml(registration.version)}</strong>` : ' · Installed: <strong>Not detected</strong>'}
-        </div>
-        ${module.selectedChannel === 'unstable' && module.stableModule
-          ? `<div class="lm-stable-reference">Stable target: ${escapeHtml(module.stableModule.version)}</div>`
-          : ''}
-      </div>
-      <div class="lm-module-action"></div>
-    `;
-
-    const actionHost = card.querySelector('.lm-module-action');
-    if (action.kind === 'current') {
-      const badge = document.createElement('span');
-      badge.className = 'lm-current';
-      badge.textContent = 'Up to date';
-      badge.title = `Installed version ${registration.version} matches the selected ${state.channel} target.`;
-      actionHost.appendChild(badge);
-    } else {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = `lm-action-button ${action.kind === 'downgrade' ? 'is-downgrade' : ''}`;
-      button.textContent = action.label;
-      button.title = action.tooltip;
-      button.addEventListener('click', () => openInstall(module, action));
-      actionHost.appendChild(button);
-    }
-
-    return card;
-  }
-
-  function findRegistrationForModule(module) {
-    const ids = new Set([module.id, ...(module.aliases || [])]);
-
-    if (module.stableModule) {
-      ids.add(module.stableModule.id);
-      for (const alias of module.stableModule.aliases || []) ids.add(alias);
-    }
-    if (module.unstableModule) {
-      ids.add(module.unstableModule.id);
-      for (const alias of module.unstableModule.aliases || []) ids.add(alias);
-    }
-
-    for (const registration of state.registrations.values()) {
-      const registrationIds = new Set([registration.id, ...(registration.aliases || [])]);
-      for (const id of ids) {
-        if (registrationIds.has(id)) return registration;
-      }
-    }
-
-    return null;
-  }
-
-  function determineAction(module, registration) {
-    if (!registration) {
-      return {
-        kind: 'install',
-        label: module.selectedChannel === 'unstable' ? 'Install test version' : 'Install',
-        tooltip: `Open ${module.version} in Tampermonkey. Nothing is installed until you confirm there.`
-      };
-    }
-
-    const comparison = compareVersions(registration.version, module.version);
-    if (comparison === null) {
-      return {
-        kind: 'reinstall',
-        label: 'Reinstall selected version',
-        tooltip: `The Manager cannot safely compare ${registration.version} with ${module.version}. Open the selected version in Tampermonkey.`
-      };
-    }
-
-    if (comparison < 0) {
-      return {
-        kind: 'upgrade',
-        label: `Upgrade to ${module.version}`,
-        tooltip: `Installed ${registration.version} is older than the selected ${state.channel} target ${module.version}. Tampermonkey will ask you to confirm.`
-      };
-    }
-
-    if (comparison > 0) {
-      return {
-        kind: 'downgrade',
-        label: `Downgrade to ${module.version}`,
-        tooltip: `Installed ${registration.version} is newer than the selected ${state.channel} target ${module.version}. This explicitly opens the older selected version in Tampermonkey; nothing happens automatically.`
-      };
-    }
-
-    return { kind: 'current', label: 'Up to date', tooltip: '' };
-  }
-
-  function openInstall(module, action) {
-    if (!isApprovedInstallUrl(module.installUrl)) {
-      state.statusMessage = `Blocked unapproved install URL for ${module.name}.`;
-      state.statusKind = 'error';
-      renderPanelBody();
-      return;
-    }
-
-    const verb = action.kind === 'downgrade' ? 'downgrade' :
-      action.kind === 'upgrade' ? 'upgrade' :
-      action.kind === 'reinstall' ? 'reinstall' : 'install';
-
-    state.statusMessage = `Opening ${module.name} ${module.version} to ${verb} through Tampermonkey. The Manager does not install code silently.`;
-    state.statusKind = 'info';
-    renderPanelBody();
-
-    const opened = window.open(module.installUrl, '_blank', 'noopener,noreferrer');
-    if (!opened) {
-      // Fallback for browsers that block the new tab despite a direct user click.
-      window.location.href = module.installUrl;
-    }
-  }
-
-  function getUnmatchedRegistrations(modules) {
-    return [...state.registrations.values()].filter(registration => {
-      return !modules.some(module => {
-        const ids = new Set([module.id, ...(module.aliases || [])]);
-        if (module.stableModule) {
-          ids.add(module.stableModule.id);
-          for (const alias of module.stableModule.aliases || []) ids.add(alias);
+        if (!GM_getValue(STORAGE_UPDATE_TIP_DISMISSED, false)) {
+            tipBanner.hidden = false;
         }
-        if (module.unstableModule) {
-          ids.add(module.unstableModule.id);
-          for (const alias of module.unstableModule.aliases || []) ids.add(alias);
-        }
-        return ids.has(registration.id) || (registration.aliases || []).some(alias => ids.has(alias));
-      });
-    });
-  }
 
-  function compareVersions(left, right) {
-    const a = parseVersion(left);
-    const b = parseVersion(right);
-    if (!a || !b) return null;
+        tipDismissBtn.addEventListener('click', () => {
+            tipBanner.hidden = true;
+            GM_setValue(STORAGE_UPDATE_TIP_DISMISSED, true);
+        });
 
-    for (let i = 0; i < 3; i += 1) {
-      if (a.core[i] !== b.core[i]) return a.core[i] < b.core[i] ? -1 : 1;
+        toggle.addEventListener('click', () => {
+            if (panel.hasAttribute('hidden')) {
+                panel.removeAttribute('hidden');
+                requestDiscovery();
+            } else {
+                closePanel();
+            }
+        });
+
+        closeBtn.addEventListener('click', () => closePanel());
+
+        refreshBtn.addEventListener('click', () => refreshCatalogue());
+
+        navTrigger.addEventListener('click', (event) => {
+            event.stopPropagation();
+            toggleNavMenu();
+        });
+
+        navMenu.addEventListener('click', (event) => {
+            const viewItem = event.target.closest('[data-view]');
+
+            if (viewItem) {
+                event.stopPropagation();
+                currentView = normalizeView(viewItem.dataset.view);
+                GM_setValue(STORAGE_VIEW, currentView);
+                renderModuleList();
+            }
+        });
+
+        root.querySelector('.lectio-manager-tabs').addEventListener('click', (event) => {
+            const tab = event.target.closest('[data-primary-view]');
+            if (!tab) return;
+
+            currentView = normalizeView(tab.dataset.primaryView);
+            GM_setValue(STORAGE_VIEW, currentView);
+            closeNavMenu();
+            renderModuleList();
+        });
+
+        root.querySelector('.lectio-manager-sort').addEventListener('click', (event) => {
+            const sortItem = event.target.closest('[data-sort]');
+            if (!sortItem) return;
+
+            sortMode = normalizeSortMode(sortItem.dataset.sort);
+            GM_setValue(STORAGE_SORT_MODE, sortMode);
+            renderModuleList();
+        });
+
+        root.querySelector('.lectio-manager-settings-back').addEventListener('click', showMainView);
+
+        document.addEventListener('click', (event) => {
+            if (!elements) {
+                return;
+            }
+
+            if (!elements.navMenu.hidden &&
+                !elements.navTrigger.contains(event.target) &&
+                !elements.navMenu.contains(event.target)) {
+                closeNavMenu();
+            }
+
+            if (!elements.panel.hasAttribute('hidden') && !elements.root.contains(event.target)) {
+                closePanel();
+            }
+
+            for (const previewSelect of document.querySelectorAll('.lectio-manager-preview-select.is-open')) {
+                if (!previewSelect.contains(event.target)) {
+                    closePreviewSelect(previewSelect);
+                }
+            }
+        });
+
+        document.addEventListener('keydown', (event) => {
+            if (event.key !== 'Escape' || !elements) {
+                return;
+            }
+
+            if (!elements.navMenu.hidden) {
+                closeNavMenu();
+                return;
+            }
+
+            if (!elements.settingsView.hidden) {
+                showMainView();
+                return;
+            }
+
+            closePanel();
+        });
+
+        elements = {
+            root,
+            panel,
+            refreshBtn,
+            navTrigger,
+            navMenu,
+            navCurrent,
+            nav: root.querySelector('.lectio-manager-nav'),
+            tabs: [...root.querySelectorAll('.lectio-manager-tab')],
+            installedCount: root.querySelector('.lectio-manager-installed-count'),
+            availableCount: root.querySelector('.lectio-manager-available-count'),
+            sortButtons: [...root.querySelectorAll('.lectio-manager-sort [data-sort]')],
+            mainView,
+            settingsView,
+            settingsBody: root.querySelector('.lectio-manager-settings-body'),
+            settingsTitle: root.querySelector('.lectio-manager-settings-title'),
+            settingsCategory: root.querySelector('.lectio-manager-settings-category'),
+            settingsVersion: root.querySelector('.lectio-manager-settings-version'),
+            helpBtn,
+            helpPanel,
+            prefsBtn,
+            prefsPanel,
+            list: root.querySelector('.lectio-manager-list'),
+            viewHeading: root.querySelector('.lectio-manager-view-heading'),
+            errorBox: root.querySelector('.lectio-manager-error')
+        };
+
+        // focusout fires before the next element takes focus, so check on the
+        // next tick — otherwise moving focus between two controls in the same
+        // settings view would look like the view going idle and re-render mid-tab.
+        elements.settingsBody.addEventListener('focusout', () => {
+            setTimeout(flushPendingSettingsRefresh, 0);
+        });
     }
 
-    if (!a.pre.length && !b.pre.length) return 0;
-    if (!a.pre.length) return 1;
-    if (!b.pre.length) return -1;
+    function closePanel() {
+        if (!elements || elements.panel.hasAttribute('hidden')) {
+            return;
+        }
 
-    const length = Math.max(a.pre.length, b.pre.length);
-    for (let i = 0; i < length; i += 1) {
-      const av = a.pre[i];
-      const bv = b.pre[i];
-      if (av === undefined) return -1;
-      if (bv === undefined) return 1;
-      if (av === bv) continue;
-
-      const an = /^\d+$/.test(av) ? Number(av) : null;
-      const bn = /^\d+$/.test(bv) ? Number(bv) : null;
-      if (an !== null && bn !== null) return an < bn ? -1 : 1;
-      if (an !== null) return -1;
-      if (bn !== null) return 1;
-      return av.localeCompare(bv) < 0 ? -1 : 1;
+        closeAllPreviewSelects();
+        elements.panel.setAttribute('hidden', '');
+        closeNavMenu();
+        closePrefsPanel();
+        showMainView({ restoreFocus: false });
     }
 
-    return 0;
-  }
-
-  function parseVersion(value) {
-    const text = String(value || '').trim().replace(/^v/i, '');
-    const match = text.match(/^(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/);
-    if (!match) return null;
-
-    return {
-      core: [Number(match[1]), Number(match[2] || 0), Number(match[3] || 0)],
-      pre: match[4] ? match[4].split('.') : []
-    };
-  }
-
-  function formatRefresh(timestamp) {
-    if (!timestamp) return 'not yet refreshed';
-    try {
-      return new Date(timestamp).toLocaleString([], {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      });
-    } catch (_) {
-      return 'unknown';
+    function toggleNavMenu() {
+        if (elements.navMenu.hidden) {
+            openNavMenu();
+        } else {
+            closeNavMenu();
+        }
     }
-  }
 
-  function makeWarning(title, text) {
-    const box = document.createElement('div');
-    box.className = 'lm-warning';
-    box.innerHTML = `<strong>${escapeHtml(title)}</strong><span>${escapeHtml(text)}</span>`;
-    return box;
-  }
+    function openNavMenu() {
+        elements.navMenu.hidden = false;
+        elements.navTrigger.setAttribute('aria-expanded', 'true');
+    }
 
-  function uniqueStrings(values) {
-    return [...new Set(values.map(cleanString).filter(Boolean))];
-  }
-
-  function capitalize(value) {
-    const text = String(value || '');
-    return text ? text[0].toUpperCase() + text.slice(1) : text;
-  }
-
-  function escapeHtml(value) {
-    return String(value ?? '').replace(/[&<>"']/g, char => ({
-      '&': '&amp;',
-      '<': '&lt;',
-      '>': '&gt;',
-      '"': '&quot;',
-      "'": '&#39;'
-    }[char]));
-  }
-
-  function installStyles() {
-    if (document.getElementById(ID.style)) return;
-
-    const style = document.createElement('style');
-    style.id = ID.style;
-    style.textContent = `
-      #${ID.launcher} {
-        position: fixed;
-        right: 14px;
-        bottom: 14px;
-        z-index: 2147482500;
-        width: 34px;
-        height: 34px;
-        border: 1px solid rgba(32, 64, 92, .35);
-        border-radius: 50%;
-        background: #f5f8fb;
-        color: #315f86;
-        font: 700 18px/32px Arial, Helvetica, sans-serif;
-        box-shadow: 0 2px 10px rgba(0, 0, 0, .16);
-        cursor: pointer;
-      }
-      #${ID.launcher}:hover,
-      #${ID.launcher}:focus-visible {
-        background: #e8f1f8;
-        outline: 2px solid rgba(49, 95, 134, .2);
-      }
-      #${ID.backdrop} {
-        position: fixed;
-        inset: 0;
-        z-index: 2147482800;
-        display: flex;
-        align-items: flex-start;
-        justify-content: flex-end;
-        padding: 18px;
-        box-sizing: border-box;
-        background: rgba(20, 30, 40, .34);
-      }
-      #${ID.backdrop}[hidden] { display: none !important; }
-      #${ID.panel} {
-        width: min(560px, calc(100vw - 36px));
-        max-height: calc(100vh - 36px);
-        overflow: hidden;
-        display: flex;
-        flex-direction: column;
-        border: 1px solid #bcc8d2;
-        border-radius: 12px;
-        background: #f9fbfc;
-        color: #17222c;
-        box-shadow: 0 18px 60px rgba(0, 0, 0, .28);
-        font: 13px/1.4 Arial, Helvetica, sans-serif;
-      }
-      .lm-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-        padding: 14px 16px 11px;
-        border-bottom: 1px solid #d9e0e6;
-        background: #fff;
-      }
-      .lm-title-row {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-      }
-      .lm-header h2 {
-        margin: 0;
-        font-size: 18px;
-        color: #1f3f59;
-      }
-      .lm-version {
-        margin-top: 2px;
-        color: #687783;
-        font-size: 11px;
-      }
-      .lm-channel-badge,
-      .lm-tag {
-        display: inline-flex;
-        align-items: center;
-        border: 1px solid #b6c8d6;
-        border-radius: 999px;
-        padding: 2px 7px;
-        background: #edf4f8;
-        color: #315f86;
-        font-size: 9px;
-        font-weight: 800;
-        letter-spacing: .04em;
-        text-transform: uppercase;
-      }
-      .lm-channel-badge.is-unstable,
-      .lm-tag.is-unstable {
-        border-color: #c77a12;
-        background: #fff3d9;
-        color: #7f4700;
-      }
-      .lm-header-actions {
-        display: flex;
-        gap: 7px;
-      }
-      .lm-icon-button {
-        width: 32px;
-        height: 32px;
-        border: 1px solid #c7d1d9;
-        border-radius: 7px;
-        background: #fff;
-        color: #365c78;
-        font: 700 18px/28px Arial, Helvetica, sans-serif;
-        cursor: pointer;
-      }
-      .lm-tabs {
-        display: flex;
-        gap: 4px;
-        padding: 8px 12px 0;
-        background: #f2f6f8;
-        border-bottom: 1px solid #d9e0e6;
-      }
-      .lm-tabs button {
-        border: 0;
-        border-bottom: 3px solid transparent;
-        background: transparent;
-        padding: 8px 12px 7px;
-        color: #5b6975;
-        font-weight: 700;
-        cursor: pointer;
-      }
-      .lm-tabs button.active {
-        color: #214f72;
-        border-bottom-color: #356f98;
-      }
-      .lm-body {
-        overflow: auto;
-        padding: 14px;
-      }
-      .lm-warning {
-        display: flex;
-        gap: 10px;
-        align-items: flex-start;
-        margin-bottom: 12px;
-        border: 1px solid #e1a544;
-        border-radius: 8px;
-        background: #fff5df;
-        padding: 10px 12px;
-        color: #684000;
-      }
-      .lm-warning strong {
-        flex: 0 0 auto;
-        font-size: 10px;
-        letter-spacing: .05em;
-      }
-      .lm-warning span { font-size: 12px; }
-      .lm-status {
-        margin-bottom: 10px;
-        border-radius: 7px;
-        padding: 8px 10px;
-        background: #edf4f8;
-        color: #31566f;
-        font-size: 11px;
-      }
-      .lm-status.is-error { background: #fff0ed; color: #8a2d1d; }
-      .lm-status.is-success { background: #eaf6ee; color: #26613c; }
-      .lm-module-list {
-        display: grid;
-        gap: 10px;
-      }
-      .lm-module-card {
-        display: flex;
-        justify-content: space-between;
-        gap: 12px;
-        border: 1px solid #d3dce3;
-        border-radius: 9px;
-        background: #fff;
-        padding: 12px;
-      }
-      .lm-module-card.is-unstable {
-        border-color: #ddad65;
-        background: #fffdfa;
-      }
-      .lm-module-card.is-outside {
-        margin-top: 8px;
-        border-style: dashed;
-      }
-      .lm-module-main { min-width: 0; }
-      .lm-module-title-row {
-        display: flex;
-        align-items: center;
-        flex-wrap: wrap;
-        gap: 7px;
-      }
-      .lm-module-card h3,
-      .lm-settings-section h3,
-      .lm-subheading {
-        margin: 0;
-        color: #244760;
-        font-size: 14px;
-      }
-      .lm-module-card p {
-        margin: 5px 0 6px;
-        color: #52616d;
-        font-size: 12px;
-      }
-      .lm-version-line,
-      .lm-stable-reference {
-        color: #6b7781;
-        font-size: 11px;
-      }
-      .lm-stable-reference { margin-top: 2px; }
-      .lm-module-action {
-        flex: 0 0 auto;
-        align-self: center;
-      }
-      .lm-action-button {
-        max-width: 180px;
-        border: 1px solid #3977a2;
-        border-radius: 7px;
-        background: #3d7fab;
-        color: #fff;
-        padding: 7px 10px;
-        font-weight: 700;
-        font-size: 11px;
-        cursor: pointer;
-      }
-      .lm-action-button.is-downgrade {
-        border-color: #9b6519;
-        background: #fff4dc;
-        color: #704300;
-      }
-      .lm-current {
-        display: inline-block;
-        border-radius: 999px;
-        background: #eaf6ee;
-        color: #27613c;
-        padding: 5px 9px;
-        font-size: 10px;
-        font-weight: 800;
-      }
-      .lm-settings-section {
-        border: 1px solid #d3dce3;
-        border-radius: 9px;
-        background: #fff;
-        padding: 13px;
-      }
-      .lm-section-heading p {
-        margin: 5px 0 12px;
-        color: #5f6e79;
-        font-size: 12px;
-      }
-      .lm-channel-options {
-        display: grid;
-        gap: 8px;
-      }
-      .lm-channel-option {
-        display: flex;
-        gap: 10px;
-        align-items: flex-start;
-        border: 1px solid #ccd7df;
-        border-radius: 8px;
-        padding: 10px;
-        cursor: pointer;
-      }
-      .lm-channel-option.selected {
-        border-color: #4680a8;
-        box-shadow: inset 0 0 0 1px #4680a8;
-        background: #f3f8fb;
-      }
-      .lm-channel-option.is-danger.selected {
-        border-color: #cc8428;
-        box-shadow: inset 0 0 0 1px #cc8428;
-        background: #fff9ee;
-      }
-      .lm-channel-copy {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-      }
-      .lm-channel-copy strong { color: #244760; }
-      .lm-channel-copy small { color: #63717b; }
-      .lm-help {
-        display: inline-flex;
-        width: 15px;
-        height: 15px;
-        align-items: center;
-        justify-content: center;
-        border: 1px solid #9fb0bd;
-        border-radius: 50%;
-        color: #4a687d;
-        font-size: 10px;
-        cursor: help;
-      }
-      .lm-explainer {
-        margin-top: 12px;
-        border-left: 3px solid #7497ae;
-        padding: 8px 10px;
-        background: #f5f8fa;
-        color: #53616b;
-        font-size: 11px;
-      }
-      .lm-refresh-info {
-        display: grid;
-        gap: 3px;
-        margin-top: 12px;
-        color: #6b7781;
-        font-size: 11px;
-      }
-      .lm-empty {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        border: 1px dashed #c9d3db;
-        border-radius: 8px;
-        padding: 18px;
-        text-align: center;
-        color: #63717b;
-      }
-      .lm-subheading { margin-top: 16px; }
-      .lm-footer-note {
-        margin-top: 13px;
-        color: #77838d;
-        font-size: 10px;
-        text-align: right;
-      }
-      @media (max-width: 620px) {
-        #${ID.backdrop} {
-          align-items: stretch;
-          padding: 0;
+    function closeNavMenu() {
+        if (!elements) {
+            return;
         }
-        #${ID.panel} {
-          width: 100vw;
-          max-height: 100vh;
-          border: 0;
-          border-radius: 0;
-        }
-        .lm-module-card {
-          flex-direction: column;
-        }
-        .lm-module-action {
-          align-self: stretch;
-        }
-        .lm-action-button { width: 100%; max-width: none; }
-      }
-    `;
 
-    (document.head || document.documentElement).appendChild(style);
-  }
+        elements.navMenu.hidden = true;
+        elements.navTrigger.setAttribute('aria-expanded', 'false');
+    }
+
+    // ============================================================
+    // UI: RENDER
+    // ============================================================
+
+    function renderModuleList({ refreshFocusedSettings = true } = {}) {
+        if (!elements) {
+            return;
+        }
+
+        renderNavMenu();
+        renderPrimaryTabs();
+
+        const { list, viewHeading } = elements;
+        list.innerHTML = '';
+
+        if (!catalogue) {
+            const loading = document.createElement('div');
+            loading.className = 'lectio-manager-loading';
+            loading.textContent = 'Loading catalogue…';
+            list.appendChild(loading);
+            viewHeading.textContent = '';
+            return;
+        }
+
+        const modules = getFilteredSortedModules();
+
+        viewHeading.textContent = modules.length
+            ? `${getViewLabel(currentView)} · ${modules.length}`
+            : getViewLabel(currentView);
+
+        for (const button of elements.sortButtons) {
+            const active = button.dataset.sort === sortMode;
+            button.classList.toggle('is-active', active);
+            button.setAttribute('aria-pressed', String(active));
+        }
+
+        if (!modules.length) {
+            const empty = document.createElement('div');
+            empty.className = 'lectio-manager-loading';
+            empty.textContent = getEmptyStateText(currentView);
+            list.appendChild(empty);
+            return;
+        }
+
+        const groupByCategory = sortMode === 'category' && !currentView.startsWith(CATEGORY_VIEW_PREFIX);
+        let lastCategory = null;
+
+        for (const module of modules) {
+            if (groupByCategory && module.category !== lastCategory) {
+                lastCategory = module.category;
+
+                const categoryHeading = document.createElement('div');
+                categoryHeading.className = 'lectio-manager-category-heading';
+                categoryHeading.textContent = module.category;
+                list.appendChild(categoryHeading);
+            }
+
+            list.appendChild(buildModuleCard(module));
+        }
+
+        if (openSettingsModuleId && refreshFocusedSettings) {
+            const module = getModules().find((entry) => entry.id === openSettingsModuleId);
+            const registration = detected.get(openSettingsModuleId);
+            if (module && registration) {
+                refreshFocusedSettingsView(module, registration);
+            } else {
+                showMainView();
+            }
+        }
+    }
+
+    // A schema can grow while its settings view is open (Subject Colours discovers
+    // classes from the timetable a second or two after the page loads). Rebuilding
+    // the view is safe most of the time -- a toggle, select, or preview-select all
+    // commit atomically, so replacing them afterwards loses nothing, and the open
+    // module's own committed change is expected to redraw the panel immediately
+    // even mid-preview. A text or range input is different: it holds uncommitted
+    // state (a partial keystroke, a drag in progress) between focus and its
+    // eventual `change` event, and rebuilding out from under that would discard
+    // it. So: rebuild immediately, unless a text/range input has focus, in which
+    // case queue the rebuild for the moment that input loses focus.
+    function isSettingsBodyBusy() {
+        if (!elements) {
+            return false;
+        }
+
+        const { settingsBody } = elements;
+        const active = document.activeElement;
+
+        if (!settingsBody.contains(active) || active === settingsBody) {
+            return false;
+        }
+
+        return active.tagName === 'INPUT' && (active.type === 'text' || active.type === 'range');
+    }
+
+    function refreshFocusedSettingsView(module, registration) {
+        if (isSettingsBodyBusy()) {
+            pendingSettingsRefresh = { module, registration };
+            return;
+        }
+
+        pendingSettingsRefresh = null;
+        renderFocusedSettings(module, registration);
+    }
+
+    function flushPendingSettingsRefresh() {
+        if (!pendingSettingsRefresh || isSettingsBodyBusy()) {
+            return;
+        }
+
+        const { module, registration } = pendingSettingsRefresh;
+        pendingSettingsRefresh = null;
+
+        if (openSettingsModuleId === module.id) {
+            renderFocusedSettings(module, registration);
+        }
+    }
+
+    function renderPrimaryTabs() {
+        const modules = getModules();
+        const installedCount = modules.filter((module) => isInstalled(module.id)).length;
+        const availableCount = modules.filter((module) => !isInstalled(module.id)).length;
+        const primaryView = currentView === 'installed' ? 'installed' : 'all';
+
+        elements.installedCount.textContent = String(installedCount);
+        elements.availableCount.textContent = String(availableCount);
+        for (const tab of elements.tabs) {
+            const active = tab.dataset.primaryView === primaryView;
+            tab.classList.toggle('is-active', active);
+            tab.setAttribute('aria-selected', String(active));
+        }
+
+        elements.nav.hidden = primaryView === 'installed';
+    }
+
+    function getFilteredSortedModules() {
+        if (!catalogue) {
+            return [];
+        }
+
+        let filtered;
+
+        if (currentView === 'installed') {
+            filtered = getModules().filter((module) => isInstalled(module.id));
+        } else if (currentView.startsWith(AUDIENCE_VIEW_PREFIX)) {
+            const audience = currentView.slice(AUDIENCE_VIEW_PREFIX.length);
+            filtered = getAvailableModules().filter((module) => !module.audience.length || module.audience.includes(audience));
+        } else if (currentView.startsWith(CATEGORY_VIEW_PREFIX)) {
+            const category = currentView.slice(CATEGORY_VIEW_PREFIX.length);
+            filtered = getAvailableModules().filter((module) => module.category === category);
+        } else {
+            filtered = getAvailableModules();
+        }
+
+        const sorted = filtered.slice();
+
+        if (sortMode === 'name' || currentView.startsWith(CATEGORY_VIEW_PREFIX)) {
+            sorted.sort((a, b) => a.name.localeCompare(b.name));
+        } else {
+            sorted.sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
+        }
+
+        return sorted;
+    }
+
+    function getAvailableModules() {
+        return getModules().filter((module) => !isInstalled(module.id));
+    }
+
+    function getEmptyStateText(view) {
+        if (view === 'installed') {
+            return 'No installed modules detected yet.';
+        }
+
+        if (getAvailableModules().length === 0) {
+            return 'All available modules are installed.';
+        }
+
+        return 'No available modules match this filter.';
+    }
+
+    // ============================================================
+    // UI: NAVIGATION MENU
+    // ============================================================
+
+    function renderNavMenu() {
+        if (!elements) {
+            return;
+        }
+
+        const { navMenu, navCurrent } = elements;
+
+        const categories = [...new Set(getModules().map((module) => module.category))]
+            .sort((a, b) => a.localeCompare(b));
+
+        navMenu.innerHTML = '';
+
+        const topGroup = document.createElement('div');
+        topGroup.className = 'lectio-manager-nav-group';
+        topGroup.appendChild(buildNavMenuItem('all', 'All available modules'));
+        navMenu.appendChild(topGroup);
+
+        const audienceGroup = document.createElement('div');
+        audienceGroup.className = 'lectio-manager-nav-group';
+        audienceGroup.appendChild(buildNavGroupLabel('Audience'));
+        audienceGroup.appendChild(buildNavMenuItem(`${AUDIENCE_VIEW_PREFIX}student`, 'Student'));
+        audienceGroup.appendChild(buildNavMenuItem(`${AUDIENCE_VIEW_PREFIX}teacher`, 'Teacher'));
+        navMenu.appendChild(audienceGroup);
+
+        if (categories.length) {
+            const categoryGroup = document.createElement('div');
+            categoryGroup.className = 'lectio-manager-nav-group';
+            categoryGroup.appendChild(buildNavGroupLabel('Category'));
+
+            for (const category of categories) {
+                categoryGroup.appendChild(buildNavMenuItem(`${CATEGORY_VIEW_PREFIX}${category}`, category));
+            }
+
+            navMenu.appendChild(categoryGroup);
+        }
+
+        navCurrent.textContent = getViewLabel(currentView);
+    }
+
+    function buildNavGroupLabel(text) {
+        const label = document.createElement('div');
+        label.className = 'lectio-manager-nav-group-label';
+        label.textContent = text;
+        return label;
+    }
+
+    function buildNavMenuItem(view, label) {
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.className = 'lectio-manager-nav-item';
+        item.dataset.view = view;
+        item.setAttribute('role', 'menuitemradio');
+        item.setAttribute('aria-checked', String(view === currentView));
+        item.classList.toggle('is-active', view === currentView);
+        item.textContent = label;
+        return item;
+    }
+
+    function buildModuleCard(module) {
+        // `live` is the module running on this page; `record` is what we know about it
+        // as an installed module, which survives pages where it does not run.
+        const live = detected.get(module.id);
+        const record = getModuleRecord(module.id);
+        const compact = currentView === 'installed';
+
+        const card = document.createElement('div');
+        card.className = 'lectio-manager-card';
+        card.classList.toggle('is-compact', compact);
+        card.dataset.moduleId = module.id;
+        card.dataset.category = module.category;
+
+        const main = document.createElement('div');
+        main.className = 'lectio-manager-card-main';
+
+        const meta = document.createElement('div');
+        meta.className = 'lectio-manager-card-meta';
+
+        const category = document.createElement('span');
+        category.className = 'lectio-manager-card-category';
+        category.textContent = module.category;
+        meta.appendChild(category);
+
+        if (module.channel === 'unstable') {
+            const experimental = document.createElement('span');
+            experimental.className = 'lectio-manager-card-experimental';
+            experimental.textContent = 'experimental';
+            experimental.title = module.stableVersion
+                ? `Test version v${module.version}. The stable version is v${module.stableVersion}.`
+                : 'Test version. It may contain bugs or unfinished features.';
+            meta.appendChild(experimental);
+        }
+
+        if (!compact && module.audience.length) {
+            const audience = document.createElement('span');
+            audience.className = 'lectio-manager-card-audience';
+            audience.textContent = module.audience.join(' · ');
+            meta.appendChild(audience);
+        }
+
+        const nameRow = document.createElement('div');
+        nameRow.className = 'lectio-manager-card-name';
+        nameRow.textContent = module.name;
+
+        const desc = document.createElement('div');
+        desc.className = 'lectio-manager-card-desc';
+        desc.textContent = module.description;
+
+        main.append(meta, nameRow);
+        if (!compact) {
+            main.appendChild(desc);
+        }
+
+        const status = document.createElement('div');
+        status.className = 'lectio-manager-card-status';
+
+        const actions = document.createElement('div');
+        actions.className = 'lectio-manager-card-actions';
+
+        if (record) {
+            const hasUpdate = isVersionNewer(module.version, record.version);
+
+            // Turning experimental mode off would otherwise strand anyone who
+            // installed a test build: its version is higher than the stable one,
+            // so it never reads as an update. Offer the way back explicitly.
+            const canRestoreStable = !experimentalMode &&
+                module.channel !== 'unstable' &&
+                isVersionNewer(record.version, module.version);
+
+            const installedLabel = document.createElement('span');
+            installedLabel.className = hasUpdate || canRestoreStable
+                ? 'lectio-manager-status-update'
+                : 'lectio-manager-status-installed';
+            installedLabel.textContent = hasUpdate
+                ? `Update available: v${module.version} (installed v${record.version})`
+                : canRestoreStable
+                    ? `Installed v${record.version} is newer than stable v${module.version}`
+                    : `Installed v${record.version || module.version}`;
+            status.appendChild(installedLabel);
+
+            if (!live) {
+                const idle = document.createElement('span');
+                idle.className = 'lectio-manager-status-idle';
+                idle.textContent = 'Not active on this page';
+                idle.title = `${module.name} is installed but does not run on this Lectio page, so its settings cannot be changed from here.`;
+                status.appendChild(idle);
+            }
+
+            if (hasUpdate) {
+                const updateLink = document.createElement('a');
+                updateLink.className = 'lectio-manager-update-btn';
+                updateLink.href = module.installUrl;
+                updateLink.target = '_blank';
+                updateLink.rel = 'noopener noreferrer';
+                updateLink.textContent = 'Update';
+                updateLink.title = 'Open Tampermonkey\'s update/install page';
+                actions.appendChild(updateLink);
+            }
+
+            if (canRestoreStable) {
+                const restoreLink = document.createElement('a');
+                restoreLink.className = 'lectio-manager-update-btn';
+                restoreLink.href = module.installUrl;
+                restoreLink.target = '_blank';
+                restoreLink.rel = 'noopener noreferrer';
+                restoreLink.textContent = 'Restore stable';
+                restoreLink.title = `Open stable v${module.version} in Tampermonkey.`;
+                actions.appendChild(restoreLink);
+            }
+
+            if (live && live.settingsSchema.length) {
+                const settingsBtn = document.createElement('button');
+                settingsBtn.type = 'button';
+                settingsBtn.className = 'lectio-manager-settings-btn';
+                settingsBtn.textContent = 'Settings';
+                settingsBtn.addEventListener('click', () => showSettingsView(module, live));
+                actions.appendChild(settingsBtn);
+            }
+
+            if (!live) {
+                const forgetBtn = document.createElement('button');
+                forgetBtn.type = 'button';
+                forgetBtn.className = 'lectio-manager-forget-btn';
+                forgetBtn.textContent = 'Remove';
+                forgetBtn.title = 'Remove from Installed — use this only if you have uninstalled the module in Tampermonkey.';
+                forgetBtn.addEventListener('click', () => forgetInstalled(module.id));
+                actions.appendChild(forgetBtn);
+            }
+        } else {
+            const notDetected = document.createElement('span');
+            notDetected.className = 'lectio-manager-status-missing';
+            notDetected.textContent = 'Not detected';
+            status.appendChild(notDetected);
+
+            const installLink = document.createElement('a');
+            installLink.className = 'lectio-manager-install-btn';
+            installLink.href = module.installUrl;
+            installLink.target = '_blank';
+            installLink.rel = 'noopener noreferrer';
+            installLink.textContent = 'Install';
+            actions.appendChild(installLink);
+        }
+
+        status.appendChild(actions);
+        card.append(main, status);
+
+        return card;
+    }
+
+    function showSettingsView(module, registration) {
+        openSettingsModuleId = module.id;
+        renderFocusedSettings(module, registration);
+        closeNavMenu();
+        elements.helpPanel.hidden = true;
+        elements.helpBtn.setAttribute('aria-expanded', 'false');
+        closePrefsPanel();
+        elements.mainView.hidden = true;
+        elements.settingsView.hidden = false;
+        queueMicrotask(() => {
+            if (!elements.settingsView.hidden) {
+                elements.settingsView.querySelector('.lectio-manager-settings-back').focus();
+            }
+        });
+    }
+
+    function renderFocusedSettings(module, registration) {
+        elements.settingsTitle.textContent = module.name;
+        elements.settingsCategory.textContent = module.category;
+        elements.settingsVersion.textContent = `v${registration.version || module.version}`;
+
+        const { scrollTop } = elements.settingsBody;
+        renderSettingsControls(elements.settingsBody, module, registration);
+        elements.settingsBody.scrollTop = scrollTop;
+    }
+
+    function showMainView({ restoreFocus = true } = {}) {
+        if (!elements) return;
+        closeAllPreviewSelects();
+        const moduleId = openSettingsModuleId;
+        openSettingsModuleId = null;
+
+        if (moduleId) {
+            currentView = 'installed';
+            GM_setValue(STORAGE_VIEW, currentView);
+            renderModuleList();
+        }
+
+        elements.settingsView.hidden = true;
+        elements.mainView.hidden = false;
+
+        if (restoreFocus && moduleId) {
+            elements.list
+                .querySelector(`[data-module-id="${CSS.escape(moduleId)}"] .lectio-manager-settings-btn`)
+                ?.focus();
+        }
+    }
+
+    // A section renders collapsed behind a click when every control placed in
+    // it opts in with `advanced: true` — for settings (like a custom colour
+    // palette) most people should never need, so the panel doesn't read as
+    // more overwhelming than the system defaults most people actually use.
+    function findAdvancedSections(schema) {
+        const grouped = new Map();
+
+        for (const control of schema) {
+            if (!control || !isNonEmptyString(control.key) || !isNonEmptyString(control.type)) {
+                continue;
+            }
+
+            const sectionName = isNonEmptyString(control.section) ? control.section.trim() : '';
+            if (!sectionName) continue;
+
+            if (!grouped.has(sectionName)) grouped.set(sectionName, []);
+            grouped.get(sectionName).push(control);
+        }
+
+        const advanced = new Set();
+        for (const [sectionName, controls] of grouped) {
+            if (controls.every((control) => control.advanced === true)) {
+                advanced.add(sectionName);
+            }
+        }
+        return advanced;
+    }
+
+    function renderSettingsControls(container, module, registration) {
+        container.innerHTML = '';
+        const sections = new Map();
+        const advancedSections = findAdvancedSections(registration.settingsSchema);
+
+        for (const control of registration.settingsSchema) {
+            if (!control || !isNonEmptyString(control.key) || !isNonEmptyString(control.type)) {
+                continue;
+            }
+
+            const sectionName = isNonEmptyString(control.section) ? control.section.trim() : '';
+            let section = sections.get(sectionName);
+
+            if (!section) {
+                const isAdvanced = sectionName && advancedSections.has(sectionName);
+                section = document.createElement(isAdvanced ? 'details' : 'section');
+                section.className = 'lectio-manager-settings-section';
+
+                if (sectionName) {
+                    const heading = document.createElement(isAdvanced ? 'summary' : 'h3');
+                    heading.className = 'lectio-manager-settings-section-heading';
+                    heading.textContent = sectionName;
+                    section.appendChild(heading);
+                }
+
+                const rows = document.createElement('div');
+                rows.className = 'lectio-manager-settings-section-rows';
+                section.appendChild(rows);
+                sections.set(sectionName, section);
+                container.appendChild(section);
+            }
+
+            const row = document.createElement('div');
+            row.className = 'lectio-manager-setting-row';
+
+            const copy = document.createElement('div');
+            copy.className = 'lectio-manager-setting-copy';
+
+            const labelRow = document.createElement('div');
+            labelRow.className = 'lectio-manager-setting-label-row';
+
+            const label = document.createElement('label');
+            label.className = 'lectio-manager-setting-label';
+            label.textContent = control.label || control.key;
+            labelRow.appendChild(label);
+            copy.appendChild(labelRow);
+
+            if (isNonEmptyString(control.description)) {
+                const descriptionId = `lectio-manager-setting-desc-${module.id}-${control.key}`
+                    .replace(/[^a-zA-Z0-9_-]/g, '-');
+
+                const description = document.createElement('span');
+                description.id = descriptionId;
+                description.className = 'lectio-manager-setting-description';
+                description.textContent = control.description;
+                description.hidden = true;
+
+                const infoBtn = document.createElement('button');
+                infoBtn.type = 'button';
+                infoBtn.className = 'lectio-manager-setting-info';
+                infoBtn.setAttribute('aria-expanded', 'false');
+                infoBtn.setAttribute('aria-controls', descriptionId);
+                infoBtn.setAttribute('aria-label', `What does “${control.label || control.key}” do?`);
+                infoBtn.innerHTML = helpSvg();
+                infoBtn.addEventListener('click', () => {
+                    const expanded = infoBtn.getAttribute('aria-expanded') === 'true';
+                    infoBtn.setAttribute('aria-expanded', String(!expanded));
+                    description.hidden = expanded;
+                });
+                labelRow.appendChild(infoBtn);
+                copy.appendChild(description);
+            }
+
+            row.appendChild(copy);
+
+            const currentValue = registration.currentValues[control.key];
+            let input;
+
+            switch (control.type) {
+                case 'toggle':
+                    row.classList.add('is-toggle');
+                    input = document.createElement('input');
+                    input.type = 'checkbox';
+                    input.checked = Boolean(currentValue);
+                    input.addEventListener('change', () => emitSettingChange(module.id, control.key, input.checked));
+                    break;
+
+                case 'select':
+                    if (control.previewOnHover === true) {
+                        row.classList.add('is-preview-select');
+                        input = buildPreviewSelect(module, control, currentValue);
+                    } else {
+                        input = document.createElement('select');
+                        for (const option of control.options || []) {
+                            const opt = document.createElement('option');
+                            opt.value = option.value ?? option;
+                            opt.textContent = option.label ?? option;
+                            input.appendChild(opt);
+                        }
+                        input.value = currentValue ?? '';
+                        input.addEventListener('change', () => emitSettingChange(module.id, control.key, input.value));
+                    }
+                    break;
+
+                case 'range':
+                    row.classList.add('is-range');
+                    input = document.createElement('input');
+                    input.type = 'range';
+                    input.min = control.min ?? 0;
+                    input.max = control.max ?? 100;
+                    input.step = control.step ?? 1;
+                    input.value = currentValue ?? control.min ?? 0;
+                    {
+                        const value = document.createElement('output');
+                        value.className = 'lectio-manager-range-value';
+                        value.textContent = `${input.value}${control.suffix || ''}`;
+                        input.addEventListener('input', () => {
+                            value.textContent = `${input.value}${control.suffix || ''}`;
+                        });
+                        row.appendChild(value);
+                    }
+                    input.addEventListener('change', () => emitSettingChange(module.id, control.key, input.value));
+                    break;
+
+                case 'text':
+                    input = document.createElement('input');
+                    input.type = 'text';
+                    input.value = currentValue ?? '';
+                    input.addEventListener('change', () => emitSettingChange(module.id, control.key, input.value));
+                    break;
+
+                case 'color':
+                    row.classList.add('is-color');
+                    input = document.createElement('input');
+                    input.type = 'color';
+                    // A colour input only accepts #rrggbb, and silently shows
+                    // black for anything else, so fall back to a visible grey
+                    // rather than implying a module reported black.
+                    input.value = /^#[0-9a-f]{6}$/i.test(String(currentValue ?? ''))
+                        ? String(currentValue).toLowerCase()
+                        : '#808080';
+                    input.addEventListener('change', () => emitSettingChange(module.id, control.key, input.value));
+                    break;
+
+                case 'button':
+                    row.classList.add('is-button');
+                    input = document.createElement('button');
+                    input.type = 'button';
+                    input.textContent = control.buttonLabel || control.label || 'Run';
+                    input.addEventListener('click', () => emitSettingChange(module.id, control.key, true));
+                    break;
+
+                default:
+                    continue;
+            }
+
+            if (input.matches('input, select, textarea')) {
+                input.id = `lectio-manager-setting-${module.id}-${control.key}`
+                    .replace(/[^a-zA-Z0-9_-]/g, '-');
+                label.htmlFor = input.id;
+            } else if (input.classList.contains('lectio-manager-preview-select')) {
+                label.id = `lectio-manager-setting-label-${module.id}-${control.key}`
+                    .replace(/[^a-zA-Z0-9_-]/g, '-');
+                input.querySelector('.lectio-manager-preview-select-trigger')
+                    .setAttribute('aria-labelledby', label.id);
+            }
+
+            row.appendChild(input);
+            section.querySelector('.lectio-manager-settings-section-rows').appendChild(row);
+        }
+    }
+
+    function buildPreviewSelect(module, control, currentValue) {
+        const options = (control.options || []).map((option) => ({
+            value: String(option.value ?? option),
+            label: String(option.label ?? option)
+        }));
+        const selected = options.find((option) => option.value === String(currentValue ?? '')) || options[0];
+        const wrapper = document.createElement('div');
+        wrapper.className = 'lectio-manager-preview-select';
+        wrapper.dataset.moduleId = module.id;
+        wrapper.dataset.settingKey = control.key;
+
+        const trigger = document.createElement('button');
+        trigger.type = 'button';
+        trigger.className = 'lectio-manager-preview-select-trigger';
+        trigger.setAttribute('role', 'combobox');
+        trigger.setAttribute('aria-haspopup', 'listbox');
+        trigger.setAttribute('aria-expanded', 'false');
+        trigger.textContent = selected?.label || 'Choose';
+
+        const menu = document.createElement('div');
+        menu.className = 'lectio-manager-preview-select-menu';
+        menu.setAttribute('role', 'listbox');
+        menu.hidden = true;
+
+        for (const option of options) {
+            const item = document.createElement('button');
+            item.type = 'button';
+            item.className = 'lectio-manager-preview-select-option';
+            item.dataset.previewValue = option.value;
+            item.setAttribute('role', 'option');
+            item.setAttribute('aria-selected', String(option.value === selected?.value));
+            item.textContent = option.label;
+            const preview = () => emitSettingPreview(module.id, control.key, option.value);
+            const clearPreview = () => clearSettingPreview(module.id, control.key);
+            item.addEventListener('mouseenter', preview);
+            item.addEventListener('mouseleave', clearPreview);
+            item.addEventListener('focus', preview);
+            item.addEventListener('blur', clearPreview);
+            item.addEventListener('click', (event) => {
+                event.stopPropagation();
+                trigger.textContent = option.label;
+                for (const sibling of menu.querySelectorAll('[role="option"]')) {
+                    sibling.setAttribute('aria-selected', String(sibling === item));
+                }
+                emitSettingChange(module.id, control.key, option.value);
+                closePreviewSelect(wrapper, { restore: false });
+                clearSettingPreview(module.id, control.key);
+            });
+            menu.appendChild(item);
+        }
+
+        trigger.addEventListener('click', (event) => {
+            event.stopPropagation();
+            if (wrapper.classList.contains('is-open')) {
+                closePreviewSelect(wrapper);
+            } else {
+                for (const other of document.querySelectorAll('.lectio-manager-preview-select.is-open')) {
+                    closePreviewSelect(other);
+                }
+                wrapper.classList.add('is-open');
+                menu.hidden = false;
+                trigger.setAttribute('aria-expanded', 'true');
+            }
+        });
+
+        trigger.addEventListener('keydown', (event) => {
+            if (!['ArrowDown', 'ArrowUp'].includes(event.key)) return;
+            event.preventDefault();
+            if (!wrapper.classList.contains('is-open')) trigger.click();
+            const items = [...menu.querySelectorAll('[role="option"]')];
+            const selectedIndex = Math.max(0, items.findIndex((item) => item.getAttribute('aria-selected') === 'true'));
+            items[event.key === 'ArrowUp' ? Math.max(0, selectedIndex - 1) : Math.min(items.length - 1, selectedIndex + 1)]?.focus();
+        });
+
+        menu.addEventListener('keydown', (event) => {
+            const items = [...menu.querySelectorAll('[role="option"]')];
+            const index = items.indexOf(document.activeElement);
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                event.stopPropagation();
+                closePreviewSelect(wrapper);
+                trigger.focus();
+            } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                event.preventDefault();
+                const offset = event.key === 'ArrowDown' ? 1 : -1;
+                items[Math.max(0, Math.min(items.length - 1, index + offset))]?.focus();
+            }
+        });
+
+        wrapper.append(trigger, menu);
+        return wrapper;
+    }
+
+    function closePreviewSelect(wrapper, { restore = true } = {}) {
+        if (!wrapper?.classList.contains('is-open')) return;
+        wrapper.classList.remove('is-open');
+        wrapper.querySelector('.lectio-manager-preview-select-menu').hidden = true;
+        wrapper.querySelector('.lectio-manager-preview-select-trigger').setAttribute('aria-expanded', 'false');
+        if (restore) {
+            clearSettingPreview(wrapper.dataset.moduleId, wrapper.dataset.settingKey);
+        }
+    }
+
+    function closeAllPreviewSelects() {
+        for (const previewSelect of document.querySelectorAll('.lectio-manager-preview-select.is-open')) {
+            closePreviewSelect(previewSelect);
+        }
+    }
+
+    function isVersionNewer(candidate, installed) {
+        if (!isNonEmptyString(candidate) || !isNonEmptyString(installed)) return false;
+        const parse = (value) => value.replace(/^v/i, '').split(/[.-]/).slice(0, 3).map((part) => Number(part));
+        const next = parse(candidate);
+        const current = parse(installed);
+        if (next.some((part) => !Number.isInteger(part)) || current.some((part) => !Number.isInteger(part))) return false;
+        for (let index = 0; index < 3; index += 1) {
+            const difference = (next[index] || 0) - (current[index] || 0);
+            if (difference !== 0) return difference > 0;
+        }
+        return false;
+    }
+
+    // ============================================================
+    // UI: STATUS TEXT
+    // ============================================================
+
+    function updateRefreshedLabel({ justUpdated }) {
+        if (!elements) {
+            return;
+        }
+
+        if (!lastRefresh) {
+            elements.refreshBtn.title = 'Refresh catalogue — not refreshed yet';
+            elements.refreshBtn.setAttribute('aria-label', 'Refresh catalogue — not refreshed yet');
+            return;
+        }
+
+        window.clearTimeout(updatedLabelTimer);
+
+        if (justUpdated) {
+            elements.refreshBtn.title = 'Catalogue updated just now';
+            elements.refreshBtn.setAttribute('aria-label', 'Catalogue updated just now');
+            updatedLabelTimer = window.setTimeout(() => {
+                updateRefreshedLabel({ justUpdated: false });
+            }, 5000);
+        } else {
+            const status = `Last refreshed: ${formatTime(lastRefresh)}`;
+            elements.refreshBtn.title = `Refresh catalogue — ${status}`;
+            elements.refreshBtn.setAttribute('aria-label', `Refresh catalogue — ${status}`);
+        }
+    }
+
+    function showError(message) {
+        if (!elements) {
+            return;
+        }
+
+        if (!message) {
+            elements.errorBox.hidden = true;
+            elements.errorBox.textContent = '';
+            return;
+        }
+
+        elements.errorBox.hidden = false;
+        elements.errorBox.textContent = message;
+    }
+
+    function setRefreshingUI(isRefreshing) {
+        if (!elements) {
+            return;
+        }
+
+        elements.refreshBtn.disabled = isRefreshing;
+        elements.refreshBtn.classList.toggle('is-spinning', isRefreshing);
+    }
+
+    function formatTime(timestamp) {
+        if (!timestamp) {
+            return '--:--';
+        }
+
+        return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+
+    // ============================================================
+    // ICONS
+    // ============================================================
+
+    function gearSvg() {
+        return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"></path><path d="M19.4 13.5a7.6 7.6 0 0 0 0-3l1.9-1.5-2-3.4-2.2.9a7.6 7.6 0 0 0-2.6-1.5L14 2.6h-4l-.5 2.4a7.6 7.6 0 0 0-2.6 1.5l-2.2-.9-2 3.4L4.6 10.5a7.6 7.6 0 0 0 0 3l-1.9 1.5 2 3.4 2.2-.9c.77.66 1.65 1.17 2.6 1.5l.5 2.4h4l.5-2.4a7.6 7.6 0 0 0 2.6-1.5l2.2.9 2-3.4-1.9-1.5Z"></path></svg>`;
+    }
+
+    function refreshSvg() {
+        return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 12a8 8 0 0 1 13.66-5.66L20 8"></path><path d="M20 4v4h-4"></path><path d="M20 12a8 8 0 0 1-13.66 5.66L4 16"></path><path d="M4 20v-4h4"></path></svg>`;
+    }
+
+    function closeSvg() {
+        return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 5l14 14"></path><path d="M19 5 5 19"></path></svg>`;
+    }
+
+    function chevronSvg() {
+        return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 9l6 6 6-6"></path></svg>`;
+    }
+
+    function helpSvg() {
+        return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"></circle><path d="M9.5 9.3a2.5 2.5 0 0 1 4.9.8c0 1.7-2.4 1.9-2.4 3.4"></path><circle cx="12" cy="16.8" r=".15" fill="currentColor" stroke-width="1.2"></circle></svg>`;
+    }
+
+    // ============================================================
+    // STYLES
+    // ============================================================
+
+    function injectStyles() {
+        const style = document.createElement('style');
+
+        style.textContent = `
+            #lectio-manager-root {
+                position: fixed;
+                right: 16px;
+                bottom: 16px;
+                z-index: 999999;
+                font-family: Roboto, Arial, sans-serif;
+                font-size: 13px;
+                color: var(--lectio-theme-text, #10201e);
+            }
+
+            #lectio-manager-toggle {
+                width: 44px;
+                height: 44px;
+                border-radius: 50%;
+                border: none;
+                background: var(--lectio-theme-accent, #0f6f6f);
+                box-shadow: 0 3px 10px rgba(0,0,0,.28);
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 0;
+            }
+
+            #lectio-manager-toggle svg {
+                width: 22px;
+                height: 22px;
+                fill: none;
+                /* Fixed white: sits on the accent-coloured circle, not on
+                   the panel surface — see the nav-item.is-active comment
+                   below for why this can't be var(--lectio-theme-surface). */
+                stroke: #ffffff;
+                stroke-width: 1.6;
+                stroke-linecap: round;
+                stroke-linejoin: round;
+            }
+
+            #lectio-manager-toggle:hover {
+                background: color-mix(in srgb, var(--lectio-theme-accent, #0d5f5f) 85%, black);
+            }
+
+            #lectio-manager-panel {
+                position: absolute;
+                right: 0;
+                bottom: 54px;
+                width: min(390px, calc(100vw - 32px));
+                max-height: min(78vh, 640px);
+                display: flex;
+                flex-direction: column;
+                background: var(--lectio-theme-surface, #ffffff);
+                border: 1px solid var(--lectio-theme-muted, #d6dde0);
+                border-radius: 10px;
+                box-shadow: 0 10px 28px rgba(0,0,0,.22);
+            }
+
+            #lectio-manager-panel[hidden] {
+                display: none !important;
+            }
+
+            .lectio-manager-header {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                padding: 10px 12px;
+                background: var(--lectio-theme-accent, #0f6f6f);
+                /* Fixed white, not var(--lectio-theme-surface) — on-accent
+                   text, same reasoning as nav-item.is-active below. */
+                color: #ffffff;
+                border-radius: 10px 10px 0 0;
+            }
+
+            .lectio-manager-footer {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 8px;
+                padding: 8px 12px;
+                border-top: 1px solid var(--lectio-theme-muted, #eef1f2);
+                background: var(--lectio-theme-surface-alt, #fafbfb);
+                border-radius: 0 0 10px 10px;
+            }
+
+            .lectio-manager-footer-link {
+                border: none;
+                background: transparent;
+                padding: 0;
+                font-size: 11px;
+                font-weight: 600;
+                font-family: inherit;
+                color: var(--lectio-theme-accent, #0f6f6f);
+                text-decoration: none;
+                cursor: pointer;
+            }
+
+            .lectio-manager-footer-link:hover {
+                text-decoration: underline;
+            }
+
+            .lectio-manager-title {
+                flex: 1;
+                font-weight: 700;
+                font-size: 14px;
+            }
+
+            .lectio-manager-prefs,
+            .lectio-manager-help,
+            .lectio-manager-refresh,
+            .lectio-manager-close {
+                width: 26px;
+                height: 26px;
+                border: none;
+                background: transparent;
+                /* Fixed white: these icons sit inside .lectio-manager-header
+                   (accent background), not on the panel surface. */
+                color: #ffffff;
+                text-decoration: none;
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                border-radius: 6px;
+            }
+
+            .lectio-manager-prefs:hover,
+            .lectio-manager-help:hover,
+            .lectio-manager-refresh:hover,
+            .lectio-manager-close:hover {
+                background: rgba(255,255,255,.16);
+            }
+
+            .lectio-manager-refresh:disabled {
+                opacity: .6;
+                cursor: default;
+            }
+
+            .lectio-manager-prefs svg,
+            .lectio-manager-help svg,
+            .lectio-manager-refresh svg,
+            .lectio-manager-close svg {
+                width: 15px;
+                height: 15px;
+                fill: none;
+                stroke: currentColor;
+                stroke-width: 2;
+                stroke-linecap: round;
+                stroke-linejoin: round;
+            }
+
+            .lectio-manager-help-panel {
+                margin: 6px 12px 0;
+                padding: 8px 10px;
+                font-size: 11px;
+                line-height: 1.4;
+                background: var(--lectio-theme-surface-alt, #eef3f6);
+                color: var(--lectio-theme-text, #2a4250);
+                border: 1px solid var(--lectio-theme-muted, #d8e3e9);
+                border-radius: 8px;
+            }
+
+            .lectio-manager-help-panel[hidden] {
+                display: none !important;
+            }
+
+            .lectio-manager-prefs-panel {
+                margin: 6px 12px 0;
+                padding: 8px 10px;
+                background: var(--lectio-theme-surface-alt, #eef3f6);
+                border: 1px solid var(--lectio-theme-muted, #d8e3e9);
+                border-radius: 8px;
+            }
+
+            .lectio-manager-prefs-panel[hidden] {
+                display: none !important;
+            }
+
+            .lectio-manager-prefs-row {
+                display: flex;
+                align-items: flex-start;
+                gap: 8px;
+                cursor: pointer;
+            }
+
+            .lectio-manager-prefs-row input {
+                margin: 1px 0 0;
+                accent-color: var(--lectio-theme-accent, #0f6f6f);
+                cursor: pointer;
+            }
+
+            .lectio-manager-prefs-row strong {
+                display: block;
+                font-size: 12px;
+                color: var(--lectio-theme-text, #2a4250);
+            }
+
+            .lectio-manager-prefs-row small {
+                display: block;
+                margin-top: 2px;
+                font-size: 11px;
+                line-height: 1.4;
+                color: var(--lectio-theme-muted, #5e6870);
+            }
+
+            .lectio-manager-refresh.is-spinning svg {
+                animation: lectio-manager-spin 800ms linear infinite;
+            }
+
+            @keyframes lectio-manager-spin {
+                from { transform: rotate(0deg); }
+                to { transform: rotate(360deg); }
+            }
+
+            .lectio-manager-main-view,
+            .lectio-manager-settings-view {
+                display: flex;
+                flex: 1;
+                min-height: 0;
+                flex-direction: column;
+            }
+
+            .lectio-manager-main-view[hidden],
+            .lectio-manager-settings-view[hidden] {
+                display: none !important;
+            }
+
+            .lectio-manager-tabs {
+                display: flex;
+                gap: 2px;
+                padding: 6px 12px 0;
+                border-bottom: 1px solid var(--lectio-theme-muted, #eef1f2);
+            }
+
+            .lectio-manager-tab {
+                flex: 1;
+                border: none;
+                border-bottom: 2px solid transparent;
+                background: transparent;
+                color: var(--lectio-theme-muted, #5e6870);
+                cursor: pointer;
+                font: inherit;
+                font-size: 12px;
+                font-weight: 650;
+                padding: 7px 10px 6px;
+            }
+
+            .lectio-manager-tab:hover {
+                color: var(--lectio-theme-text, #10201e);
+            }
+
+            .lectio-manager-tab.is-active {
+                border-bottom-color: var(--lectio-theme-accent, #0f6f6f);
+                color: var(--lectio-theme-accent, #0f6f6f);
+            }
+
+            .lectio-manager-installed-count,
+            .lectio-manager-available-count {
+                color: var(--lectio-theme-muted, #5e6870);
+                font-size: 10px;
+            }
+
+            .lectio-manager-nav {
+                position: relative;
+                padding: 6px 12px 0;
+            }
+
+            .lectio-manager-nav[hidden] {
+                display: none !important;
+            }
+
+            .lectio-manager-nav-trigger {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                width: 100%;
+                gap: 8px;
+                border: 1px solid var(--lectio-theme-muted, #d6dde0);
+                background: var(--lectio-theme-surface, #ffffff);
+                border-radius: 8px;
+                padding: 6px 10px;
+                font-size: 12px;
+                font-weight: 700;
+                color: var(--lectio-theme-text, #10201e);
+                cursor: pointer;
+            }
+
+            .lectio-manager-nav-trigger:hover {
+                border-color: var(--lectio-theme-accent, #0f6f6f);
+            }
+
+            .lectio-manager-nav-trigger svg {
+                width: 12px;
+                height: 12px;
+                flex-shrink: 0;
+                fill: none;
+                stroke: var(--lectio-theme-muted, #5e6870);
+                stroke-width: 2;
+                stroke-linecap: round;
+                stroke-linejoin: round;
+            }
+
+            .lectio-manager-nav-menu {
+                position: absolute;
+                left: 12px;
+                right: 12px;
+                top: calc(100% + 4px);
+                z-index: 10;
+                background: var(--lectio-theme-surface, #ffffff);
+                border: 1px solid var(--lectio-theme-muted, #d6dde0);
+                border-radius: 8px;
+                box-shadow: 0 8px 20px rgba(0,0,0,.18);
+                padding: 6px;
+                max-height: 260px;
+                overflow-y: auto;
+            }
+
+            .lectio-manager-nav-menu[hidden] {
+                display: none !important;
+            }
+
+            .lectio-manager-nav-group {
+                display: flex;
+                flex-direction: column;
+                gap: 2px;
+                border: 1px solid var(--lectio-theme-muted, #e2e8ea);
+                border-radius: 8px;
+                background: var(--lectio-theme-surface-alt, #f1f6f6);
+                padding: 4px;
+                margin-bottom: 6px;
+            }
+
+            .lectio-manager-nav-group:last-child {
+                margin-bottom: 0;
+            }
+
+            .lectio-manager-nav-group-label {
+                padding: 4px 8px 2px;
+                font-size: 10px;
+                font-weight: 700;
+                text-transform: uppercase;
+                letter-spacing: .04em;
+                color: var(--lectio-theme-muted, #8a949c);
+            }
+
+            .lectio-manager-nav-item {
+                display: block;
+                width: 100%;
+                text-align: left;
+                border: none;
+                background: transparent;
+                border-radius: 6px;
+                padding: 6px 8px;
+                font-size: 12px;
+                font-weight: 500;
+                color: var(--lectio-theme-text, #10201e);
+                cursor: pointer;
+            }
+
+            .lectio-manager-nav-item:hover {
+                background: var(--lectio-theme-surface-alt, #f2f6f6);
+            }
+
+            .lectio-manager-nav-item.is-active {
+                background: var(--lectio-theme-accent, #0f6f6f);
+                /* Fixed white, not var(--lectio-theme-surface): this text
+                   sits ON the accent colour, not on the surface, and a dark
+                   theme's dark surface would pair dark-on-accent instead of
+                   the light-on-accent contrast this needs. */
+                color: #ffffff;
+                font-weight: 700;
+            }
+
+            .lectio-manager-list-toolbar {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                justify-content: space-between;
+                padding: 8px 12px 4px;
+            }
+
+            .lectio-manager-view-heading {
+                font-size: 11px;
+                font-weight: 700;
+                text-transform: uppercase;
+                letter-spacing: .03em;
+                color: var(--lectio-theme-muted, #5e6870);
+            }
+
+            .lectio-manager-sort {
+                display: flex;
+                overflow: hidden;
+                border: 1px solid var(--lectio-theme-muted, #d6dde0);
+                border-radius: 6px;
+            }
+
+            .lectio-manager-sort button {
+                border: none;
+                background: var(--lectio-theme-surface, #ffffff);
+                color: var(--lectio-theme-muted, #5e6870);
+                cursor: pointer;
+                font: inherit;
+                font-size: 10px;
+                padding: 3px 7px;
+            }
+
+            .lectio-manager-sort button + button {
+                border-left: 1px solid var(--lectio-theme-muted, #d6dde0);
+            }
+
+            .lectio-manager-sort button.is-active {
+                background: var(--lectio-theme-surface-alt, #eef3f6);
+                color: var(--lectio-theme-accent, #0f6f6f);
+                font-weight: 700;
+            }
+
+            .lectio-manager-tip {
+                display: flex;
+                align-items: flex-start;
+                gap: 8px;
+                margin: 6px 12px 0;
+                padding: 8px 10px;
+                font-size: 11px;
+                line-height: 1.35;
+                background: var(--lectio-theme-surface-alt, #eaf5f2);
+                color: var(--lectio-theme-accent, #0d4d4d);
+                border: 1px solid var(--lectio-theme-muted, #cfe8e3);
+                border-radius: 8px;
+            }
+
+            .lectio-manager-tip[hidden] {
+                display: none !important;
+            }
+
+            .lectio-manager-tip-text {
+                flex: 1;
+            }
+
+            .lectio-manager-tip-dismiss {
+                border: none;
+                background: transparent;
+                color: var(--lectio-theme-accent, #0d4d4d);
+                font-size: 14px;
+                line-height: 1;
+                cursor: pointer;
+                padding: 0 2px;
+            }
+
+            .lectio-manager-error {
+                padding: 8px 12px;
+                font-size: 12px;
+                background: #fff4e5;
+                color: #7a4a00;
+                border-bottom: 1px solid var(--lectio-theme-muted, #eef1f2);
+            }
+
+            .lectio-manager-error[hidden] {
+                display: none !important;
+            }
+
+            .lectio-manager-list {
+                flex: 1;
+                min-height: 0;
+                overflow-y: auto;
+                padding: 6px 12px 14px;
+            }
+
+            .lectio-manager-loading {
+                padding: 16px 8px;
+                color: var(--lectio-theme-muted, #5e6870);
+                text-align: center;
+                font-size: 12px;
+            }
+
+            .lectio-manager-category-heading {
+                margin: 12px 2px 5px;
+                font-size: 10px;
+                font-weight: 800;
+                color: var(--lectio-theme-muted, #66767b);
+                letter-spacing: .08em;
+                text-transform: uppercase;
+            }
+
+            .lectio-manager-category-heading:first-child {
+                margin-top: 0;
+            }
+
+            .lectio-manager-card {
+                position: relative;
+                padding: 11px 12px;
+                border: 1px solid var(--lectio-theme-muted, #dde5e6);
+                border-radius: 10px;
+                background: var(--lectio-theme-surface, #ffffff);
+                box-shadow: 0 1px 2px rgba(16,32,30,.04);
+                overflow: hidden;
+            }
+
+            .lectio-manager-card + .lectio-manager-card {
+                margin-top: 7px;
+            }
+
+            .lectio-manager-card::before {
+                content: '';
+                position: absolute;
+                inset: 0 auto 0 0;
+                width: 3px;
+                background: var(--lectio-theme-accent-alt, #69a9a5);
+            }
+
+            .lectio-manager-card:hover {
+                border-color: var(--lectio-theme-muted, #b9cbcc);
+            }
+
+            .lectio-manager-card-main {
+                margin-bottom: 9px;
+            }
+
+            .lectio-manager-card.is-compact {
+                padding-block: 8px;
+            }
+
+            .lectio-manager-card.is-compact .lectio-manager-card-main {
+                margin-bottom: 6px;
+            }
+
+            .lectio-manager-card-meta {
+                display: flex;
+                align-items: center;
+                gap: 7px;
+                margin-bottom: 5px;
+            }
+
+            .lectio-manager-card-category {
+                padding: 2px 6px;
+                border-radius: 999px;
+                background: var(--lectio-theme-surface-alt, #e9f3f2);
+                color: var(--lectio-theme-accent, #176766);
+                font-size: 9px;
+                font-weight: 800;
+                letter-spacing: .05em;
+                text-transform: uppercase;
+            }
+
+            .lectio-manager-card-experimental {
+                padding: 2px 6px;
+                border-radius: 999px;
+                background: #fdf0dd;
+                color: #9a4f00;
+                font-size: 9px;
+                font-weight: 800;
+                letter-spacing: .05em;
+                text-transform: uppercase;
+            }
+
+            .lectio-manager-card-name {
+                font-weight: 700;
+                font-size: 13px;
+                display: flex;
+                align-items: baseline;
+                gap: 6px;
+            }
+
+            .lectio-manager-card-audience {
+                font-weight: 600;
+                font-size: 9px;
+                color: var(--lectio-theme-muted, #778187);
+                text-transform: uppercase;
+                letter-spacing: .04em;
+            }
+
+            .lectio-manager-card-desc {
+                margin-top: 3px;
+                font-size: 12px;
+                color: var(--lectio-theme-text, #394a57);
+                line-height: 1.4;
+            }
+
+            .lectio-manager-card-status {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+
+            .lectio-manager-status-installed,
+            .lectio-manager-status-update,
+            .lectio-manager-status-missing {
+                flex: 1;
+            }
+
+            .lectio-manager-status-installed {
+                font-size: 11px;
+                font-weight: 600;
+                color: #0f6f4f;
+            }
+
+            .lectio-manager-status-update {
+                font-size: 11px;
+                font-weight: 700;
+                color: #9a4f00;
+            }
+
+            .lectio-manager-status-missing {
+                font-size: 11px;
+                color: var(--lectio-theme-muted, #5e6870);
+            }
+
+            .lectio-manager-status-idle {
+                font-size: 10px;
+                font-style: italic;
+                color: var(--lectio-theme-muted, #5e6870);
+                white-space: nowrap;
+            }
+
+            .lectio-manager-card-actions {
+                display: flex;
+                gap: 6px;
+            }
+
+            .lectio-manager-forget-btn {
+                border-color: var(--lectio-theme-muted, #5e6870);
+                color: var(--lectio-theme-muted, #5e6870);
+            }
+
+            .lectio-manager-install-btn,
+            .lectio-manager-update-btn,
+            .lectio-manager-forget-btn,
+            .lectio-manager-settings-btn {
+                border: 1px solid var(--lectio-theme-accent, #0f6f6f);
+                color: var(--lectio-theme-accent, #0f6f6f);
+                background: var(--lectio-theme-surface, #ffffff);
+                border-radius: 6px;
+                padding: 3px 10px;
+                font-size: 11px;
+                font-weight: 600;
+                text-decoration: none;
+                cursor: pointer;
+                white-space: nowrap;
+            }
+
+            .lectio-manager-install-btn:hover,
+            .lectio-manager-update-btn:hover,
+            .lectio-manager-forget-btn:hover,
+            .lectio-manager-settings-btn:hover {
+                background: var(--lectio-theme-surface-alt, #e8f3f3);
+            }
+
+            .lectio-manager-settings-view-header {
+                padding: 8px 12px 10px;
+                border-bottom: 1px solid var(--lectio-theme-muted, #eef1f2);
+            }
+
+            .lectio-manager-settings-back {
+                border: none;
+                background: transparent;
+                color: var(--lectio-theme-accent, #0f6f6f);
+                cursor: pointer;
+                font: inherit;
+                font-size: 11px;
+                font-weight: 650;
+                padding: 2px 0 7px;
+            }
+
+            .lectio-manager-settings-title-row {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 10px;
+            }
+
+            .lectio-manager-settings-title-row > div {
+                display: flex;
+                min-width: 0;
+                flex-direction: column;
+                gap: 2px;
+            }
+
+            .lectio-manager-settings-category {
+                color: var(--lectio-theme-accent, #0f6f6f);
+                font-size: 9px;
+                font-weight: 800;
+                letter-spacing: .05em;
+                text-transform: uppercase;
+            }
+
+            .lectio-manager-settings-title {
+                color: var(--lectio-theme-text, #10201e);
+                font-size: 14px;
+            }
+
+            .lectio-manager-settings-version {
+                color: var(--lectio-theme-muted, #5e6870);
+                font-size: 10px;
+            }
+
+            .lectio-manager-settings-body {
+                display: flex;
+                min-height: 0;
+                flex: 1;
+                flex-direction: column;
+                gap: 9px;
+                overflow-y: auto;
+                padding: 10px 12px 14px;
+            }
+
+            .lectio-manager-settings-section {
+                border: 1px solid var(--lectio-theme-muted, #dce9e8);
+                border-radius: 8px;
+                background: var(--lectio-theme-surface-alt, #f6f9f9);
+                overflow: visible;
+            }
+
+            .lectio-manager-settings-section-heading {
+                margin: 0;
+                padding: 8px 10px 0;
+                color: var(--lectio-theme-accent, #176766);
+                font-size: 10px;
+                font-weight: 800;
+                letter-spacing: .07em;
+                text-transform: uppercase;
+            }
+
+            summary.lectio-manager-settings-section-heading {
+                cursor: pointer;
+                user-select: none;
+            }
+
+            summary.lectio-manager-settings-section-heading::-webkit-details-marker {
+                color: var(--lectio-theme-accent, #176766);
+            }
+
+            .lectio-manager-setting-label-row {
+                display: flex;
+                align-items: center;
+                gap: 5px;
+            }
+
+            .lectio-manager-setting-info {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                width: 15px;
+                height: 15px;
+                padding: 0;
+                border: none;
+                border-radius: 50%;
+                background: transparent;
+                color: var(--lectio-theme-muted, #8a969b);
+                cursor: pointer;
+                flex: none;
+            }
+
+            .lectio-manager-setting-info svg {
+                width: 100%;
+                height: 100%;
+                fill: none;
+                stroke: currentColor;
+                stroke-width: 2;
+                stroke-linecap: round;
+                stroke-linejoin: round;
+            }
+
+            .lectio-manager-setting-info:hover,
+            .lectio-manager-setting-info:focus-visible,
+            .lectio-manager-setting-info[aria-expanded='true'] {
+                color: var(--lectio-theme-accent, #176766);
+            }
+
+            .lectio-manager-settings-section-rows {
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
+                padding: 9px 10px 10px;
+            }
+
+            .lectio-manager-setting-row {
+                display: grid;
+                grid-template-columns: minmax(0, 1fr) minmax(110px, 42%);
+                align-items: center;
+                gap: 10px;
+                font-size: 12px;
+            }
+
+            .lectio-manager-setting-copy {
+                display: flex;
+                min-width: 0;
+                flex-direction: column;
+                gap: 2px;
+            }
+
+            .lectio-manager-setting-label {
+                color: var(--lectio-theme-text, #203431);
+                font-weight: 650;
+            }
+
+            .lectio-manager-setting-description {
+                color: var(--lectio-theme-muted, #68767b);
+                font-size: 10px;
+                line-height: 1.3;
+            }
+
+            .lectio-manager-setting-row select,
+            .lectio-manager-setting-row input[type='text'] {
+                min-width: 0;
+                width: 100%;
+                box-sizing: border-box;
+                /* Deliberately NOT var(--lectio-theme-surface)/-text here: a
+                   <select>'s open native option list doesn't reliably inherit
+                   author background/text colour across browsers, so a dark
+                   theme's light text could land on a still-light native
+                   popup and become illegible. Keep a fixed, always-legible
+                   base and let only the border pick up the theme. */
+                border: 1px solid var(--lectio-theme-accent, #cbd7d9);
+                border-radius: 6px;
+                background: #ffffff;
+                color: #10201e;
+                padding: 5px 7px;
+                font: inherit;
+            }
+
+            .lectio-manager-setting-row.is-preview-select {
+                align-items: start;
+            }
+
+            .lectio-manager-preview-select {
+                position: relative;
+                min-width: 0;
+                width: 100%;
+            }
+
+            .lectio-manager-preview-select-trigger {
+                width: 100%;
+                border: 1px solid var(--lectio-theme-accent, #cbd7d9);
+                border-radius: 6px;
+                background: #ffffff;
+                color: #10201e;
+                padding: 5px 24px 5px 7px;
+                font: inherit;
+                text-align: left;
+                cursor: pointer;
+            }
+
+            .lectio-manager-preview-select-trigger::after {
+                content: '⌄';
+                position: absolute;
+                right: 8px;
+                color: #5e6870;
+            }
+
+            .lectio-manager-preview-select-menu {
+                position: absolute;
+                top: calc(100% + 3px);
+                left: 0;
+                right: 0;
+                z-index: 20;
+                max-height: 220px;
+                overflow-y: auto;
+                padding: 4px;
+                border: 1px solid var(--lectio-theme-accent, #cbd7d9);
+                border-radius: 6px;
+                background: #ffffff;
+                box-shadow: 0 8px 18px rgba(0,0,0,.18);
+            }
+
+            .lectio-manager-preview-select-menu[hidden] {
+                display: none !important;
+            }
+
+            .lectio-manager-preview-select-option {
+                display: block;
+                width: 100%;
+                border: none;
+                border-radius: 4px;
+                background: transparent;
+                color: #10201e;
+                padding: 5px 7px;
+                font: inherit;
+                text-align: left;
+                cursor: pointer;
+            }
+
+            .lectio-manager-preview-select-option:hover,
+            .lectio-manager-preview-select-option:focus-visible {
+                outline: none;
+                background: #e8f3f3;
+            }
+
+            .lectio-manager-preview-select-option[aria-selected='true'] {
+                font-weight: 700;
+            }
+
+            .lectio-manager-setting-row input[type='checkbox'] {
+                justify-self: end;
+                width: 34px;
+                height: 18px;
+                accent-color: var(--lectio-theme-accent, #0f6f6f);
+            }
+
+            .lectio-manager-setting-row.is-color {
+                grid-template-columns: minmax(0, 1fr) auto;
+            }
+
+            .lectio-manager-setting-row input[type='color'] {
+                width: 44px;
+                height: 26px;
+                padding: 2px;
+                border: 1px solid var(--lectio-theme-accent, #cbd7d9);
+                border-radius: 6px;
+                background: #ffffff;
+                cursor: pointer;
+            }
+
+            .lectio-manager-setting-row.is-range {
+                grid-template-columns: minmax(0, 1fr) minmax(90px, 1fr) auto;
+            }
+
+            .lectio-manager-setting-row input[type='range'] {
+                grid-column: 2;
+                min-width: 0;
+                width: 100%;
+                accent-color: var(--lectio-theme-accent, #0f6f6f);
+            }
+
+            .lectio-manager-range-value {
+                grid-column: 3;
+                grid-row: 1;
+                min-width: 35px;
+                color: var(--lectio-theme-accent, #176766);
+                font-size: 10px;
+                font-weight: 700;
+                text-align: right;
+            }
+
+            .lectio-manager-setting-row.is-button {
+                grid-template-columns: minmax(0, 1fr) auto;
+            }
+
+            /* Direct child only — a button-type row's info toggle is also a
+               <button>, but it sits nested inside the copy/label, not as a
+               direct child of the row like the row's own action button. A
+               descendant selector here would restyle that icon toggle into
+               a bordered, padded box and swallow its small SVG. */
+            .lectio-manager-setting-row.is-button > button {
+                border: 1px solid var(--lectio-theme-accent, #0f6f6f);
+                border-radius: 6px;
+                background: var(--lectio-theme-surface, #ffffff);
+                color: var(--lectio-theme-accent, #0f6f6f);
+                padding: 5px 9px;
+                font: inherit;
+                font-weight: 700;
+                cursor: pointer;
+            }
+
+            @media (max-width: 420px) {
+                #lectio-manager-root {
+                    right: 10px;
+                    bottom: 10px;
+                }
+
+                #lectio-manager-panel {
+                    width: calc(100vw - 20px);
+                }
+            }
+        `;
+
+        document.head.appendChild(style);
+    }
+
 })();
