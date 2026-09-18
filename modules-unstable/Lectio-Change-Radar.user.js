@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Change Radar
 // @namespace    https://github.com/RktRobinhood/Lectio-Scripts
-// @version      0.2.0-beta.1
+// @version      0.2.0-beta.2
 // @description  Watches your Lectio timetable for cancellations and schedule changes and keeps a compact recent-change HUD.
 // @author       RktRobinhood
 // @match        https://www.lectio.dk/lectio/*
@@ -20,9 +20,11 @@
     id: 'change-radar',
     aliases: ['schedule-change-radar', 'lectio-change-radar', 'change-log'],
     name: 'Lectio Change Radar',
-    version: '0.2.0-beta.1',
+    version: '0.2.0-beta.2',
     channel: 'unstable'
   });
+
+  const MANAGER_DISABLED_KEY = 'lectioManager.disabledModules.v1';
 
   const BASE_CONFIG = Object.freeze({
     minRefreshGapMs: 90 * 1000,
@@ -109,10 +111,12 @@
     window.addEventListener(eventName, handleManagerSettingsEvent);
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init, { once: true });
-  } else {
-    init();
+  if (!isManagerPaused()) {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', init, { once: true });
+    } else {
+      init();
+    }
   }
 
   function makeSelectSetting(key, label, description, defaultValue, pairs) {
@@ -164,9 +168,23 @@
         settings: currentValues,
         setSetting: apply,
         applySetting: apply,
-        updateSettings: applyMany
+        updateSettings: applyMany,
+        enabled: !isManagerPaused(),
+        capabilities: {
+          pause: true,
+          managerPause: true
+        }
       }
     }));
+  }
+
+  function isManagerPaused() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(MANAGER_DISABLED_KEY) || '[]');
+      return Array.isArray(parsed) && parsed.includes(MODULE.id);
+    } catch (_) {
+      return false;
+    }
   }
 
   function init() {
