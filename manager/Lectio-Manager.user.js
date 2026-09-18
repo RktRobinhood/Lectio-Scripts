@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://github.com/RktRobinhood/Lectio-Scripts
-// @version      2.1.2
+// @version      2.1.3
 // @description  Discover, configure and manage Lectio userscript modules with Stable and Unstable release channels.
 // @author       RktRobinhood
 // @match        https://www.lectio.dk/lectio/*
@@ -19,204 +19,502 @@
 (() => {
   'use strict';
 
-  const VERSION = '2.1.2';
-  const REPO_RAW = 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main';
-  const STABLE_CATALOGUE_URL = `${REPO_RAW}/catalogue/modules.json`;
-  const UNSTABLE_CATALOGUE_URL = `${REPO_RAW}/modules-unstable/modules.json`;
-  const STABLE_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
-  const UNSTABLE_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
-  const DISABLED_MODULES_KEY = 'lectioManager.disabledModules.v1';
+  const VERSION = '2.1.3';
+
+  const REPO_RAW =
+    'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main';
+
+  const STABLE_CATALOGUE_URL =
+    `${REPO_RAW}/catalogue/modules.json`;
+
+  const UNSTABLE_CATALOGUE_URL =
+    `${REPO_RAW}/modules-unstable/modules.json`;
+
+  const STABLE_REFRESH_INTERVAL_MS =
+    24 * 60 * 60 * 1000;
+
+  const UNSTABLE_REFRESH_INTERVAL_MS =
+    5 * 60 * 1000;
 
   const KEY = Object.freeze({
-    channel: 'lectioManager.releaseChannel.v1',
-    stableCatalogue: 'lectioManager.catalogue.stable.v1',
-    stableRefresh: 'lectioManager.catalogue.stable.refreshedAt.v1',
-    unstableCatalogue: 'lectioManager.catalogue.unstable.v1',
-    unstableRefresh: 'lectioManager.catalogue.unstable.refreshedAt.v1',
-    activeCollection: 'lectioManager.activeCollection.v1',
-    sortMode: 'lectioManager.sortMode.v1'
+    channel:
+      'lectioManager.releaseChannel.v1',
+
+    stableCatalogue:
+      'lectioManager.catalogue.stable.v1',
+
+    stableRefresh:
+      'lectioManager.catalogue.stable.refreshedAt.v1',
+
+    unstableCatalogue:
+      'lectioManager.catalogue.unstable.v1',
+
+    unstableRefresh:
+      'lectioManager.catalogue.unstable.refreshedAt.v1',
+
+    activeCollection:
+      'lectioManager.activeCollection.v1',
+
+    sortMode:
+      'lectioManager.sortMode.v1'
   });
 
   const ID = Object.freeze({
-    launcher: 'lectio-manager-launcher',
-    backdrop: 'lectio-manager-backdrop',
-    panel: 'lectio-manager-panel',
-    style: 'lectio-manager-style',
-    body: 'lectio-manager-panel-body',
-    dialog: 'lectio-manager-subdialog'
+    launcher:
+      'lectio-manager-launcher',
+
+    backdrop:
+      'lectio-manager-backdrop',
+
+    panel:
+      'lectio-manager-panel',
+
+    style:
+      'lectio-manager-style',
+
+    body:
+      'lectio-manager-panel-body',
+
+    dialog:
+      'lectio-manager-subdialog'
   });
 
   const state = {
-    channel: normalizeChannel(GM_getValue(KEY.channel, 'stable')),
-    activeCollection: normalizeCollection(GM_getValue(KEY.activeCollection, 'installed')),
-    sortMode: normalizeSortMode(GM_getValue(KEY.sortMode, 'category')),
-    stableCatalogue: readStoredCatalogue(KEY.stableCatalogue),
-    unstableCatalogue: readStoredCatalogue(KEY.unstableCatalogue),
-    stableRefreshedAt: Number(GM_getValue(KEY.stableRefresh, 0)) || 0,
-    unstableRefreshedAt: Number(GM_getValue(KEY.unstableRefresh, 0)) || 0,
-    registrations: new Map(),
-    panelOpen: false,
-    settingsView: false,
-    moduleSettingsId: null,
-    refreshInFlight: false,
-    statusMessage: '',
-    statusKind: 'info'
+    channel:
+      normalizeChannel(
+        GM_getValue(
+          KEY.channel,
+          'stable'
+        )
+      ),
+
+    activeCollection:
+      normalizeCollection(
+        GM_getValue(
+          KEY.activeCollection,
+          'installed'
+        )
+      ),
+
+    sortMode:
+      normalizeSortMode(
+        GM_getValue(
+          KEY.sortMode,
+          'category'
+        )
+      ),
+
+    stableCatalogue:
+      readStoredCatalogue(
+        KEY.stableCatalogue
+      ),
+
+    unstableCatalogue:
+      readStoredCatalogue(
+        KEY.unstableCatalogue
+      ),
+
+    stableRefreshedAt:
+      Number(
+        GM_getValue(
+          KEY.stableRefresh,
+          0
+        )
+      ) || 0,
+
+    unstableRefreshedAt:
+      Number(
+        GM_getValue(
+          KEY.unstableRefresh,
+          0
+        )
+      ) || 0,
+
+    registrations:
+      new Map(),
+
+    panelOpen:
+      false,
+
+    settingsView:
+      false,
+
+    moduleSettingsId:
+      null,
+
+    refreshInFlight:
+      false,
+
+    statusMessage:
+      '',
+
+    statusKind:
+      'info'
   };
 
-  window.addEventListener('lectio-module:register', onModuleRegister);
-  window.addEventListener('storage', event => {
-    if (event.key === DISABLED_MODULES_KEY && state.panelOpen) renderPanelBody();
-  });
+  window.addEventListener(
+    'lectio-module:register',
+    onModuleRegister
+  );
 
   installStyles();
   installLauncher();
+
   requestModuleDiscovery();
-  window.setTimeout(requestModuleDiscovery, 400);
-  window.setTimeout(requestModuleDiscovery, 1400);
+
+  window.setTimeout(
+    requestModuleDiscovery,
+    400
+  );
+
+  window.setTimeout(
+    requestModuleDiscovery,
+    1400
+  );
+
   void refreshIfNeeded();
 
   function normalizeChannel(value) {
-    return value === 'unstable' ? 'unstable' : 'stable';
+    return value === 'unstable'
+      ? 'unstable'
+      : 'stable';
   }
 
   function normalizeCollection(value) {
-    return value === 'available' ? 'available' : 'installed';
+    return value === 'available'
+      ? 'available'
+      : 'installed';
   }
 
   function normalizeSortMode(value) {
-    return value === 'az' ? 'az' : 'category';
+    return value === 'az'
+      ? 'az'
+      : 'category';
   }
 
   function normalizeRegisteredChannel(value) {
-    if (value === 'stable' || value === 'unstable') return value;
+    if (
+      value === 'stable' ||
+      value === 'unstable'
+    ) {
+      return value;
+    }
+
     return 'unknown';
   }
 
+  function cleanString(value) {
+    return typeof value === 'string'
+      ? value.trim()
+      : '';
+  }
+
+  function firstFunction(...values) {
+    return (
+      values.find(
+        value =>
+          typeof value === 'function'
+      ) ||
+      null
+    );
+  }
+
+  function uniqueStrings(values) {
+    return [
+      ...new Set(
+        values
+          .map(cleanString)
+          .filter(Boolean)
+      )
+    ];
+  }
+
   function readStoredCatalogue(key) {
-    const raw = GM_getValue(key, null);
-    if (!raw) return null;
+    const raw =
+      GM_getValue(
+        key,
+        null
+      );
+
+    if (!raw) {
+      return null;
+    }
 
     try {
-      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
-      return validateCatalogue(parsed, { allowUnstableChannel: true });
+      const parsed =
+        typeof raw === 'string'
+          ? JSON.parse(raw)
+          : raw;
+
+      return validateCatalogue(
+        parsed
+      );
     } catch (_) {
       return null;
     }
   }
 
-  function writeStoredCatalogue(key, catalogue) {
-    GM_setValue(key, JSON.stringify(catalogue));
+  function writeStoredCatalogue(
+    key,
+    catalogue
+  ) {
+    GM_setValue(
+      key,
+      JSON.stringify(catalogue)
+    );
   }
 
   function onModuleRegister(event) {
-    const detail = event?.detail;
-    if (!detail || typeof detail !== 'object') return;
+    const detail =
+      event?.detail;
 
-    const id = cleanString(detail.id);
-    const version = cleanString(detail.version);
+    if (
+      !detail ||
+      typeof detail !== 'object'
+    ) {
+      return;
+    }
 
-    if (!id || !version) return;
+    const id =
+      cleanString(
+        detail.id
+      );
 
-    const aliases = Array.isArray(detail.aliases)
-      ? detail.aliases.map(cleanString).filter(Boolean)
-      : [];
+    const version =
+      cleanString(
+        detail.version
+      );
 
-    state.registrations.set(id, {
+    if (
+      !id ||
+      !version
+    ) {
+      return;
+    }
+
+    const aliases =
+      Array.isArray(
+        detail.aliases
+      )
+        ? detail.aliases
+            .map(cleanString)
+            .filter(Boolean)
+        : [];
+
+    /*
+     * IMPORTANT:
+     *
+     * Do not replace a module's settings behaviour.
+     *
+     * The Manager is responsible for rendering the controls.
+     * The module remains responsible for:
+     *
+     * - applying a setting
+     * - saving it
+     * - previewing it
+     * - clearing previews
+     *
+     * This is particularly important for Lectio Theming.
+     */
+    state.registrations.set(
       id,
-      aliases,
-      name: cleanString(detail.name) || id,
-      version,
-      channel: normalizeRegisteredChannel(detail.channel),
-      settingsSchema: Array.isArray(detail.settingsSchema)
-        ? detail.settingsSchema
-        : [],
-      currentValues:
-        detail.currentValues && typeof detail.currentValues === 'object'
-          ? { ...detail.currentValues }
-          : detail.settings && typeof detail.settings === 'object'
-            ? { ...detail.settings }
-            : {},
-      setSetting:
-        typeof detail.setSetting === 'function'
-          ? detail.setSetting
-          : null,
-      applySetting:
-        typeof detail.applySetting === 'function'
-          ? detail.applySetting
-          : null,
-      updateSettings:
-        typeof detail.updateSettings === 'function'
-          ? detail.updateSettings
-          : null,
-      setEnabled:
-        typeof detail.setEnabled === 'function'
-          ? detail.setEnabled
-          : null,
-      capabilities:
-        detail.capabilities && typeof detail.capabilities === 'object'
-          ? { ...detail.capabilities }
-          : {},
-      enabled: detail.enabled !== false
-    });
+      {
+        id,
+        aliases,
 
-    if (state.panelOpen) renderPanelBody();
+        name:
+          cleanString(
+            detail.name
+          ) || id,
+
+        version,
+
+        channel:
+          normalizeRegisteredChannel(
+            detail.channel
+          ),
+
+        settingsSchema:
+          Array.isArray(
+            detail.settingsSchema
+          )
+            ? detail.settingsSchema
+            : [],
+
+        currentValues:
+          detail.currentValues &&
+          typeof detail.currentValues ===
+            'object'
+            ? {
+                ...detail.currentValues
+              }
+            : (
+                detail.settings &&
+                typeof detail.settings ===
+                  'object'
+                  ? {
+                      ...detail.settings
+                    }
+                  : {}
+              ),
+
+        /*
+         * Established setting hooks.
+         *
+         * Keep several historical aliases here so the Manager
+         * remains compatible with modules created before the
+         * Stable / Unstable work.
+         */
+        setSetting:
+          firstFunction(
+            detail.setSetting,
+            detail.applySetting,
+            detail.updateSetting,
+            detail.changeSetting,
+            detail.onSettingChange
+          ),
+
+        applySetting:
+          typeof detail.applySetting ===
+            'function'
+            ? detail.applySetting
+            : null,
+
+        updateSettings:
+          typeof detail.updateSettings ===
+            'function'
+            ? detail.updateSettings
+            : null,
+
+        /*
+         * Optional preview hooks.
+         *
+         * Lectio Theming can use these when available.
+         */
+        previewSetting:
+          firstFunction(
+            detail.previewSetting,
+            detail.previewValue,
+            detail.previewTheme,
+            detail.preview
+          ),
+
+        clearPreview:
+          firstFunction(
+            detail.clearPreview,
+            detail.restorePreview,
+            detail.endPreview,
+            detail.cancelPreview
+          ),
+
+        rawRegistration:
+          detail
+      }
+    );
+
+    if (
+      state.panelOpen
+    ) {
+      renderPanelBody();
+    }
   }
 
   function requestModuleDiscovery() {
     window.dispatchEvent(
-      new CustomEvent('lectio-manager:discover', {
-        detail: {
-          managerVersion: VERSION,
-          channel: state.channel
+      new CustomEvent(
+        'lectio-manager:discover',
+        {
+          detail: {
+            managerVersion:
+              VERSION,
+
+            channel:
+              state.channel
+          }
         }
-      })
+      )
     );
   }
 
   async function refreshIfNeeded() {
-    const now = Date.now();
+    const now =
+      Date.now();
 
     const stableStale =
       !state.stableCatalogue ||
-      now - state.stableRefreshedAt >= STABLE_REFRESH_INTERVAL_MS;
+      now -
+        state.stableRefreshedAt >=
+        STABLE_REFRESH_INTERVAL_MS;
 
     const unstableStale =
-      state.channel === 'unstable' &&
+      state.channel ===
+        'unstable' &&
       (
         !state.unstableCatalogue ||
-        now - state.unstableRefreshedAt >= UNSTABLE_REFRESH_INTERVAL_MS
+        now -
+          state.unstableRefreshedAt >=
+          UNSTABLE_REFRESH_INTERVAL_MS
       );
 
-    if (!stableStale && !unstableStale) return;
+    if (
+      !stableStale &&
+      !unstableStale
+    ) {
+      return;
+    }
 
-    await refreshCatalogues({ force: false });
+    await refreshCatalogues({
+      force: false
+    });
   }
 
-  async function refreshCatalogues({ force }) {
-    if (state.refreshInFlight) return;
+  async function refreshCatalogues({
+    force
+  }) {
+    if (
+      state.refreshInFlight
+    ) {
+      return;
+    }
 
-    state.refreshInFlight = true;
-    state.statusMessage = 'Refreshing module catalogues...';
-    state.statusKind = 'info';
+    state.refreshInFlight =
+      true;
+
+    state.statusMessage =
+      'Refreshing module catalogues...';
+
+    state.statusKind =
+      'info';
+
     renderPanelBody();
 
     const errors = [];
-    const now = Date.now();
+
+    const now =
+      Date.now();
 
     try {
       if (
         force ||
         !state.stableCatalogue ||
-        now - state.stableRefreshedAt >= STABLE_REFRESH_INTERVAL_MS
+        now -
+          state.stableRefreshedAt >=
+          STABLE_REFRESH_INTERVAL_MS
       ) {
         try {
-          const stable = await fetchCatalogue(
-            STABLE_CATALOGUE_URL,
-            { force }
-          );
+          const stable =
+            await fetchCatalogue(
+              STABLE_CATALOGUE_URL,
+              {
+                force
+              }
+            );
 
-          state.stableCatalogue = stable;
-          state.stableRefreshedAt = Date.now();
+          state.stableCatalogue =
+            stable;
+
+          state.stableRefreshedAt =
+            Date.now();
 
           writeStoredCatalogue(
             KEY.stableCatalogue,
@@ -235,21 +533,34 @@
       }
 
       if (
-        state.channel === 'unstable' &&
+        state.channel ===
+          'unstable' &&
         (
           force ||
           !state.unstableCatalogue ||
-          now - state.unstableRefreshedAt >= UNSTABLE_REFRESH_INTERVAL_MS
+          now -
+            state.unstableRefreshedAt >=
+            UNSTABLE_REFRESH_INTERVAL_MS
         )
       ) {
         try {
-          const unstable = await fetchCatalogue(
-            UNSTABLE_CATALOGUE_URL,
-            { force: true }
-          );
+          /*
+           * Always bypass cache for the experimental
+           * overlay when a refresh is requested.
+           */
+          const unstable =
+            await fetchCatalogue(
+              UNSTABLE_CATALOGUE_URL,
+              {
+                force: true
+              }
+            );
 
-          state.unstableCatalogue = unstable;
-          state.unstableRefreshedAt = Date.now();
+          state.unstableCatalogue =
+            unstable;
+
+          state.unstableRefreshedAt =
+            Date.now();
 
           writeStoredCatalogue(
             KEY.unstableCatalogue,
@@ -267,114 +578,143 @@
         }
       }
     } finally {
-      state.refreshInFlight = false;
+      state.refreshInFlight =
+        false;
     }
 
-    if (errors.length) {
-      const hasUsableStable =
-        Boolean(state.stableCatalogue);
-
+    if (
+      errors.length
+    ) {
       state.statusMessage =
-        hasUsableStable
-          ? `Could not refresh everything. Using last known good data. ${errors.join(' | ')}`
-          : `Catalogue refresh failed. ${errors.join(' | ')}`;
+        state.stableCatalogue
+          ? (
+              'Could not refresh everything. ' +
+              'Using the last known good catalogue. ' +
+              errors.join(' | ')
+            )
+          : (
+              'Catalogue refresh failed. ' +
+              errors.join(' | ')
+            );
 
-      state.statusKind = 'error';
+      state.statusKind =
+        'error';
     } else {
-      state.statusMessage = 'Updated just now.';
-      state.statusKind = 'success';
+      state.statusMessage =
+        'Updated just now.';
+
+      state.statusKind =
+        'success';
     }
 
     requestModuleDiscovery();
     renderPanelBody();
   }
 
-  function fetchCatalogue(baseUrl, { force }) {
-    return new Promise((resolve, reject) => {
-      const url =
-        force
-          ? `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}_=${Date.now()}`
-          : baseUrl;
-
-      GM_xmlhttpRequest({
-        method: 'GET',
-        url,
-
-        headers: {
-          Accept:
-            'application/json,text/plain;q=0.9,*/*;q=0.8',
-
-          'Cache-Control':
-            force
-              ? 'no-cache'
-              : 'max-age=0'
-        },
-
-        timeout: 15000,
-
-        onload(response) {
-          if (
-            response.status < 200 ||
-            response.status >= 300
-          ) {
-            reject(
-              new Error(
-                `HTTP ${response.status}`
+  function fetchCatalogue(
+    baseUrl,
+    {
+      force
+    }
+  ) {
+    return new Promise(
+      (
+        resolve,
+        reject
+      ) => {
+        const url =
+          force
+            ? (
+                `${baseUrl}${
+                  baseUrl.includes('?')
+                    ? '&'
+                    : '?'
+                }_=${Date.now()}`
               )
-            );
+            : baseUrl;
 
-            return;
-          }
+        GM_xmlhttpRequest({
+          method:
+            'GET',
 
-          try {
-            const parsed =
-              JSON.parse(
-                response.responseText
+          url,
+
+          headers: {
+            Accept:
+              'application/json,text/plain;q=0.9,*/*;q=0.8',
+
+            'Cache-Control':
+              force
+                ? 'no-cache'
+                : 'max-age=0'
+          },
+
+          timeout:
+            15000,
+
+          onload(response) {
+            if (
+              response.status <
+                200 ||
+              response.status >=
+                300
+            ) {
+              reject(
+                new Error(
+                  `HTTP ${response.status}`
+                )
               );
 
-            resolve(
-              validateCatalogue(
-                parsed,
-                {
-                  allowUnstableChannel: true
-                }
-              )
-            );
-          } catch (error) {
+              return;
+            }
+
+            try {
+              const parsed =
+                JSON.parse(
+                  response.responseText
+                );
+
+              resolve(
+                validateCatalogue(
+                  parsed
+                )
+              );
+            } catch (error) {
+              reject(
+                new Error(
+                  `Invalid catalogue JSON: ${error.message}`
+                )
+              );
+            }
+          },
+
+          onerror() {
             reject(
               new Error(
-                `Invalid JSON/catalogue: ${error.message}`
+                'Network error'
+              )
+            );
+          },
+
+          ontimeout() {
+            reject(
+              new Error(
+                'Request timed out'
               )
             );
           }
-        },
-
-        onerror() {
-          reject(
-            new Error(
-              'Network error'
-            )
-          );
-        },
-
-        ontimeout() {
-          reject(
-            new Error(
-              'Request timed out'
-            )
-          );
-        }
-      });
-    });
+        });
+      }
+    );
   }
 
   function validateCatalogue(
-    input,
-    { allowUnstableChannel }
+    input
   ) {
     if (
       !input ||
-      typeof input !== 'object'
+      typeof input !==
+        'object'
     ) {
       throw new Error(
         'Catalogue is not an object'
@@ -382,7 +722,9 @@
     }
 
     if (
-      Number(input.schemaVersion) !== 1
+      Number(
+        input.schemaVersion
+      ) !== 1
     ) {
       throw new Error(
         `Unsupported schemaVersion ${input.schemaVersion}`
@@ -390,27 +732,24 @@
     }
 
     if (
-      !Array.isArray(input.modules)
+      !Array.isArray(
+        input.modules
+      )
     ) {
       throw new Error(
         'Catalogue modules must be an array'
       );
     }
 
-    if (
-      input.channel &&
-      !allowUnstableChannel
-    ) {
-      throw new Error(
-        'Unexpected channel field'
-      );
-    }
-
-    const ids = new Set();
+    const ids =
+      new Set();
 
     const modules =
       input.modules.map(
-        (module, index) =>
+        (
+          module,
+          index
+        ) =>
           validateModule(
             module,
             index
@@ -422,7 +761,9 @@
       of modules
     ) {
       if (
-        ids.has(module.id)
+        ids.has(
+          module.id
+        )
       ) {
         throw new Error(
           `Duplicate module id: ${module.id}`
@@ -447,7 +788,8 @@
   ) {
     if (
       !input ||
-      typeof input !== 'object'
+      typeof input !==
+        'object'
     ) {
       throw new Error(
         `Module ${index + 1} is invalid`
@@ -455,10 +797,14 @@
     }
 
     const id =
-      cleanString(input.id);
+      cleanString(
+        input.id
+      );
 
     const name =
-      cleanString(input.name);
+      cleanString(
+        input.name
+      );
 
     const description =
       cleanString(
@@ -477,7 +823,8 @@
 
     if (
       !id ||
-      !/^[a-z0-9][a-z0-9._-]*$/i.test(id)
+      !/^[a-z0-9][a-z0-9._-]*$/i
+        .test(id)
     ) {
       throw new Error(
         `Invalid module id at ${index + 1}`
@@ -497,6 +844,7 @@
     }
 
     if (
+      installUrl &&
       !isApprovedInstallUrl(
         installUrl
       )
@@ -548,12 +896,17 @@
   function isApprovedInstallUrl(
     value
   ) {
+    if (!value) {
+      return false;
+    }
+
     try {
       const url =
         new URL(value);
 
       if (
-        url.protocol !== 'https:'
+        url.protocol !==
+        'https:'
       ) {
         return false;
       }
@@ -585,14 +938,6 @@
     } catch (_) {
       return false;
     }
-  }
-
-  function cleanString(
-    value
-  ) {
-    return typeof value === 'string'
-      ? value.trim()
-      : '';
   }
 
   function installLauncher() {
@@ -631,10 +976,9 @@
       openPanel
     );
 
-    document.body
-      .appendChild(
-        button
-      );
+    document.body.appendChild(
+      button
+    );
   }
 
   function openPanel() {
@@ -677,10 +1021,9 @@
         }
       );
 
-      document.body
-        .appendChild(
-          backdrop
-        );
+      document.body.appendChild(
+        backdrop
+      );
     }
 
     backdrop.hidden =
@@ -718,7 +1061,9 @@
         ID.backdrop
       );
 
-    if (!backdrop) return;
+    if (!backdrop) {
+      return;
+    }
 
     let panel =
       document.getElementById(
@@ -893,11 +1238,9 @@
       .addEventListener(
         'click',
         () => {
-          void refreshCatalogues(
-            {
-              force: true
-            }
-          );
+          void refreshCatalogues({
+            force: true
+          });
         }
       );
 
@@ -955,7 +1298,9 @@
         ID.body
       );
 
-    if (!body) return;
+    if (!body) {
+      return;
+    }
 
     body.innerHTML =
       '';
@@ -1025,7 +1370,8 @@
         'lm-empty';
 
       empty.innerHTML =
-        '<strong>Loading tool catalogue...</strong><span>Last known good data is kept if GitHub is temporarily unavailable.</span>';
+        '<strong>Loading tool catalogue...</strong>' +
+        '<span>Last known good data is kept if GitHub is temporarily unavailable.</span>';
 
       body.appendChild(
         empty
@@ -1045,7 +1391,8 @@
     toolbar.innerHTML = `
       <div class="lm-list-label">
         ${
-          state.activeCollection === 'installed'
+          state.activeCollection ===
+            'installed'
             ? 'INSTALLED'
             : 'AVAILABLE'
         }
@@ -1109,7 +1456,8 @@
     );
 
     if (
-      state.channel === 'unstable'
+      state.channel ===
+      'unstable'
     ) {
       const banner =
         document.createElement(
@@ -1120,7 +1468,8 @@
         'lm-channel-note';
 
       banner.innerHTML =
-        '<strong>UNSTABLE</strong><span>Experimental builds are visible. Channel changes never install or remove tools automatically.</span>';
+        '<strong>UNSTABLE</strong>' +
+        '<span>Experimental builds are visible. Channel changes never install or remove tools automatically.</span>';
 
       body.appendChild(
         banner
@@ -1128,7 +1477,8 @@
     }
 
     const entries =
-      state.activeCollection === 'installed'
+      state.activeCollection ===
+        'installed'
         ? buildInstalledEntries()
         : buildAvailableEntries();
 
@@ -1144,9 +1494,15 @@
         'lm-empty';
 
       empty.textContent =
-        state.activeCollection === 'installed'
+        state.activeCollection ===
+          'installed'
           ? 'No Lectio tools are currently detected.'
-          : `No additional ${state.channel === 'unstable' ? 'Stable or Unstable' : 'Stable'} tools are available.`;
+          : `No additional ${
+              state.channel ===
+                'unstable'
+                ? 'Stable or Unstable'
+                : 'Stable'
+            } tools are available.`;
 
       body.appendChild(
         empty
@@ -1164,17 +1520,22 @@
       'lm-module-list';
 
     if (
-      state.sortMode === 'az'
+      state.sortMode ===
+      'az'
     ) {
+      const sorted =
+        [...entries]
+          .sort(
+            (a, b) =>
+              displayName(a)
+                .localeCompare(
+                  displayName(b)
+                )
+          );
+
       for (
         const entry
-        of [...entries].sort(
-          (a, b) =>
-            displayName(a)
-              .localeCompare(
-                displayName(b)
-              )
-        )
+        of sorted
       ) {
         list.appendChild(
           renderModuleCard(
@@ -1256,7 +1617,9 @@
       </div>
 
       <div class="lm-channel-options">
-        <label class="lm-channel-option ${state.channel === 'stable' ? 'selected' : ''}">
+        <label
+          class="lm-channel-option ${state.channel === 'stable' ? 'selected' : ''}"
+        >
           <input
             type="radio"
             name="lm-channel"
@@ -1273,7 +1636,9 @@
           </span>
         </label>
 
-        <label class="lm-channel-option is-danger ${state.channel === 'unstable' ? 'selected' : ''}">
+        <label
+          class="lm-channel-option is-danger ${state.channel === 'unstable' ? 'selected' : ''}"
+        >
           <input
             type="radio"
             name="lm-channel"
@@ -1293,19 +1658,28 @@
 
       <div class="lm-settings-note">
         <strong>Installed means installed.</strong>
-        Experimental tools that are already running remain visible in the Installed tab after you return to Stable.
+        Experimental tools that are already running remain visible
+        in the Installed tab after you return to Stable.
         Uninstalled experimental tools disappear from Available.
       </div>
 
       <div class="lm-refresh-info">
         <div>
           <strong>Stable catalogue:</strong>
-          ${escapeHtml(formatRefresh(state.stableRefreshedAt))}
+          ${escapeHtml(
+            formatRefresh(
+              state.stableRefreshedAt
+            )
+          )}
         </div>
 
         <div>
           <strong>Unstable overlay:</strong>
-          ${escapeHtml(formatRefresh(state.unstableRefreshedAt))}
+          ${escapeHtml(
+            formatRefresh(
+              state.unstableRefreshedAt
+            )
+          )}
         </div>
 
         <div>
@@ -1323,10 +1697,11 @@
     ) {
       input.addEventListener(
         'change',
-        () =>
+        () => {
           void setChannel(
             input.value
-          )
+          );
+        }
       );
     }
 
@@ -1344,18 +1719,21 @@
       );
 
     if (
-      next === state.channel
+      next ===
+      state.channel
     ) {
       return;
     }
 
     if (
-      next === 'unstable'
+      next ===
+      'unstable'
     ) {
       const accepted =
         window.confirm(
           'Switch Lectio Tools to the UNSTABLE channel?\n\n' +
-          'Experimental modules may contain bugs or breaking changes. Nothing is installed automatically.'
+          'Experimental modules may contain bugs or breaking changes. ' +
+          'Nothing is installed automatically.'
         );
 
       if (!accepted) {
@@ -1373,9 +1751,16 @@
     );
 
     state.statusMessage =
-      next === 'unstable'
-        ? 'Unstable channel selected. No installed tools were changed.'
-        : 'Stable channel selected. Installed experimental tools remain visible until you remove them in your userscript manager.';
+      next ===
+        'unstable'
+        ? (
+            'Unstable channel selected. ' +
+            'No installed tools were changed.'
+          )
+        : (
+            'Stable channel selected. ' +
+            'Installed experimental tools remain visible until you remove them in your userscript manager.'
+          );
 
     state.statusKind =
       'success';
@@ -1383,13 +1768,12 @@
     requestModuleDiscovery();
 
     if (
-      next === 'unstable'
+      next ===
+      'unstable'
     ) {
-      await refreshCatalogues(
-        {
-          force: true
-        }
-      );
+      await refreshCatalogues({
+        force: true
+      });
     } else {
       renderPanel();
     }
@@ -1411,7 +1795,8 @@
 
   function buildEffectiveModules() {
     const stable =
-      state.stableCatalogue?.modules ||
+      state.stableCatalogue
+        ?.modules ||
       [];
 
     const byId =
@@ -1421,6 +1806,7 @@
             module.id,
             {
               ...module,
+
               selectedChannel:
                 'stable',
 
@@ -1435,7 +1821,8 @@
       );
 
     if (
-      state.channel !== 'unstable'
+      state.channel !==
+      'unstable'
     ) {
       return [
         ...byId.values()
@@ -1444,7 +1831,8 @@
 
     for (
       const experimental
-      of state.unstableCatalogue?.modules ||
+      of state.unstableCatalogue
+        ?.modules ||
       []
     ) {
       const stableMatch =
@@ -1515,7 +1903,8 @@
       buildEffectiveModules();
 
     const overlay =
-      state.unstableCatalogue?.modules ||
+      state.unstableCatalogue
+        ?.modules ||
       [];
 
     const entries =
@@ -1523,7 +1912,8 @@
 
     for (
       const registration
-      of state.registrations.values()
+      of state.registrations
+        .values()
     ) {
       let module =
         selected.find(
@@ -1584,17 +1974,17 @@
               '',
 
             category:
-              registration.channel === 'unstable'
+              registration.channel ===
+                'unstable'
                 ? 'Experimental'
                 : 'Other',
 
             status:
-              registration.channel === 'unstable'
-                ? 'unstable'
-                : registration.channel,
+              registration.channel,
 
             selectedChannel:
-              registration.channel === 'unstable'
+              registration.channel ===
+                'unstable'
                 ? 'unstable'
                 : 'stable',
 
@@ -1620,9 +2010,12 @@
         outsideSelectedChannel,
 
         experimental:
-          registration.channel === 'unstable' ||
-          module.selectedChannel === 'unstable' ||
-          module.status === 'unstable'
+          registration.channel ===
+            'unstable' ||
+          module.selectedChannel ===
+            'unstable' ||
+          module.status ===
+            'unstable'
       });
     }
 
@@ -1642,13 +2035,21 @@
       .map(
         module => ({
           module,
-          registration: null,
-          installed: false,
-          outsideSelectedChannel: false,
+
+          registration:
+            null,
+
+          installed:
+            false,
+
+          outsideSelectedChannel:
+            false,
 
           experimental:
-            module.selectedChannel === 'unstable' ||
-            module.status === 'unstable'
+            module.selectedChannel ===
+              'unstable' ||
+            module.status ===
+              'unstable'
         })
       );
   }
@@ -1671,9 +2072,7 @@
           return false;
         }
 
-        seen.add(
-          key
-        );
+        seen.add(key);
 
         return true;
       }
@@ -1725,9 +2124,7 @@
             ...experimentalIds
           ].some(
             id =>
-              stableIds.has(
-                id
-              )
+              stableIds.has(id)
           );
         }
       ) ||
@@ -1757,7 +2154,8 @@
 
       for (
         const alias
-        of module.stableModule.aliases ||
+        of module.stableModule
+          .aliases ||
         []
       ) {
         moduleIds.add(
@@ -1775,7 +2173,8 @@
 
       for (
         const alias
-        of module.unstableModule.aliases ||
+        of module.unstableModule
+          .aliases ||
         []
       ) {
         moduleIds.add(
@@ -1798,9 +2197,7 @@
       of registrationIds
     ) {
       if (
-        moduleIds.has(
-          id
-        )
+        moduleIds.has(id)
       ) {
         return true;
       }
@@ -1814,7 +2211,8 @@
   ) {
     for (
       const registration
-      of state.registrations.values()
+      of state.registrations
+        .values()
     ) {
       if (
         registrationMatchesModule(
@@ -1829,6 +2227,58 @@
     return null;
   }
 
+  function displayCategory(
+    entry
+  ) {
+    const raw =
+      cleanString(
+        entry.module
+          ?.category
+      ) ||
+      'Other';
+
+    const map = {
+      schedule:
+        'Timetable',
+
+      timetable:
+        'Timetable',
+
+      message:
+        'Messages',
+
+      messages:
+        'Messages',
+
+      interface:
+        'Interface',
+
+      testing:
+        'Testing',
+
+      experimental:
+        'Experimental'
+    };
+
+    return (
+      map[
+        raw.toLowerCase()
+      ] ||
+      raw
+    );
+  }
+
+  function displayName(
+    entry
+  ) {
+    return (
+      entry.module?.name ||
+      entry.registration?.name ||
+      entry.module?.id ||
+      'Unknown tool'
+    );
+  }
+
   function groupByCategory(
     entries
   ) {
@@ -1836,26 +2286,29 @@
       new Map();
 
     const sorted =
-      [...entries].sort(
-        (a, b) => {
-          const ca =
-            displayCategory(a);
+      [...entries]
+        .sort(
+          (a, b) => {
+            const categoryA =
+              displayCategory(a);
 
-          const cb =
-            displayCategory(b);
+            const categoryB =
+              displayCategory(b);
 
-          const c =
-            ca.localeCompare(cb);
+            const categoryCompare =
+              categoryA.localeCompare(
+                categoryB
+              );
 
-          return (
-            c ||
-            displayName(a)
-              .localeCompare(
-                displayName(b)
-              )
-          );
-        }
-      );
+            return (
+              categoryCompare ||
+              displayName(a)
+                .localeCompare(
+                  displayName(b)
+                )
+            );
+          }
+        );
 
     for (
       const entry
@@ -1885,44 +2338,6 @@
     return groups;
   }
 
-  function displayCategory(
-    entry
-  ) {
-    const raw =
-      cleanString(
-        entry.module?.category
-      ) ||
-      'Other';
-
-    const map = {
-      schedule: 'Timetable',
-      timetable: 'Timetable',
-      message: 'Messages',
-      messages: 'Messages',
-      interface: 'Interface',
-      testing: 'Testing',
-      experimental: 'Experimental'
-    };
-
-    return (
-      map[
-        raw.toLowerCase()
-      ] ||
-      raw
-    );
-  }
-
-  function displayName(
-    entry
-  ) {
-    return (
-      entry.module?.name ||
-      entry.registration?.name ||
-      entry.module?.id ||
-      'Unknown tool'
-    );
-  }
-
   function renderModuleCard(
     entry
   ) {
@@ -1937,18 +2352,21 @@
       );
 
     card.className =
-      `lm-module-card ${entry.experimental ? 'is-unstable' : ''} ${entry.outsideSelectedChannel ? 'is-outside-channel' : ''}`;
+      `lm-module-card ${
+        entry.experimental
+          ? 'is-unstable'
+          : ''
+      } ${
+        entry.outsideSelectedChannel
+          ? 'is-outside-channel'
+          : ''
+      }`;
 
     const action =
-      registration
-        ? determineAction(
-            module,
-            registration
-          )
-        : determineAction(
-            module,
-            null
-          );
+      determineAction(
+        module,
+        registration
+      );
 
     const category =
       displayCategory(
@@ -1963,8 +2381,11 @@
         ? '<span class="lm-tag is-unstable">experimental</span>'
         : '',
 
-      entry.outsideSelectedChannel &&
-      state.channel === 'stable'
+      (
+        entry.outsideSelectedChannel &&
+        state.channel ===
+          'stable'
+      )
         ? '<span class="lm-tag is-muted">installed only</span>'
         : ''
     ]
@@ -1977,7 +2398,11 @@
             entry,
             action
           )
-        : `<span>Version <strong>v${escapeHtml(module.version)}</strong></span>`;
+        : (
+            `<span>Version ` +
+            `<strong>v${escapeHtml(module.version)}</strong>` +
+            `</span>`
+          );
 
     card.innerHTML = `
       <div class="lm-module-main">
@@ -2027,7 +2452,8 @@
     }
 
     if (
-      action.kind !== 'current'
+      action.kind !==
+      'current'
     ) {
       actions.appendChild(
         makeTextAction(
@@ -2062,28 +2488,50 @@
   ) {
     const installed =
       escapeHtml(
-        entry.registration.version
+        entry.registration
+          .version
       );
 
     if (
-      action.kind === 'current'
+      action.kind ===
+      'current'
     ) {
-      return `<span class="lm-installed-current">Installed v${installed}</span>`;
+      return (
+        `<span class="lm-installed-current">` +
+        `Installed v${installed}` +
+        `</span>`
+      );
     }
 
     if (
-      action.kind === 'upgrade'
+      action.kind ===
+      'upgrade'
     ) {
-      return `<span class="lm-installed-update">Update available: v${escapeHtml(entry.module.version)} <small>(installed v${installed})</small></span>`;
+      return (
+        `<span class="lm-installed-update">` +
+        `Update available: v${escapeHtml(entry.module.version)} ` +
+        `<small>(installed v${installed})</small>` +
+        `</span>`
+      );
     }
 
     if (
-      action.kind === 'downgrade'
+      action.kind ===
+      'downgrade'
     ) {
-      return `<span class="lm-installed-update is-downgrade">Stable target v${escapeHtml(entry.module.version)} <small>(installed v${installed})</small></span>`;
+      return (
+        `<span class="lm-installed-update is-downgrade">` +
+        `Stable target v${escapeHtml(entry.module.version)} ` +
+        `<small>(installed v${installed})</small>` +
+        `</span>`
+      );
     }
 
-    return `<span>Installed <strong>v${installed}</strong></span>`;
+    return (
+      `<span>Installed ` +
+      `<strong>v${installed}</strong>` +
+      `</span>`
+    );
   }
 
   function determineAction(
@@ -2098,7 +2546,8 @@
           'install',
 
         label:
-          module.selectedChannel === 'unstable'
+          module.selectedChannel ===
+            'unstable'
             ? 'Install test'
             : 'Install',
 
@@ -2112,9 +2561,14 @@
       !module.version
     ) {
       return {
-        kind: 'current',
-        label: 'Installed',
-        tooltip: ''
+        kind:
+          'current',
+
+        label:
+          'Installed',
+
+        tooltip:
+          ''
       };
     }
 
@@ -2150,7 +2604,7 @@
           'Update',
 
         tooltip:
-          `Update from ${registration.version} to ${module.version}. Tampermonkey will ask you to confirm.`
+          `Update from ${registration.version} to ${module.version}.`
       };
     }
 
@@ -2165,14 +2619,19 @@
           'Downgrade',
 
         tooltip:
-          `Return from ${registration.version} to selected ${state.channel} target ${module.version}. Tampermonkey will ask you to confirm.`
+          `Return from ${registration.version} to ${module.version}.`
       };
     }
 
     return {
-      kind: 'current',
-      label: 'Up to date',
-      tooltip: ''
+      kind:
+        'current',
+
+      label:
+        'Up to date',
+
+      tooltip:
+        ''
     };
   }
 
@@ -2197,11 +2656,14 @@
     }
 
     const verb =
-      action.kind === 'downgrade'
+      action.kind ===
+        'downgrade'
         ? 'downgrade'
-        : action.kind === 'upgrade'
+        : action.kind ===
+            'upgrade'
           ? 'update'
-          : action.kind === 'reinstall'
+          : action.kind ===
+              'reinstall'
             ? 'reinstall'
             : 'install';
 
@@ -2289,6 +2751,21 @@
     renderPanel();
   }
 
+  /*
+   * ============================================================
+   * MODULE SETTINGS
+   * ============================================================
+   *
+   * Core rule:
+   *
+   * The Manager does not own a module's setting.
+   *
+   * It displays the setting and then gives the new value back
+   * to the module immediately.
+   *
+   * No Save / Cancel layer.
+   * No delayed apply.
+   */
   function renderModuleSettings(
     body,
     entry
@@ -2298,9 +2775,11 @@
 
     const schema =
       Array.isArray(
-        registration?.settingsSchema
+        registration
+          ?.settingsSchema
       )
-        ? registration.settingsSchema
+        ? registration
+            .settingsSchema
         : [];
 
     const header =
@@ -2357,7 +2836,8 @@
         'lm-empty';
 
       empty.innerHTML =
-        '<strong>No configurable settings</strong><span>This installed version does not expose settings to Lectio Tools.</span>';
+        '<strong>No configurable settings</strong>' +
+        '<span>This installed version does not expose settings to Lectio Tools.</span>';
 
       body.appendChild(
         empty
@@ -2384,11 +2864,34 @@
           item.id
         );
 
-      if (!key) continue;
+      if (!key) {
+        continue;
+      }
 
+      const current =
+        registration
+          .currentValues?.[key] ??
+        item.value ??
+        item.defaultValue ??
+        item.default;
+
+      const usesPreviewPicker =
+        shouldUseHoverPreviewPicker(
+          item,
+          key
+        );
+
+      /*
+       * Normal rows remain <label>s, which preserves
+       * click-on-label behaviour.
+       *
+       * The theme picker contains buttons, so its row is a div.
+       */
       const row =
         document.createElement(
-          'label'
+          usesPreviewPicker
+            ? 'div'
+            : 'label'
         );
 
       row.className =
@@ -2403,17 +2906,35 @@
         'lm-setting-copy';
 
       copy.innerHTML =
-        `<strong>${escapeHtml(item.label || key)}</strong>${
+        `<strong>${escapeHtml(item.label || key)}</strong>` +
+        (
           item.description
             ? `<small>${escapeHtml(item.description)}</small>`
             : ''
-        }`;
+        );
 
-      const current =
-        registration.currentValues?.[key] ??
-        item.value ??
-        item.defaultValue ??
-        item.default;
+      if (
+        usesPreviewPicker
+      ) {
+        const picker =
+          buildHoverPreviewPicker(
+            registration,
+            item,
+            key,
+            current
+          );
+
+        row.append(
+          copy,
+          picker
+        );
+
+        list.appendChild(
+          row
+        );
+
+        continue;
+      }
 
       const control =
         buildSettingControl(
@@ -2435,7 +2956,8 @@
           applyModuleSetting(
             registration,
             key,
-            value
+            value,
+            item
           );
         };
 
@@ -2449,8 +2971,10 @@
           .toLowerCase();
 
       if (
-        control.type === 'checkbox' ||
-        control.tagName === 'SELECT'
+        control.type ===
+          'checkbox' ||
+        control.tagName ===
+          'SELECT'
       ) {
         control.addEventListener(
           'change',
@@ -2458,8 +2982,10 @@
         );
       } else if (
         type === 'range' ||
-        control.type === 'range' ||
-        control.type === 'color'
+        control.type ===
+          'range' ||
+        control.type ===
+          'color'
       ) {
         control.addEventListener(
           'input',
@@ -2492,6 +3018,598 @@
     );
   }
 
+  function getSettingOptions(
+    item
+  ) {
+    const options =
+      Array.isArray(
+        item.options
+      )
+        ? item.options
+        : Array.isArray(
+            item.choices
+          )
+          ? item.choices
+          : [];
+
+    return options.map(
+      option => ({
+        value:
+          option &&
+          typeof option ===
+            'object'
+            ? option.value
+            : option,
+
+        label:
+          option &&
+          typeof option ===
+            'object'
+            ? (
+                option.label ??
+                option.name ??
+                option.value
+              )
+            : option,
+
+        raw:
+          option
+      })
+    );
+  }
+
+  function shouldUseHoverPreviewPicker(
+    item,
+    key
+  ) {
+    const options =
+      getSettingOptions(
+        item
+      );
+
+    if (
+      !options.length
+    ) {
+      return false;
+    }
+
+    if (
+      item.hoverPreview ===
+        true ||
+      item.previewOnHover ===
+        true ||
+      item.livePreview ===
+        true
+    ) {
+      return true;
+    }
+
+    const label =
+      cleanString(
+        item.label
+      )
+        .toLowerCase();
+
+    const description =
+      cleanString(
+        item.description
+      )
+        .toLowerCase();
+
+    const normalizedKey =
+      cleanString(key)
+        .toLowerCase();
+
+    /*
+     * Lectio Theming's central theme selector.
+     */
+    return (
+      normalizedKey ===
+        'theme' ||
+      label ===
+        'theme' ||
+      /hover\s+to\s+preview|preview.*hover|hover.*preview/
+        .test(
+          description
+        )
+    );
+  }
+
+  /*
+   * ============================================================
+   * THEME PICKER
+   * ============================================================
+   *
+   * Open picker:
+   * - hover option -> preview
+   * - leave options -> committed theme comes back
+   * - click option -> keep it
+   * - Escape / click away -> restore committed theme
+   */
+  function buildHoverPreviewPicker(
+    registration,
+    item,
+    key,
+    current
+  ) {
+    const options =
+      getSettingOptions(
+        item
+      );
+
+    const root =
+      document.createElement(
+        'div'
+      );
+
+    root.className =
+      'lm-preview-picker';
+
+    const trigger =
+      document.createElement(
+        'button'
+      );
+
+    trigger.type =
+      'button';
+
+    trigger.className =
+      'lm-preview-picker-trigger';
+
+    trigger.setAttribute(
+      'aria-haspopup',
+      'listbox'
+    );
+
+    trigger.setAttribute(
+      'aria-expanded',
+      'false'
+    );
+
+    const label =
+      document.createElement(
+        'span'
+      );
+
+    const arrow =
+      document.createElement(
+        'span'
+      );
+
+    arrow.className =
+      'lm-preview-picker-arrow';
+
+    arrow.textContent =
+      '▾';
+
+    trigger.append(
+      label,
+      arrow
+    );
+
+    const menu =
+      document.createElement(
+        'div'
+      );
+
+    menu.className =
+      'lm-preview-picker-menu';
+
+    menu.setAttribute(
+      'role',
+      'listbox'
+    );
+
+    menu.hidden =
+      true;
+
+    let committedValue =
+      current;
+
+    let previewValue =
+      null;
+
+    let previewMode =
+      null;
+
+    let open =
+      false;
+
+    const labelFor =
+      value => {
+        const match =
+          options.find(
+            option =>
+              String(
+                option.value ??
+                ''
+              ) ===
+              String(
+                value ??
+                ''
+              )
+          );
+
+        return String(
+          match?.label ??
+          value ??
+          ''
+        );
+      };
+
+    const syncTrigger =
+      () => {
+        label.textContent =
+          labelFor(
+            committedValue
+          );
+
+        trigger.title =
+          label.textContent;
+      };
+
+    const restorePreview =
+      () => {
+        if (
+          previewValue ===
+          null
+        ) {
+          return;
+        }
+
+        restoreModuleSettingPreview(
+          registration,
+          item,
+          key,
+          committedValue,
+          previewMode
+        );
+
+        previewValue =
+          null;
+
+        previewMode =
+          null;
+      };
+
+    const onOutsidePointer =
+      event => {
+        if (
+          !root.contains(
+            event.target
+          )
+        ) {
+          closeMenu({
+            restore:
+              true
+          });
+        }
+      };
+
+    const onDocumentKey =
+      event => {
+        if (
+          event.key ===
+          'Escape'
+        ) {
+          event.preventDefault();
+
+          closeMenu({
+            restore:
+              true
+          });
+
+          trigger.focus();
+        }
+      };
+
+    const onPageHide =
+      () => {
+        restorePreview();
+      };
+
+    const closeMenu =
+      ({
+        restore = true
+      } = {}) => {
+        if (!open) {
+          return;
+        }
+
+        if (restore) {
+          restorePreview();
+        }
+
+        open =
+          false;
+
+        menu.hidden =
+          true;
+
+        trigger.setAttribute(
+          'aria-expanded',
+          'false'
+        );
+
+        root.classList.remove(
+          'is-open'
+        );
+
+        document.removeEventListener(
+          'pointerdown',
+          onOutsidePointer,
+          true
+        );
+
+        document.removeEventListener(
+          'keydown',
+          onDocumentKey,
+          true
+        );
+
+        window.removeEventListener(
+          'pagehide',
+          onPageHide
+        );
+      };
+
+    const openMenu =
+      () => {
+        if (open) {
+          return;
+        }
+
+        open =
+          true;
+
+        menu.hidden =
+          false;
+
+        trigger.setAttribute(
+          'aria-expanded',
+          'true'
+        );
+
+        root.classList.add(
+          'is-open'
+        );
+
+        document.addEventListener(
+          'pointerdown',
+          onOutsidePointer,
+          true
+        );
+
+        document.addEventListener(
+          'keydown',
+          onDocumentKey,
+          true
+        );
+
+        window.addEventListener(
+          'pagehide',
+          onPageHide
+        );
+      };
+
+    for (
+      const option
+      of options
+    ) {
+      const optionButton =
+        document.createElement(
+          'button'
+        );
+
+      optionButton.type =
+        'button';
+
+      optionButton.className =
+        'lm-preview-picker-option';
+
+      optionButton.setAttribute(
+        'role',
+        'option'
+      );
+
+      optionButton.dataset.value =
+        String(
+          option.value ??
+          ''
+        );
+
+      optionButton.textContent =
+        String(
+          option.label ??
+          option.value ??
+          ''
+        );
+
+      const selected =
+        String(
+          option.value ??
+          ''
+        ) ===
+        String(
+          committedValue ??
+          ''
+        );
+
+      optionButton
+        .classList
+        .toggle(
+          'is-selected',
+          selected
+        );
+
+      optionButton.setAttribute(
+        'aria-selected',
+        selected
+          ? 'true'
+          : 'false'
+      );
+
+      const preview =
+        () => {
+          if (
+            previewValue !==
+              null &&
+            String(
+              option.value ??
+              ''
+            ) ===
+            String(
+              previewValue ??
+              ''
+            )
+          ) {
+            return;
+          }
+
+          previewValue =
+            option.value;
+
+          previewMode =
+            previewModuleSetting(
+              registration,
+              item,
+              key,
+              option.value,
+              committedValue
+            );
+        };
+
+      optionButton.addEventListener(
+        'pointerenter',
+        preview
+      );
+
+      optionButton.addEventListener(
+        'focus',
+        preview
+      );
+
+      optionButton.addEventListener(
+        'click',
+        event => {
+          event.preventDefault();
+          event.stopPropagation();
+
+          /*
+           * If the module has a dedicated temporary preview layer,
+           * clear it before committing the selection.
+           */
+          if (
+            previewValue !==
+              null &&
+            previewMode ===
+              'preview-callback'
+          ) {
+            restoreModuleSettingPreview(
+              registration,
+              item,
+              key,
+              committedValue,
+              previewMode
+            );
+          }
+
+          previewValue =
+            null;
+
+          previewMode =
+            null;
+
+          committedValue =
+            option.value;
+
+          applyModuleSetting(
+            registration,
+            key,
+            option.value,
+            item
+          );
+
+          syncTrigger();
+
+          for (
+            const sibling
+            of menu.querySelectorAll(
+              '.lm-preview-picker-option'
+            )
+          ) {
+            const isSelected =
+              sibling.dataset.value ===
+              String(
+                committedValue ??
+                ''
+              );
+
+            sibling
+              .classList
+              .toggle(
+                'is-selected',
+                isSelected
+              );
+
+            sibling.setAttribute(
+              'aria-selected',
+              isSelected
+                ? 'true'
+                : 'false'
+            );
+          }
+
+          closeMenu({
+            restore:
+              false
+          });
+
+          trigger.focus();
+        }
+      );
+
+      menu.appendChild(
+        optionButton
+      );
+    }
+
+    /*
+     * Leaving the options returns to the committed theme
+     * while leaving the list open for further browsing.
+     */
+    menu.addEventListener(
+      'pointerleave',
+      restorePreview
+    );
+
+    trigger.addEventListener(
+      'click',
+      event => {
+        event.preventDefault();
+        event.stopPropagation();
+
+        if (open) {
+          closeMenu({
+            restore:
+              true
+          });
+        } else {
+          openMenu();
+        }
+      }
+    );
+
+    syncTrigger();
+
+    root.append(
+      trigger,
+      menu
+    );
+
+    return root;
+  }
+
   function buildSettingControl(
     item,
     current
@@ -2506,9 +3624,12 @@
         .toLowerCase();
 
     if (
-      type === 'boolean' ||
-      type === 'toggle' ||
-      item.inputType === 'checkbox'
+      type ===
+        'boolean' ||
+      type ===
+        'toggle' ||
+      item.inputType ===
+        'checkbox'
     ) {
       const control =
         document.createElement(
@@ -2525,7 +3646,8 @@
     }
 
     if (
-      type === 'select' ||
+      type ===
+        'select' ||
       Array.isArray(
         item.options
       ) ||
@@ -2538,53 +3660,33 @@
           'select'
         );
 
-      const options =
-        Array.isArray(
-          item.options
-        )
-          ? item.options
-          : item.choices ||
-            [];
-
       for (
         const option
-        of options
+        of getSettingOptions(
+          item
+        )
       ) {
         const el =
           document.createElement(
             'option'
           );
 
-        const value =
-          option &&
-          typeof option === 'object'
-            ? option.value
-            : option;
-
-        const label =
-          option &&
-          typeof option === 'object'
-            ? (
-                option.label ??
-                option.value
-              )
-            : option;
-
         el.value =
           String(
-            value ??
+            option.value ??
             ''
           );
 
         el.textContent =
           String(
-            label ??
+            option.label ??
+            option.value ??
             ''
           );
 
         if (
           String(
-            value ??
+            option.value ??
             ''
           ) ===
           String(
@@ -2610,23 +3712,27 @@
       );
 
     if (
-      type === 'number'
+      type ===
+      'number'
     ) {
       control.type =
         'number';
     } else if (
-      type === 'range'
+      type ===
+      'range'
     ) {
       control.type =
         'range';
     } else if (
-      type === 'color' &&
-      /^#[0-9a-f]{6}$/i.test(
-        String(
-          current ||
-          ''
+      type ===
+        'color' &&
+      /^#[0-9a-f]{6}$/i
+        .test(
+          String(
+            current ||
+            ''
+          )
         )
-      )
     ) {
       control.type =
         'color';
@@ -2636,24 +3742,33 @@
     }
 
     if (
-      item.min != null
+      item.min !=
+      null
     ) {
       control.min =
-        String(item.min);
+        String(
+          item.min
+        );
     }
 
     if (
-      item.max != null
+      item.max !=
+      null
     ) {
       control.max =
-        String(item.max);
+        String(
+          item.max
+        );
     }
 
     if (
-      item.step != null
+      item.step !=
+      null
     ) {
       control.step =
-        String(item.step);
+        String(
+          item.step
+        );
     }
 
     control.value =
@@ -2668,7 +3783,8 @@
     item
   ) {
     if (
-      control.type === 'checkbox'
+      control.type ===
+      'checkbox'
     ) {
       return control.checked;
     }
@@ -2691,11 +3807,15 @@
 
     if (
       (
-        typeof defaultValue === 'number' ||
-        type === 'number' ||
-        type === 'range'
+        typeof defaultValue ===
+          'number' ||
+        type ===
+          'number' ||
+        type ===
+          'range'
       ) &&
-      value !== ''
+      value !==
+        ''
     ) {
       const parsed =
         Number(value);
@@ -2713,28 +3833,100 @@
     return value;
   }
 
-  function applyModuleSetting(
+  /*
+   * ============================================================
+   * SETTINGS BRIDGE
+   * ============================================================
+   *
+   * This is the key recovery from 2.1.2.
+   *
+   * 2.1.2 stored module callbacks but then ignored them and only
+   * fired generic events.
+   *
+   * 2.1.3 calls the module's own hook first.
+   */
+  function invokeSettingFunction(
+    fn,
     registration,
     key,
-    value
+    value,
+    meta = {}
   ) {
     if (
-      !registration ||
-      !key
+      typeof fn !==
+      'function'
+    ) {
+      return undefined;
+    }
+
+    const context =
+      registration
+        .rawRegistration ||
+      registration;
+
+    /*
+     * Theme-specific preview functions are often:
+     *
+     *     previewTheme(value)
+     *
+     * Generic settings handlers are usually:
+     *
+     *     setSetting(key, value)
+     */
+    if (
+      fn.length <=
+      1
+    ) {
+      return fn.call(
+        context,
+        value
+      );
+    }
+
+    return fn.call(
+      context,
+      key,
+      value,
+      meta
+    );
+  }
+
+  function settleSettingResult(
+    result,
+    fallback
+  ) {
+    if (
+      !result ||
+      typeof result.then !==
+        'function'
     ) {
       return;
     }
 
-    registration.currentValues = {
-      ...(
-        registration.currentValues ||
-        {}
-      ),
+    result.catch(
+      error => {
+        console.error(
+          '[Lectio Manager] Module setting callback failed:',
+          error
+        );
 
-      [key]:
-        value
-    };
+        if (
+          typeof fallback ===
+          'function'
+        ) {
+          fallback();
+        }
+      }
+    );
+  }
 
+  function broadcastSettingChange(
+    registration,
+    key,
+    value,
+    eventName = null,
+    extra = {}
+  ) {
     const detail = {
       moduleId:
         registration.id,
@@ -2765,28 +3957,421 @@
       },
 
       source:
-        'lectio-manager'
+        'lectio-manager',
+
+      ...extra
     };
 
+    /*
+     * Older modules have used slightly different event names
+     * over the life of Lectio Tools.
+     *
+     * This fallback is only used when the module did not expose
+     * its own callback.
+     */
+    const eventNames =
+      eventName
+        ? [eventName]
+        : [
+            'lectio-manager:setting-change',
+            'lectio-manager:settings-change',
+            'lectio-manager:update-setting',
+            'lectio-module:setting-change',
+            'lectio-module:update-settings'
+          ];
+
     for (
-      const eventName
-      of [
-        'lectio-manager:setting-change',
-        'lectio-manager:settings-change',
-        'lectio-manager:update-setting',
-        'lectio-module:setting-change',
-        'lectio-module:update-settings'
-      ]
+      const name
+      of eventNames
     ) {
       window.dispatchEvent(
         new CustomEvent(
-          eventName,
+          name,
           {
             detail
           }
         )
       );
     }
+  }
+
+  function invokePersistentSetting(
+    registration,
+    key,
+    value,
+    {
+      updateCurrent = true,
+      item = null
+    } = {}
+  ) {
+    let handled =
+      false;
+
+    const fallback =
+      () => {
+        broadcastSettingChange(
+          registration,
+          key,
+          value
+        );
+      };
+
+    /*
+     * Some older modules attach the callback to the individual
+     * schema item instead of the top-level registration.
+     */
+    const itemSetter =
+      item
+        ? firstFunction(
+            item.setSetting,
+            item.applySetting,
+            item.setValue,
+            item.onChange,
+            item.onApply,
+            item.apply,
+            item.change
+          )
+        : null;
+
+    try {
+      if (itemSetter) {
+        handled =
+          true;
+
+        settleSettingResult(
+          invokeSettingFunction(
+            itemSetter,
+            registration,
+            key,
+            value,
+            {
+              preview:
+                false,
+
+              item
+            }
+          ),
+          fallback
+        );
+      } else if (
+        typeof registration
+          .setSetting ===
+        'function'
+      ) {
+        handled =
+          true;
+
+        settleSettingResult(
+          invokeSettingFunction(
+            registration
+              .setSetting,
+            registration,
+            key,
+            value,
+            {
+              preview:
+                false,
+
+              item
+            }
+          ),
+          fallback
+        );
+      } else if (
+        typeof registration
+          .applySetting ===
+        'function'
+      ) {
+        handled =
+          true;
+
+        settleSettingResult(
+          invokeSettingFunction(
+            registration
+              .applySetting,
+            registration,
+            key,
+            value,
+            {
+              preview:
+                false,
+
+              item
+            }
+          ),
+          fallback
+        );
+      } else if (
+        typeof registration
+          .updateSettings ===
+        'function'
+      ) {
+        handled =
+          true;
+
+        const result =
+          registration
+            .updateSettings
+            .call(
+              registration
+                .rawRegistration ||
+              registration,
+              {
+                [key]:
+                  value
+              }
+            );
+
+        settleSettingResult(
+          result,
+          fallback
+        );
+      }
+    } catch (error) {
+      console.error(
+        '[Lectio Manager] Module setting callback failed:',
+        error
+      );
+
+      handled =
+        false;
+    }
+
+    if (!handled) {
+      fallback();
+    }
+
+    if (
+      updateCurrent
+    ) {
+      registration.currentValues = {
+        ...(
+          registration.currentValues ||
+          {}
+        ),
+
+        [key]:
+          value
+      };
+    }
+
+    return handled;
+  }
+
+  function applyModuleSetting(
+    registration,
+    key,
+    value,
+    item = null
+  ) {
+    if (
+      !registration ||
+      !key
+    ) {
+      return;
+    }
+
+    invokePersistentSetting(
+      registration,
+      key,
+      value,
+      {
+        updateCurrent:
+          true,
+
+        item
+      }
+    );
+  }
+
+  /*
+   * Temporary theme preview.
+   */
+  function previewModuleSetting(
+    registration,
+    item,
+    key,
+    value,
+    baselineValue
+  ) {
+    const itemPreview =
+      firstFunction(
+        item.onPreview,
+        item.previewSetting,
+        item.previewValue,
+        item.preview
+      );
+
+    const previewFn =
+      itemPreview ||
+      registration.previewSetting;
+
+    if (previewFn) {
+      try {
+        settleSettingResult(
+          invokeSettingFunction(
+            previewFn,
+            registration,
+            key,
+            value,
+            {
+              preview:
+                true,
+
+              baselineValue
+            }
+          )
+        );
+
+        return 'preview-callback';
+      } catch (error) {
+        console.warn(
+          '[Lectio Manager] Theme preview callback failed; using compatibility preview.',
+          error
+        );
+      }
+    }
+
+    /*
+     * Compatibility fallback:
+     *
+     * Temporarily run the normal setting hook.
+     * The committed value is restored when hover ends.
+     */
+    if (
+      typeof registration
+        .setSetting ===
+        'function' ||
+      typeof registration
+        .applySetting ===
+        'function' ||
+      typeof registration
+        .updateSettings ===
+        'function'
+    ) {
+      invokePersistentSetting(
+        registration,
+        key,
+        value,
+        {
+          updateCurrent:
+            false,
+
+          item
+        }
+      );
+
+      return 'temporary-setting';
+    }
+
+    /*
+     * Final backwards-compatible event fallback.
+     */
+    broadcastSettingChange(
+      registration,
+      key,
+      value,
+      'lectio-manager:setting-preview',
+      {
+        preview:
+          true,
+
+        baselineValue
+      }
+    );
+
+    return 'preview-event';
+  }
+
+  function restoreModuleSettingPreview(
+    registration,
+    item,
+    key,
+    baselineValue,
+    mode
+  ) {
+    const itemClear =
+      firstFunction(
+        item.onPreviewEnd,
+        item.clearPreview,
+        item.restorePreview,
+        item.cancelPreview
+      );
+
+    const clearFn =
+      itemClear ||
+      registration.clearPreview;
+
+    if (
+      mode ===
+        'preview-callback' &&
+      clearFn
+    ) {
+      try {
+        settleSettingResult(
+          invokeSettingFunction(
+            clearFn,
+            registration,
+            key,
+            baselineValue,
+            {
+              preview:
+                false,
+
+              restore:
+                true
+            }
+          )
+        );
+
+        return;
+      } catch (error) {
+        console.warn(
+          '[Lectio Manager] Theme preview restore callback failed; restoring through setting hook.',
+          error
+        );
+      }
+    }
+
+    if (
+      typeof registration
+        .setSetting ===
+        'function' ||
+      typeof registration
+        .applySetting ===
+        'function' ||
+      typeof registration
+        .updateSettings ===
+        'function'
+    ) {
+      invokePersistentSetting(
+        registration,
+        key,
+        baselineValue,
+        {
+          updateCurrent:
+            false,
+
+          item
+        }
+      );
+
+      return;
+    }
+
+    broadcastSettingChange(
+      registration,
+      key,
+      baselineValue,
+      'lectio-manager:setting-preview-end',
+      {
+        preview:
+          false,
+
+        restore:
+          true
+      }
+    );
   }
 
   function showHelpDialog() {
@@ -2797,24 +4382,33 @@
       bodyHtml: `
         <p>
           <strong>Installed</strong>
-          always shows tools that are actually detected, including experimental tools while Stable is selected.
+          always shows tools that are actually detected,
+          including experimental tools while Stable is selected.
         </p>
 
         <p>
           <strong>Available</strong>
-          follows the selected release channel. Stable hides uninstalled experimental tools; Unstable includes them.
+          follows the selected release channel.
+          Stable hides uninstalled experimental tools;
+          Unstable includes them.
         </p>
 
         <p>
-          Tool settings apply immediately. Use Back to return to the Installed list; there is no separate Save step.
+          Tool settings apply immediately.
+          Use Back to return to the Installed list.
         </p>
       `,
 
       buttons: [
         {
-          label: 'Close',
-          kind: 'primary',
-          action: closeSubdialog
+          label:
+            'Close',
+
+          kind:
+            'primary',
+
+          action:
+            closeSubdialog
         }
       ]
     });
@@ -2823,7 +4417,6 @@
   function showDialog({
     title,
     bodyHtml = '',
-    bodyNode = null,
     buttons = []
   }) {
     closeSubdialog();
@@ -2859,25 +4452,13 @@
           </button>
         </header>
 
-        <div class="lm-subdialog-body"></div>
+        <div class="lm-subdialog-body">
+          ${bodyHtml}
+        </div>
 
         <footer class="lm-subdialog-actions"></footer>
       </section>
     `;
-
-    const body =
-      host.querySelector(
-        '.lm-subdialog-body'
-      );
-
-    if (bodyNode) {
-      body.appendChild(
-        bodyNode
-      );
-    } else {
-      body.innerHTML =
-        bodyHtml;
-    }
 
     const footer =
       host.querySelector(
@@ -2897,7 +4478,12 @@
         'button';
 
       button.className =
-        `lm-dialog-button ${spec.kind === 'primary' ? 'is-primary' : ''}`;
+        `lm-dialog-button ${
+          spec.kind ===
+            'primary'
+            ? 'is-primary'
+            : ''
+        }`;
 
       button.textContent =
         spec.label;
@@ -2933,10 +4519,9 @@
       }
     );
 
-    document.body
-      .appendChild(
-        host
-      );
+    document.body.appendChild(
+      host
+    );
   }
 
   function closeSubdialog() {
@@ -3019,13 +4604,15 @@
         b.pre[i];
 
       if (
-        av === undefined
+        av ===
+        undefined
       ) {
         return -1;
       }
 
       if (
-        bv === undefined
+        bv ===
+        undefined
       ) {
         return 1;
       }
@@ -3050,11 +4637,9 @@
         an !== null &&
         bn !== null
       ) {
-        return (
-          an < bn
-            ? -1
-            : 1
-        );
+        return an < bn
+          ? -1
+          : 1;
       }
 
       if (
@@ -3070,7 +4655,8 @@
       }
 
       return (
-        av.localeCompare(bv) < 0
+        av.localeCompare(bv) <
+        0
           ? -1
           : 1
       );
@@ -3130,28 +4716,25 @@
         .toLocaleString(
           [],
           {
-            year: 'numeric',
-            month: 'short',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit'
+            year:
+              'numeric',
+
+            month:
+              'short',
+
+            day:
+              'numeric',
+
+            hour:
+              '2-digit',
+
+            minute:
+              '2-digit'
           }
         );
     } catch (_) {
       return 'unknown';
     }
-  }
-
-  function uniqueStrings(
-    values
-  ) {
-    return [
-      ...new Set(
-        values
-          .map(cleanString)
-          .filter(Boolean)
-      )
-    ];
   }
 
   function escapeHtml(
@@ -3164,11 +4747,20 @@
       .replace(
         /[&<>"']/g,
         char => ({
-          '&': '&amp;',
-          '<': '&lt;',
-          '>': '&gt;',
-          '"': '&quot;',
-          "'": '&#39;'
+          '&':
+            '&amp;',
+
+          '<':
+            '&lt;',
+
+          '>':
+            '&gt;',
+
+          '"':
+            '&quot;',
+
+          "'":
+            '&#39;'
         }[char])
       );
   }
@@ -3178,26 +4770,40 @@
   ) {
     const icons = {
       tools:
-        '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Zm8 4.2v-1.4l-2-.7a7 7 0 0 0-.6-1.4l.9-1.9-1-1-1.9.9a7 7 0 0 0-1.4-.6l-.7-2h-1.4l-.7 2a7 7 0 0 0-1.4.6l-1.9-.9-1 1 .9 1.9a7 7 0 0 0-.6 1.4l-2 .7v1.4l2 .7c.1.5.3 1 .6 1.4l-.9 1.9 1 1 1.9-.9c.4.3.9.5 1.4.6l.7 2h1.4l.7-2c.5-.1 1-.3 1.4-.6l1.9.9 1-1-.9-1.9c.3-.4.5-.9.6-1.4l2-.7Z"/></svg>',
+        '<svg viewBox="0 0 24 24" aria-hidden="true">' +
+        '<path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Zm8 4.2v-1.4l-2-.7a7 7 0 0 0-.6-1.4l.9-1.9-1-1-1.9.9a7 7 0 0 0-1.4-.6l-.7-2h-1.4l-.7 2a7 7 0 0 0-1.4.6l-1.9-.9-1 1 .9 1.9a7 7 0 0 0-.6 1.4l-2 .7v1.4l2 .7c.1.5.3 1 .6 1.4l-.9 1.9 1 1 1.9-.9c.4.3.9.5 1.4.6l.7 2h1.4l.7-2c.5-.1 1-.3 1.4-.6l1.9.9 1-1-.9-1.9c.3-.4.5-.9.6-1.4l2-.7Z"/>' +
+        '</svg>',
 
       settings:
-        '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.25"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.86 2.86-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 1.55V21h-4v-.05a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.88.34l-.06.06-2.86-2.86.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3v-4h.05A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.88l-.06-.06L7.06 4.2l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.55V3h4v.05a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.88-.34l.06-.06 2.86 2.86-.06.06A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 1.55 1H21v4h-.05a1.7 1.7 0 0 0-1.55 1Z"/></svg>',
+        '<svg viewBox="0 0 24 24" aria-hidden="true">' +
+        '<circle cx="12" cy="12" r="3.25"/>' +
+        '<path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.86 2.86-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 1.55V21h-4v-.05a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.88.34l-.06.06-2.86-2.86.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3v-4h.05A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.88l-.06-.06L7.06 4.2l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.55V3h4v.05a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.88-.34l.06-.06 2.86 2.86-.06.06A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 1.55 1H21v4h-.05a1.7 1.7 0 0 0-1.55 1Z"/>' +
+        '</svg>',
 
       help:
-        '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.8 9a2.4 2.4 0 0 1 4.6 1c0 1.9-2.4 2.1-2.4 4"/><path d="M12 17h.01"/></svg>',
+        '<svg viewBox="0 0 24 24" aria-hidden="true">' +
+        '<circle cx="12" cy="12" r="9"/>' +
+        '<path d="M9.8 9a2.4 2.4 0 0 1 4.6 1c0 1.9-2.4 2.1-2.4 4"/>' +
+        '<path d="M12 17h.01"/>' +
+        '</svg>',
 
       refresh:
-        '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5"/><path d="M19 11a7 7 0 1 0 1 4"/></svg>',
+        '<svg viewBox="0 0 24 24" aria-hidden="true">' +
+        '<path d="M20 6v5h-5"/>' +
+        '<path d="M19 11a7 7 0 1 0 1 4"/>' +
+        '</svg>',
 
       close:
-        '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>'
-    };
+        '<svg viewBox="0 0 24 24" aria-hidden="true">' +
+        '<path d="M6 6l12 12M18 6 6 18"/>' +
+        '</svg>',
 
-    if (
-      name === 'back'
-    ) {
-      return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6"/><path d="M9 12h10"/></svg>';
-    }
+      back:
+        '<svg viewBox="0 0 24 24" aria-hidden="true">' +
+        '<path d="M15 18l-6-6 6-6"/>' +
+        '<path d="M9 12h10"/>' +
+        '</svg>'
+    };
 
     return (
       icons[name] ||
@@ -3228,26 +4834,20 @@
         right: 14px;
         bottom: 14px;
         z-index: 2147482500;
-
         width: 38px;
         height: 38px;
         padding: 8px;
-
         border: 1px solid rgba(25,82,105,.55);
         border-radius: 50%;
-
         background: #237b96;
         color: #fff;
-
         box-shadow: 0 2px 10px rgba(0,0,0,.18);
-
         cursor: pointer;
       }
 
       #${ID.launcher} svg {
         width: 100%;
         height: 100%;
-
         fill: none;
         stroke: currentColor;
         stroke-width: 1.8;
@@ -3259,15 +4859,11 @@
         position: fixed;
         inset: 0;
         z-index: 2147482800;
-
         display: flex;
         align-items: flex-end;
         justify-content: flex-end;
-
         padding: 18px;
-
         box-sizing: border-box;
-
         background: transparent;
       }
 
@@ -3276,57 +4872,32 @@
       }
 
       #${ID.panel} {
-        width: min(
-          430px,
-          calc(100vw - 28px)
-        );
-
-        height: min(
-          704px,
-          calc(100vh - 36px)
-        );
-
+        width: min(430px, calc(100vw - 28px));
+        height: min(704px, calc(100vh - 36px));
         overflow: hidden;
-
         display: flex;
         flex-direction: column;
-
         border: 1px solid #5f8195;
         border-radius: 12px;
-
         background: #f8fafb;
         color: #26343d;
-
-        box-shadow:
-          0 18px 60px rgba(0,0,0,.24);
-
-        font:
-          13px/1.35
-          Arial,
-          Helvetica,
-          sans-serif;
+        box-shadow: 0 18px 60px rgba(0,0,0,.24);
+        font: 13px/1.35 Arial, Helvetica, sans-serif;
       }
 
       .lm-header {
         flex: 0 0 auto;
-
         min-height: 50px;
-
         display: flex;
         align-items: center;
         justify-content: space-between;
-
-        padding:
-          0 14px
-          0 98px;
-
+        padding: 0 14px 0 98px;
         background: #2b7b94;
         color: #fff;
       }
 
       .lm-header h2 {
         margin: 0;
-
         font-size: 15px;
         color: #fff;
       }
@@ -3340,1246 +4911,700 @@
       .lm-icon-button {
         width: 30px;
         height: 30px;
-
         padding: 6px;
-
         border: 0;
         border-radius: 6px;
-
         background: transparent;
         color: #fff;
-
         cursor: pointer;
       }
 
       .lm-icon-button:hover,
       .lm-icon-button.is-active {
-        background:
-          rgba(
-            255,
-            255,
-            255,
-            .13
-          );
+        background: rgba(255,255,255,.13);
       }
 
       .lm-icon-button svg,
       .lm-subdialog header button svg {
         width: 100%;
         height: 100%;
-
         fill: none;
         stroke: currentColor;
-
         stroke-width: 2.1;
         stroke-linecap: round;
         stroke-linejoin: round;
       }
 
       .lm-icon-button.is-spinning svg {
-        animation:
-          lm-spin
-          .9s
-          linear
-          infinite;
+        animation: lm-spin .9s linear infinite;
       }
 
       @keyframes lm-spin {
         to {
-          transform:
-            rotate(360deg);
+          transform: rotate(360deg);
         }
       }
 
       .lm-tabs {
         flex: 0 0 auto;
-
         display: grid;
-        grid-template-columns:
-          1fr 1fr;
-
+        grid-template-columns: 1fr 1fr;
         background: #fff;
-
-        border-bottom:
-          1px solid
-          #829aa9;
+        border-bottom: 1px solid #829aa9;
       }
 
       .lm-tabs button {
         border: 0;
-
-        border-bottom:
-          2px solid
-          transparent;
-
-        background:
-          transparent;
-
-        padding:
-          13px 8px
-          10px;
-
-        color:
-          #667984;
-
-        font-weight:
-          700;
-
-        cursor:
-          pointer;
+        border-bottom: 2px solid transparent;
+        background: transparent;
+        padding: 13px 8px 10px;
+        color: #667984;
+        font-weight: 700;
+        cursor: pointer;
       }
 
       .lm-tabs button.active {
-        color:
-          #27708a;
-
-        border-bottom-color:
-          #277c9d;
+        color: #27708a;
+        border-bottom-color: #277c9d;
       }
 
       .lm-tabs strong {
-        font-size:
-          11px;
+        font-size: 11px;
       }
 
       .lm-body {
-        flex:
-          1 1 auto;
-
-        overflow:
-          auto;
-
-        padding:
-          10px 14px
-          12px;
+        flex: 1 1 auto;
+        overflow: auto;
+        padding: 10px 14px 12px;
       }
 
       .lm-footer {
-        flex:
-          0 0 auto;
-
-        display:
-          flex;
-
-        justify-content:
-          center;
-
-        border-top:
-          1px solid
-          #a8b8c1;
-
-        background:
-          #e9f1f5;
+        flex: 0 0 auto;
+        display: flex;
+        justify-content: center;
+        border-top: 1px solid #a8b8c1;
+        background: #e9f1f5;
       }
 
       .lm-footer button {
-        border:
-          0;
-
-        background:
-          transparent;
-
-        color:
-          #237094;
-
-        font-weight:
-          700;
-
-        font-size:
-          11px;
-
-        padding:
-          9px 12px;
-
-        cursor:
-          pointer;
+        border: 0;
+        background: transparent;
+        color: #237094;
+        font-weight: 700;
+        font-size: 11px;
+        padding: 9px 12px;
+        cursor: pointer;
       }
 
       .lm-list-toolbar {
-        display:
-          flex;
-
-        justify-content:
-          space-between;
-
-        align-items:
-          center;
-
-        gap:
-          10px;
-
-        margin-bottom:
-          8px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 8px;
       }
 
       .lm-list-label {
-        color:
-          #6b7f8b;
-
-        font-size:
-          12px;
-
-        font-weight:
-          800;
-
-        letter-spacing:
-          .04em;
+        color: #6b7f8b;
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: .04em;
       }
 
       .lm-sort-toggle {
-        display:
-          inline-flex;
-
-        border:
-          1px solid
-          #7f9bad;
-
-        border-radius:
-          7px;
-
-        overflow:
-          hidden;
+        display: inline-flex;
+        border: 1px solid #7f9bad;
+        border-radius: 7px;
+        overflow: hidden;
       }
 
       .lm-sort-toggle button {
-        border:
-          0;
-
-        border-right:
-          1px solid
-          #a7bac4;
-
-        background:
-          #f8fbfc;
-
-        color:
-          #476878;
-
-        padding:
-          4px 8px;
-
-        font-size:
-          10px;
-
-        cursor:
-          pointer;
+        border: 0;
+        border-right: 1px solid #a7bac4;
+        background: #f8fbfc;
+        color: #476878;
+        padding: 4px 8px;
+        font-size: 10px;
+        cursor: pointer;
       }
 
       .lm-sort-toggle button:last-child {
-        border-right:
-          0;
+        border-right: 0;
       }
 
       .lm-sort-toggle button.active {
-        background:
-          #dcecf2;
-
-        color:
-          #21657d;
-
-        font-weight:
-          800;
+        background: #dcecf2;
+        color: #21657d;
+        font-weight: 800;
       }
 
       .lm-channel-note {
-        display:
-          flex;
-
-        gap:
-          8px;
-
-        align-items:
-          center;
-
-        margin:
-          0 0 8px;
-
-        padding:
-          7px 9px;
-
-        border-radius:
-          7px;
-
-        background:
-          #fff5df;
-
-        color:
-          #76500d;
-
-        font-size:
-          10px;
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        margin: 0 0 8px;
+        padding: 7px 9px;
+        border-radius: 7px;
+        background: #fff5df;
+        color: #76500d;
+        font-size: 10px;
       }
 
       .lm-channel-note strong {
-        font-size:
-          9px;
-
-        letter-spacing:
-          .08em;
+        font-size: 9px;
+        letter-spacing: .08em;
       }
 
       .lm-status {
-        margin-bottom:
-          8px;
-
-        border-radius:
-          7px;
-
-        padding:
-          7px 9px;
-
-        background:
-          #edf4f8;
-
-        color:
-          #31566f;
-
-        font-size:
-          10px;
+        margin-bottom: 8px;
+        border-radius: 7px;
+        padding: 7px 9px;
+        background: #edf4f8;
+        color: #31566f;
+        font-size: 10px;
       }
 
       .lm-status.is-error {
-        background:
-          #fff0ed;
-
-        color:
-          #8a2d1d;
+        background: #fff0ed;
+        color: #8a2d1d;
       }
 
       .lm-status.is-success {
-        background:
-          #eaf6ee;
-
-        color:
-          #26613c;
+        background: #eaf6ee;
+        color: #26613c;
       }
 
       .lm-module-list {
-        display:
-          grid;
-
-        gap:
-          8px;
+        display: grid;
+        gap: 8px;
       }
 
       .lm-category-heading {
-        text-align:
-          center;
-
-        color:
-          #71828d;
-
-        font-size:
-          10px;
-
-        font-weight:
-          800;
-
-        letter-spacing:
-          .05em;
-
-        margin:
-          2px 0 -2px;
+        text-align: center;
+        color: #71828d;
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: .05em;
+        margin: 2px 0 -2px;
       }
 
       .lm-module-card {
-        position:
-          relative;
-
-        display:
-          flex;
-
-        justify-content:
-          space-between;
-
-        align-items:
-          center;
-
-        gap:
-          10px;
-
-        border:
-          1px solid
-          #6f8999;
-
-        border-radius:
-          10px;
-
-        background:
-          rgba(
-            255,
-            255,
-            255,
-            .96
-          );
-
-        padding:
-          10px 12px
-          9px;
-
-        box-shadow:
-          inset
-          3px 0 0
-          #c9b47f;
+        position: relative;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+        border: 1px solid #6f8999;
+        border-radius: 10px;
+        background: rgba(255,255,255,.96);
+        padding: 10px 12px 9px;
+        box-shadow: inset 3px 0 0 #c9b47f;
       }
 
       .lm-module-card.is-unstable {
-        box-shadow:
-          inset
-          3px 0 0
-          #d99b46;
+        box-shadow: inset 3px 0 0 #d99b46;
       }
 
       .lm-module-card.is-outside-channel {
-        border-style:
-          dashed;
+        border-style: dashed;
       }
 
       .lm-module-main {
-        min-width:
-          0;
-
-        flex:
-          1 1 auto;
+        min-width: 0;
+        flex: 1 1 auto;
       }
 
       .lm-module-tags {
-        display:
-          flex;
-
-        gap:
-          5px;
-
-        flex-wrap:
-          wrap;
-
-        margin-bottom:
-          5px;
+        display: flex;
+        gap: 5px;
+        flex-wrap: wrap;
+        margin-bottom: 5px;
       }
 
       .lm-tag {
-        display:
-          inline-flex;
-
-        border-radius:
-          999px;
-
-        padding:
-          2px 7px;
-
-        background:
-          #dcebf0;
-
-        color:
-          #24718a;
-
-        font-size:
-          8px;
-
-        font-weight:
-          800;
-
-        text-transform:
-          uppercase;
-
-        letter-spacing:
-          .04em;
+        display: inline-flex;
+        border-radius: 999px;
+        padding: 2px 7px;
+        background: #dcebf0;
+        color: #24718a;
+        font-size: 8px;
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: .04em;
       }
 
       .lm-tag.is-unstable {
-        background:
-          #fff0dc;
-
-        color:
-          #a76109;
+        background: #fff0dc;
+        color: #a76109;
       }
 
       .lm-tag.is-muted {
-        background:
-          #eff1f2;
-
-        color:
-          #7b858b;
+        background: #eff1f2;
+        color: #7b858b;
       }
 
       .lm-module-card h3 {
-        margin:
-          0 0 4px;
-
-        color:
-          #26343d;
-
-        font-size:
-          14px;
+        margin: 0 0 4px;
+        color: #26343d;
+        font-size: 14px;
       }
 
       .lm-module-card p {
-        margin:
-          0 0 5px;
-
-        color:
-          #607079;
-
-        font-size:
-          10px;
+        margin: 0 0 5px;
+        color: #607079;
+        font-size: 10px;
       }
 
       .lm-version-line {
-        color:
-          #667780;
-
-        font-size:
-          10px;
+        color: #667780;
+        font-size: 10px;
       }
 
       .lm-installed-current {
-        color:
-          #0b7b4a;
-
-        font-weight:
-          800;
+        color: #0b7b4a;
+        font-weight: 800;
       }
 
       .lm-installed-update {
-        color:
-          #a45b00;
-
-        font-weight:
-          800;
+        color: #a45b00;
+        font-weight: 800;
       }
 
       .lm-installed-update small {
-        display:
-          block;
-
-        font-weight:
-          700;
+        display: block;
+        font-weight: 700;
       }
 
       .lm-installed-update.is-downgrade {
-        color:
-          #855b16;
+        color: #855b16;
       }
 
       .lm-module-actions {
-        flex:
-          0 0 auto;
-
-        display:
-          flex;
-
-        align-items:
-          center;
-
-        gap:
-          7px;
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        gap: 7px;
       }
 
       .lm-text-action {
-        border:
-          1px solid
-          #2b7898;
-
-        border-radius:
-          7px;
-
-        background:
-          #fff;
-
-        color:
-          #24718f;
-
-        padding:
-          5px 9px;
-
-        font-weight:
-          800;
-
-        font-size:
-          10px;
-
-        cursor:
-          pointer;
+        border: 1px solid #2b7898;
+        border-radius: 7px;
+        background: #fff;
+        color: #24718f;
+        padding: 5px 9px;
+        font-weight: 800;
+        font-size: 10px;
+        cursor: pointer;
       }
 
       .lm-empty {
-        display:
-          flex;
-
-        flex-direction:
-          column;
-
-        gap:
-          4px;
-
-        border:
-          1px dashed
-          #c9d3db;
-
-        border-radius:
-          8px;
-
-        padding:
-          18px;
-
-        text-align:
-          center;
-
-        color:
-          #63717b;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        border: 1px dashed #c9d3db;
+        border-radius: 8px;
+        padding: 18px;
+        text-align: center;
+        color: #63717b;
       }
 
       .lm-module-settings-header {
-        display:
-          flex;
-
-        align-items:
-          center;
-
-        gap:
-          10px;
-
-        margin:
-          -2px 0
-          10px;
-
-        padding-bottom:
-          9px;
-
-        border-bottom:
-          1px solid
-          #d6e0e5;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin: -2px 0 10px;
+        padding-bottom: 9px;
+        border-bottom: 1px solid #d6e0e5;
       }
 
       .lm-back-button {
-        display:
-          inline-flex;
-
-        align-items:
-          center;
-
-        gap:
-          4px;
-
-        border:
-          1px solid
-          #8fa7b5;
-
-        border-radius:
-          7px;
-
-        background:
-          #fff;
-
-        color:
-          #2a6e8b;
-
-        padding:
-          5px 8px
-          5px 5px;
-
-        font-weight:
-          800;
-
-        font-size:
-          10px;
-
-        cursor:
-          pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        border: 1px solid #8fa7b5;
+        border-radius: 7px;
+        background: #fff;
+        color: #2a6e8b;
+        padding: 5px 8px 5px 5px;
+        font-weight: 800;
+        font-size: 10px;
+        cursor: pointer;
       }
 
       .lm-back-button:hover {
-        background:
-          #edf6f9;
-
-        border-color:
-          #5e8da3;
+        background: #edf6f9;
+        border-color: #5e8da3;
       }
 
       .lm-back-button svg {
-        width:
-          16px;
-
-        height:
-          16px;
-
-        fill:
-          none;
-
-        stroke:
-          currentColor;
-
-        stroke-width:
-          2.2;
-
-        stroke-linecap:
-          round;
-
-        stroke-linejoin:
-          round;
+        width: 16px;
+        height: 16px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 2.2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
       }
 
       .lm-module-settings-title {
-        display:
-          flex;
-
-        flex-direction:
-          column;
-
-        gap:
-          1px;
-
-        min-width:
-          0;
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+        min-width: 0;
       }
 
       .lm-module-settings-title strong {
-        color:
-          #2c4655;
-
-        font-size:
-          13px;
+        color: #2c4655;
+        font-size: 13px;
       }
 
       .lm-module-settings-title small {
-        color:
-          #74838c;
-
-        font-size:
-          9px;
+        color: #74838c;
+        font-size: 9px;
       }
 
       .lm-setting-list-inline {
-        background:
-          #fff;
-
-        border:
-          1px solid
-          #c7d4dc;
-
-        border-radius:
-          9px;
-
-        padding:
-          11px 12px
-          2px;
+        background: #fff;
+        border: 1px solid #c7d4dc;
+        border-radius: 9px;
+        padding: 11px 12px 2px;
       }
 
-      .lm-setting-list-inline
-      .lm-setting-row:last-child {
-        border-bottom:
-          0;
+      .lm-setting-list-inline .lm-setting-row:last-child {
+        border-bottom: 0;
       }
 
       .lm-settings-section {
-        border:
-          1px solid
-          #c7d4dc;
-
-        border-radius:
-          9px;
-
-        background:
-          #fff;
-
-        padding:
-          13px;
+        border: 1px solid #c7d4dc;
+        border-radius: 9px;
+        background: #fff;
+        padding: 13px;
       }
 
       .lm-settings-heading {
-        display:
-          flex;
-
-        justify-content:
-          space-between;
-
-        gap:
-          12px;
-
-        align-items:
-          flex-start;
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: flex-start;
       }
 
       .lm-settings-heading h3 {
-        margin:
-          0;
-
-        color:
-          #244760;
-
-        font-size:
-          14px;
+        margin: 0;
+        color: #244760;
+        font-size: 14px;
       }
 
       .lm-settings-heading p {
-        margin:
-          4px 0 12px;
-
-        color:
-          #5f6e79;
-
-        font-size:
-          11px;
+        margin: 4px 0 12px;
+        color: #5f6e79;
+        font-size: 11px;
       }
 
       .lm-version {
-        color:
-          #74848d;
-
-        font-size:
-          9px;
-
-        white-space:
-          nowrap;
+        color: #74848d;
+        font-size: 9px;
+        white-space: nowrap;
       }
 
       .lm-channel-options {
-        display:
-          grid;
-
-        gap:
-          8px;
+        display: grid;
+        gap: 8px;
       }
 
       .lm-channel-option {
-        display:
-          flex;
-
-        gap:
-          9px;
-
-        border:
-          1px solid
-          #ccd7df;
-
-        border-radius:
-          8px;
-
-        padding:
-          9px;
-
-        cursor:
-          pointer;
+        display: flex;
+        gap: 9px;
+        border: 1px solid #ccd7df;
+        border-radius: 8px;
+        padding: 9px;
+        cursor: pointer;
       }
 
       .lm-channel-option.selected {
-        border-color:
-          #4680a8;
-
-        background:
-          #f3f8fb;
-
-        box-shadow:
-          inset
-          0 0 0 1px
-          #4680a8;
+        border-color: #4680a8;
+        background: #f3f8fb;
+        box-shadow: inset 0 0 0 1px #4680a8;
       }
 
       .lm-channel-option.is-danger.selected {
-        border-color:
-          #cc8428;
-
-        background:
-          #fff9ee;
-
-        box-shadow:
-          inset
-          0 0 0 1px
-          #cc8428;
+        border-color: #cc8428;
+        background: #fff9ee;
+        box-shadow: inset 0 0 0 1px #cc8428;
       }
 
       .lm-channel-option span {
-        display:
-          flex;
-
-        flex-direction:
-          column;
-
-        gap:
-          2px;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
       }
 
       .lm-channel-option small {
-        color:
-          #6b7781;
-
-        font-size:
-          10px;
+        color: #6b7781;
+        font-size: 10px;
       }
 
       .lm-settings-note {
-        margin-top:
-          12px;
-
-        border-left:
-          3px solid
-          #7497ae;
-
-        padding:
-          8px 10px;
-
-        background:
-          #f5f8fa;
-
-        color:
-          #53616b;
-
-        font-size:
-          10px;
+        margin-top: 12px;
+        border-left: 3px solid #7497ae;
+        padding: 8px 10px;
+        background: #f5f8fa;
+        color: #53616b;
+        font-size: 10px;
       }
 
       .lm-refresh-info {
-        display:
-          grid;
-
-        gap:
-          3px;
-
-        margin-top:
-          12px;
-
-        color:
-          #6b7781;
-
-        font-size:
-          10px;
+        display: grid;
+        gap: 3px;
+        margin-top: 12px;
+        color: #6b7781;
+        font-size: 10px;
       }
 
       .lm-subdialog-backdrop {
-        position:
-          fixed;
-
-        inset:
-          0;
-
-        z-index:
-          2147483400;
-
-        display:
-          flex;
-
-        align-items:
-          center;
-
-        justify-content:
-          center;
-
-        padding:
-          18px;
-
-        background:
-          rgba(
-            15,
-            25,
-            35,
-            .38
-          );
+        position: fixed;
+        inset: 0;
+        z-index: 2147483400;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 18px;
+        background: rgba(15,25,35,.38);
       }
 
       .lm-subdialog {
-        width:
-          min(
-            420px,
-            calc(100vw - 32px)
-          );
-
-        max-height:
-          min(
-            620px,
-            calc(100vh - 40px)
-          );
-
-        overflow:
-          hidden;
-
-        display:
-          flex;
-
-        flex-direction:
-          column;
-
-        border:
-          1px solid
-          #7794a4;
-
-        border-radius:
-          11px;
-
-        background:
-          #fff;
-
-        box-shadow:
-          0 18px 60px
-          rgba(0,0,0,.30);
-
-        color:
-          #293942;
+        width: min(420px, calc(100vw - 32px));
+        max-height: min(620px, calc(100vh - 40px));
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        border: 1px solid #7794a4;
+        border-radius: 11px;
+        background: #fff;
+        box-shadow: 0 18px 60px rgba(0,0,0,.30);
+        color: #293942;
       }
 
       .lm-subdialog header {
-        display:
-          flex;
-
-        justify-content:
-          space-between;
-
-        align-items:
-          center;
-
-        gap:
-          10px;
-
-        padding:
-          11px 13px;
-
-        border-bottom:
-          1px solid
-          #d5dfe4;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+        padding: 11px 13px;
+        border-bottom: 1px solid #d5dfe4;
       }
 
       .lm-subdialog header h3 {
-        margin:
-          0;
-
-        font-size:
-          14px;
+        margin: 0;
+        font-size: 14px;
       }
 
       .lm-subdialog header button {
-        width:
-          28px;
-
-        height:
-          28px;
-
-        padding:
-          6px;
-
-        border:
-          0;
-
-        border-radius:
-          6px;
-
-        background:
-          transparent;
-
-        color:
-          #577283;
-
-        cursor:
-          pointer;
+        width: 28px;
+        height: 28px;
+        padding: 6px;
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        color: #577283;
+        cursor: pointer;
       }
 
       .lm-subdialog-body {
-        overflow:
-          auto;
-
-        padding:
-          13px;
-
-        color:
-          #4e5f69;
-
-        font-size:
-          11px;
-      }
-
-      .lm-subdialog-body p:first-child {
-        margin-top:
-          0;
+        overflow: auto;
+        padding: 13px;
+        color: #4e5f69;
+        font-size: 11px;
       }
 
       .lm-subdialog-actions {
-        display:
-          flex;
-
-        justify-content:
-          flex-end;
-
-        gap:
-          7px;
-
-        padding:
-          10px 13px;
-
-        border-top:
-          1px solid
-          #d5dfe4;
-
-        background:
-          #f7f9fa;
+        display: flex;
+        justify-content: flex-end;
+        gap: 7px;
+        padding: 10px 13px;
+        border-top: 1px solid #d5dfe4;
+        background: #f7f9fa;
       }
 
       .lm-dialog-button {
-        border:
-          1px solid
-          #99adba;
-
-        border-radius:
-          7px;
-
-        background:
-          #fff;
-
-        color:
-          #41677b;
-
-        padding:
-          6px 10px;
-
-        font-weight:
-          700;
-
-        font-size:
-          10px;
-
-        cursor:
-          pointer;
+        border: 1px solid #99adba;
+        border-radius: 7px;
+        background: #fff;
+        color: #41677b;
+        padding: 6px 10px;
+        font-weight: 700;
+        font-size: 10px;
+        cursor: pointer;
       }
 
       .lm-dialog-button.is-primary {
-        border-color:
-          #2b7898;
-
-        background:
-          #2d7d9c;
-
-        color:
-          #fff;
+        border-color: #2b7898;
+        background: #2d7d9c;
+        color: #fff;
       }
 
       .lm-setting-list {
-        display:
-          grid;
-
-        gap:
-          10px;
+        display: grid;
+        gap: 10px;
       }
 
       .lm-setting-row {
-        display:
-          flex;
-
-        justify-content:
-          space-between;
-
-        align-items:
-          center;
-
-        gap:
-          14px;
-
-        border-bottom:
-          1px solid
-          #edf0f2;
-
-        padding-bottom:
-          9px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 14px;
+        border-bottom: 1px solid #edf0f2;
+        padding-bottom: 9px;
       }
 
       .lm-setting-copy {
-        display:
-          flex;
-
-        flex-direction:
-          column;
-
-        gap:
-          2px;
-
-        min-width:
-          0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
       }
 
       .lm-setting-copy strong {
-        color:
-          #344b58;
+        color: #344b58;
       }
 
       .lm-setting-copy small {
-        color:
-          #71808a;
-
-        font-size:
-          9px;
+        color: #71808a;
+        font-size: 9px;
       }
 
       .lm-setting-row select,
       .lm-setting-row input[type="text"],
-      .lm-setting-row input[type="number"] {
-        max-width:
-          150px;
-
-        border:
-          1px solid
-          #aebfc9;
-
-        border-radius:
-          6px;
-
-        padding:
-          5px 7px;
-
-        background:
-          #fff;
-
-        color:
-          #26343d;
+      .lm-setting-row input[type="number"],
+      .lm-setting-row input[type="color"] {
+        max-width: 170px;
+        border: 1px solid #aebfc9;
+        border-radius: 6px;
+        padding: 5px 7px;
+        background: #fff;
+        color: #26343d;
       }
 
-      @media (
-        max-width: 620px
-      ) {
+      /*
+       * Theme preview dropdown.
+       */
+      .lm-preview-picker {
+        position: relative;
+        width: min(185px, 46vw);
+        flex: 0 0 auto;
+      }
+
+      .lm-preview-picker-trigger {
+        width: 100%;
+        min-height: 30px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        border: 1px solid #aebfc9;
+        border-radius: 6px;
+        padding: 5px 8px;
+        background: #fff;
+        color: #26343d;
+        font: inherit;
+        font-size: 10px;
+        text-align: left;
+        cursor: pointer;
+      }
+
+      .lm-preview-picker.is-open
+      .lm-preview-picker-trigger,
+      .lm-preview-picker-trigger:focus-visible {
+        border-color: #4381a0;
+        box-shadow: 0 0 0 2px rgba(45,125,156,.13);
+        outline: none;
+      }
+
+      .lm-preview-picker-trigger > span:first-child {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .lm-preview-picker-arrow {
+        flex: 0 0 auto;
+        color: #5c7787;
+        font-size: 11px;
+      }
+
+      .lm-preview-picker-menu {
+        position: absolute;
+        z-index: 2147483300;
+        top: calc(100% + 4px);
+        right: 0;
+        width: max(100%, 215px);
+        max-width: min(285px, calc(100vw - 46px));
+        max-height: min(310px, 52vh);
+        overflow: auto;
+        border: 1px solid #7895a6;
+        border-radius: 8px;
+        padding: 4px;
+        background: #fff;
+        box-shadow: 0 10px 30px rgba(0,0,0,.22);
+      }
+
+      .lm-preview-picker-menu[hidden] {
+        display: none !important;
+      }
+
+      .lm-preview-picker-option {
+        width: 100%;
+        display: block;
+        border: 0;
+        border-radius: 5px;
+        padding: 7px 9px;
+        background: transparent;
+        color: #2b3d47;
+        font: inherit;
+        font-size: 10px;
+        text-align: left;
+        cursor: pointer;
+      }
+
+      .lm-preview-picker-option:hover,
+      .lm-preview-picker-option:focus-visible {
+        background: #e8f2f6;
+        color: #185f7a;
+        outline: none;
+      }
+
+      .lm-preview-picker-option.is-selected {
+        background: #dcecf2;
+        color: #185f7a;
+        font-weight: 800;
+      }
+
+      @media (max-width: 620px) {
         #${ID.backdrop} {
-          padding:
-            0;
-
-          align-items:
-            stretch;
-
-          justify-content:
-            stretch;
-
-          background:
-            rgba(
-              20,
-              30,
-              40,
-              .20
-            );
+          padding: 0;
+          align-items: stretch;
+          justify-content: stretch;
+          background: rgba(20,30,40,.20);
         }
 
         #${ID.panel} {
-          width:
-            100vw;
-
-          height:
-            100vh;
-
-          border:
-            0;
-
-          border-radius:
-            0;
+          width: 100vw;
+          height: 100vh;
+          border: 0;
+          border-radius: 0;
         }
 
         .lm-header {
-          padding-left:
-            14px;
+          padding-left: 14px;
         }
 
         .lm-module-card {
-          align-items:
-            flex-start;
+          align-items: flex-start;
         }
 
         .lm-module-actions {
-          flex-direction:
-            column;
-
-          align-items:
-            flex-end;
+          flex-direction: column;
+          align-items: flex-end;
         }
       }
     `;
