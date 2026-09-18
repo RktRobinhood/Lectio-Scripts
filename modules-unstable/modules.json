@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "channel": "unstable",
-  "generatedAt": "2026-09-18T18:05:00Z",
+  "generatedAt": "2026-09-18T18:50:41Z",
   "modules": [
     {
       "id": "unstable-channel-test",
@@ -37,6 +37,25 @@
       "status": "unstable",
       "version": "99.0.0-beta.1",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Unread-Message-Notifications.user.js",
+      "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues"
+    },
+    {
+      "id": "change-radar",
+      "aliases": [
+        "schedule-change-radar",
+        "lectio-change-radar",
+        "change-log"
+      ],
+      "name": "Lectio Change Radar",
+      "description": "Experimental timetable watcher with a compact HUD and a rotating log of the 10 most recently noticed cancellations, room/time changes, additions and removals.",
+      "category": "Schedule",
+      "audience": [
+        "student",
+        "teacher"
+      ],
+      "status": "unstable",
+      "version": "0.1.0-beta.1",
+      "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Change-Radar.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues"
     }
   ]
