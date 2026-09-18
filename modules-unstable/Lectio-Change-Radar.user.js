@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Change Radar
 // @namespace    https://github.com/RktRobinhood/Lectio-Scripts
-// @version      0.1.0-beta.1
+// @version      0.2.0-beta.1
 // @description  Watches your Lectio timetable for cancellations and schedule changes and keeps a compact recent-change HUD.
 // @author       RktRobinhood
 // @match        https://www.lectio.dk/lectio/*
@@ -20,23 +20,51 @@
     id: 'change-radar',
     aliases: ['schedule-change-radar', 'lectio-change-radar', 'change-log'],
     name: 'Lectio Change Radar',
-    version: '0.1.0-beta.1',
+    version: '0.2.0-beta.1',
     channel: 'unstable'
   });
 
-  const CONFIG = Object.freeze({
-    pollMs: 10 * 60 * 1000,
+  const BASE_CONFIG = Object.freeze({
     minRefreshGapMs: 90 * 1000,
-    maxHistory: 10,
-    weeksAhead: 1,
-    fetchTimeoutMs: 20 * 1000
+    fetchTimeoutMs: 20 * 1000,
+    autoSeenDelayMs: 1200
   });
+
+  const DEFAULT_SETTINGS = Object.freeze({
+    pollMinutes: 10,
+    weeksAhead: 1,
+    urgentHours: 24,
+    recentHours: 24,
+    attentionAnimation: true,
+    hoverOpen: true,
+    historyLimit: 10
+  });
+
+  const SETTING_SCHEMA = Object.freeze([
+    makeSelectSetting('pollMinutes', 'Check frequency', 'How often Change Radar checks Lectio while a Lectio tab is open.', 10, [
+      [5, 'Every 5 minutes'], [10, 'Every 10 minutes'], [15, 'Every 15 minutes'], [30, 'Every 30 minutes']
+    ]),
+    makeSelectSetting('weeksAhead', 'Weeks to watch', 'How far ahead the radar snapshots your timetable.', 1, [
+      [0, 'This week only'], [1, 'This week + next'], [2, 'This week + 2 weeks']
+    ]),
+    makeSelectSetting('urgentHours', 'Urgent window', 'An unseen change to an activity inside this window turns the radar red.', 24, [
+      [6, 'Next 6 hours'], [12, 'Next 12 hours'], [24, 'Next 24 hours'], [48, 'Next 48 hours']
+    ]),
+    makeSelectSetting('recentHours', 'Recent-change window', 'After changes are seen, keep the radar amber for this long before returning to green.', 24, [
+      [12, '12 hours'], [24, '24 hours'], [48, '48 hours'], [72, '72 hours']
+    ]),
+    makeToggleSetting('attentionAnimation', 'Urgent animation', 'Pulse the radar signal when an urgent unseen change needs attention.', true),
+    makeToggleSetting('hoverOpen', 'Open on hover', 'Open the change log when the pointer rests on the radar. Click still pins it open.', true),
+    makeSelectSetting('historyLimit', 'History size', 'Maximum number of recent changes kept in the rotating local log.', 10, [
+      [5, '5 changes'], [10, '10 changes'], [20, '20 changes']
+    ])
+  ]);
 
   const UI = Object.freeze({
     root: 'lectio-change-radar',
     style: 'lectio-change-radar-style',
+    button: 'lectio-change-radar-button',
     panel: 'lectio-change-radar-panel',
-    header: 'lectio-change-radar-header',
     list: 'lectio-change-radar-list',
     status: 'lectio-change-radar-status'
   });
@@ -49,21 +77,37 @@
   const STORAGE = Object.freeze({
     state: `${storageBase}.state`,
     lastPoll: `${storageBase}.lastPoll`,
-    lastViewed: `${storageBase}.lastViewed`
+    lastViewed: `${storageBase}.lastViewed`,
+    settings: `${storageBase}.settings`
   });
 
   const runtime = {
-    state: loadState(),
+    state: null,
+    settings: null,
     inFlight: false,
     pinned: false,
     hovered: false,
+    settingsOpen: false,
     timer: null,
-    lastError: '',
-    refreshQueued: false
+    viewTimer: null,
+    lastError: ''
   };
+
+  runtime.settings = loadSettings();
+  runtime.state = loadState();
 
   registerWithManager();
   window.addEventListener('lectio-manager:discover', registerWithManager);
+
+  for (const eventName of [
+    'lectio-manager:setting-change',
+    'lectio-manager:settings-change',
+    'lectio-manager:update-setting',
+    'lectio-module:setting-change',
+    'lectio-module:update-settings'
+  ]) {
+    window.addEventListener(eventName, handleManagerSettingsEvent);
+  }
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init, { once: true });
@@ -71,7 +115,43 @@
     init();
   }
 
+  function makeSelectSetting(key, label, description, defaultValue, pairs) {
+    const options = pairs.map(([value, optionLabel]) => ({ value, label: optionLabel }));
+    return {
+      id: key,
+      key,
+      type: 'select',
+      control: 'select',
+      kind: 'select',
+      label,
+      description,
+      default: defaultValue,
+      defaultValue,
+      options,
+      choices: options
+    };
+  }
+
+  function makeToggleSetting(key, label, description, defaultValue) {
+    return {
+      id: key,
+      key,
+      type: 'boolean',
+      control: 'toggle',
+      kind: 'toggle',
+      inputType: 'checkbox',
+      label,
+      description,
+      default: defaultValue,
+      defaultValue
+    };
+  }
+
   function registerWithManager() {
+    const currentValues = { ...runtime.settings };
+    const apply = (key, value) => applySetting(key, value, { source: 'manager-callback' });
+    const applyMany = (values) => applySettings(values, { source: 'manager-callback' });
+
     window.dispatchEvent(new CustomEvent('lectio-module:register', {
       detail: {
         id: MODULE.id,
@@ -79,8 +159,12 @@
         name: MODULE.name,
         version: MODULE.version,
         channel: MODULE.channel,
-        settingsSchema: [],
-        currentValues: {}
+        settingsSchema: SETTING_SCHEMA.map((item) => ({ ...item, value: currentValues[item.key] })),
+        currentValues,
+        settings: currentValues,
+        setSetting: apply,
+        applySetting: apply,
+        updateSettings: applyMany
       }
     }));
   }
@@ -90,32 +174,103 @@
 
     installStyles();
     installHud();
+    syncTheme();
+    installThemeObserver();
     renderHud();
 
     void refresh({ reason: 'startup' });
-
-    runtime.timer = window.setInterval(() => {
-      void refresh({ reason: 'interval' });
-    }, CONFIG.pollMs);
+    restartPollTimer();
 
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
+        syncTheme();
         const lastPoll = readNumber(STORAGE.lastPoll);
-        if (Date.now() - lastPoll >= CONFIG.pollMs) {
+        if (Date.now() - lastPoll >= getPollMs()) {
           void refresh({ reason: 'visible' });
         }
       }
     });
 
     window.addEventListener('storage', (event) => {
-      if (event.key !== STORAGE.state && event.key !== STORAGE.lastViewed) return;
+      if (![STORAGE.state, STORAGE.lastViewed, STORAGE.settings].includes(event.key)) return;
+      runtime.settings = loadSettings();
       runtime.state = loadState();
+      restartPollTimer();
       renderHud();
+      registerWithManager();
     });
 
     // Give the Manager more than one opportunity to discover the module.
     window.setTimeout(registerWithManager, 500);
     window.setTimeout(registerWithManager, 1500);
+  }
+
+  function restartPollTimer() {
+    if (runtime.timer) window.clearInterval(runtime.timer);
+    runtime.timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        void refresh({ reason: 'interval' });
+      }
+    }, getPollMs());
+  }
+
+  function getPollMs() {
+    return Math.max(5, Number(runtime.settings?.pollMinutes) || DEFAULT_SETTINGS.pollMinutes) * 60 * 1000;
+  }
+
+  function getHistoryLimit() {
+    return Math.max(5, Math.min(20, Number(runtime.settings?.historyLimit) || DEFAULT_SETTINGS.historyLimit));
+  }
+
+  function handleManagerSettingsEvent(event) {
+    const detail = event?.detail;
+    if (!detail || typeof detail !== 'object') return;
+
+    const moduleRef = detail.moduleId || detail.module?.id || detail.module;
+    if (moduleRef && moduleRef !== MODULE.id && !MODULE.aliases.includes(moduleRef)) return;
+
+    if (detail.values && typeof detail.values === 'object') {
+      applySettings(detail.values, { source: 'manager-event' });
+      return;
+    }
+
+    const key = detail.key || detail.settingId || detail.settingKey ||
+      (moduleRef ? detail.id : '') || detail.name;
+    if (!key || !Object.prototype.hasOwnProperty.call(DEFAULT_SETTINGS, key)) return;
+    applySetting(key, detail.value, { source: 'manager-event' });
+  }
+
+  function applySetting(key, value, { source = 'local' } = {}) {
+    if (!Object.prototype.hasOwnProperty.call(DEFAULT_SETTINGS, key)) return false;
+    return applySettings({ [key]: value }, { source });
+  }
+
+  function applySettings(values, { source = 'local' } = {}) {
+    if (!values || typeof values !== 'object') return false;
+    const before = runtime.settings;
+    const next = sanitizeSettings({ ...before, ...values });
+    const changed = Object.keys(next).some((key) => next[key] !== before[key]);
+    if (!changed) return false;
+
+    runtime.settings = next;
+    saveSettings(next);
+
+    if (next.historyLimit !== before.historyLimit && runtime.state?.history) {
+      runtime.state = { ...runtime.state, history: runtime.state.history.slice(0, getHistoryLimit()) };
+      saveState(runtime.state);
+    }
+
+    if (next.pollMinutes !== before.pollMinutes) restartPollTimer();
+    if (next.weeksAhead !== before.weeksAhead) {
+      window.setTimeout(() => void refresh({ reason: 'settings', force: true }), 0);
+    }
+
+    renderHud();
+    registerWithManager();
+    window.dispatchEvent(new CustomEvent('lectio-module:settings-updated', {
+      detail: { id: MODULE.id, source, currentValues: { ...runtime.settings } }
+    }));
+    return true;
   }
 
   async function refresh({ reason = 'manual', force = false } = {}) {
@@ -124,7 +279,7 @@
     const now = Date.now();
     const lastPoll = readNumber(STORAGE.lastPoll);
 
-    if (!force && reason !== 'manual' && now - lastPoll < CONFIG.minRefreshGapMs) {
+    if (!force && reason !== 'manual' && now - lastPoll < BASE_CONFIG.minRefreshGapMs) {
       return;
     }
 
@@ -172,7 +327,7 @@
     const now = new Date();
     const weekInfos = [];
 
-    for (let offset = 0; offset <= CONFIG.weeksAhead; offset += 1) {
+    for (let offset = 0; offset <= (Number(runtime.settings.weeksAhead) || 0); offset += 1) {
       weekInfos.push(getIsoWeekInfo(addDays(now, offset * 7)));
     }
 
@@ -186,7 +341,7 @@
     }
 
     const rangeStart = startOfIsoWeek(now);
-    const rangeEnd = addDays(rangeStart, ((CONFIG.weeksAhead + 1) * 7) - 1);
+    const rangeEnd = addDays(rangeStart, (((Number(runtime.settings.weeksAhead) || 0) + 1) * 7) - 1);
 
     return {
       capturedAt: Date.now(),
@@ -199,7 +354,7 @@
   async function fetchScheduleWeek(weekInfo) {
     const url = `/lectio/${schoolId}/SkemaNy.aspx?week=${weekInfo.week}${weekInfo.year}&showtype=0`;
     const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), CONFIG.fetchTimeoutMs);
+    const timeout = window.setTimeout(() => controller.abort(), BASE_CONFIG.fetchTimeoutMs);
 
     try {
       const response = await fetch(url, {
@@ -440,7 +595,7 @@
   }
 
   function mergeHistory(changes, history) {
-    if (!changes.length) return history.slice(0, CONFIG.maxHistory);
+    if (!changes.length) return history.slice(0, getHistoryLimit());
 
     const combined = [...changes.slice().reverse(), ...history];
     const seen = new Set();
@@ -451,7 +606,7 @@
       if (seen.has(key)) continue;
       seen.add(key);
       deduped.push(item);
-      if (deduped.length >= CONFIG.maxHistory) break;
+      if (deduped.length >= getHistoryLimit()) break;
     }
 
     return deduped;
@@ -464,276 +619,327 @@
     style.id = UI.style;
     style.textContent = `
       #${UI.root} {
-        --lcr-border: #c8d4dc;
+        --lcr-surface: #ffffff;
         --lcr-text: #243746;
         --lcr-muted: #667783;
-        --lcr-bg: rgba(255, 255, 255, .98);
-        --lcr-soft: #f5f8fa;
-        --lcr-accent: #3b6f93;
+        --lcr-border: #c8d4dc;
+        --lcr-soft: #f4f7f9;
+        --lcr-signal: #3b9a58;
+        --lcr-signal-rgb: 59, 154, 88;
         position: fixed;
-        top: 96px;
+        top: 92px;
         right: 12px;
         z-index: 2147482900;
-        width: 286px;
+        width: 42px;
+        height: 42px;
         box-sizing: border-box;
-        border: 1px solid var(--lcr-border);
-        border-radius: 10px;
-        background: var(--lcr-bg);
-        color: var(--lcr-text);
-        box-shadow: 0 5px 20px rgba(28, 46, 58, .16);
+        color: var(--lcr-text) !important;
         font: 12px/1.35 Arial, Helvetica, sans-serif;
-        overflow: hidden;
       }
 
-      #${UI.root}.is-error { --lcr-accent: #a44b40; }
-      #${UI.root}.has-unseen { border-color: #9bb5c7; }
+      #${UI.root}.state-yellow { --lcr-signal: #d79619; --lcr-signal-rgb: 215, 150, 25; }
+      #${UI.root}.state-red { --lcr-signal: #d94b43; --lcr-signal-rgb: 217, 75, 67; }
+      #${UI.root}.state-error { --lcr-signal: #7a8790; --lcr-signal-rgb: 122, 135, 144; }
 
-      #${UI.header} {
-        width: 100%;
-        display: flex;
-        align-items: center;
-        gap: 8px;
+      #${UI.button} {
+        position: relative;
+        width: 42px;
+        height: 42px;
+        display: grid;
+        place-items: center;
         box-sizing: border-box;
-        border: 0;
-        background: #fff;
-        color: var(--lcr-text);
-        padding: 9px 10px;
-        text-align: left;
-        cursor: pointer;
-        font: inherit;
-      }
-
-      #${UI.header}:hover,
-      #${UI.header}:focus-visible {
-        background: var(--lcr-soft);
-        outline: none;
-      }
-
-      .lcr-pulse {
-        width: 8px;
-        height: 8px;
-        flex: 0 0 auto;
+        border: 1px solid var(--lcr-border) !important;
         border-radius: 50%;
-        background: var(--lcr-accent);
-        box-shadow: 0 0 0 3px rgba(59, 111, 147, .12);
+        background: var(--lcr-surface) !important;
+        color: var(--lcr-signal) !important;
+        box-shadow: 0 3px 12px rgba(0, 0, 0, .16);
+        padding: 0;
+        cursor: pointer;
+        overflow: visible;
       }
 
-      .lcr-heading {
-        min-width: 0;
-        flex: 1;
+      #${UI.button}:hover,
+      #${UI.button}:focus-visible {
+        background: var(--lcr-soft) !important;
+        outline: 2px solid rgba(var(--lcr-signal-rgb), .22);
+        outline-offset: 2px;
       }
 
-      .lcr-heading strong {
+      .lcr-radar-svg {
+        width: 27px;
+        height: 27px;
         display: block;
-        font-size: 12px;
-        line-height: 1.2;
+        overflow: visible;
       }
 
-      .lcr-heading small {
-        display: block;
-        margin-top: 2px;
-        color: var(--lcr-muted);
-        font-size: 10px;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
+      .lcr-radar-svg path,
+      .lcr-radar-svg circle,
+      .lcr-radar-svg line {
+        stroke: currentColor;
       }
 
-      .lcr-count {
-        min-width: 20px;
-        height: 20px;
+      .lcr-radar-wave {
+        opacity: .55;
+        transform-origin: 15px 11px;
+      }
+
+      #${UI.root}.is-urgent-animated .lcr-radar-wave.wave-1 {
+        animation: lcr-wave 1.45s ease-out infinite;
+      }
+      #${UI.root}.is-urgent-animated .lcr-radar-wave.wave-2 {
+        animation: lcr-wave 1.45s .48s ease-out infinite;
+      }
+
+      #${UI.root}.is-urgent-animated #${UI.button} {
+        animation: lcr-button-pulse 1.55s ease-in-out infinite;
+      }
+
+      @keyframes lcr-wave {
+        0% { opacity: .78; transform: scale(.78); }
+        75%, 100% { opacity: 0; transform: scale(1.28); }
+      }
+
+      @keyframes lcr-button-pulse {
+        0%, 100% { box-shadow: 0 3px 12px rgba(0,0,0,.16), 0 0 0 0 rgba(var(--lcr-signal-rgb), .30); }
+        50% { box-shadow: 0 3px 12px rgba(0,0,0,.16), 0 0 0 7px rgba(var(--lcr-signal-rgb), 0); }
+      }
+
+      .lcr-count-badge {
+        position: absolute;
+        top: -5px;
+        right: -5px;
+        min-width: 18px;
+        height: 18px;
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        border-radius: 999px;
-        background: #e9f1f6;
-        color: #315e7d;
-        padding: 0 6px;
         box-sizing: border-box;
-        font-weight: 700;
+        border: 2px solid var(--lcr-surface);
+        border-radius: 999px;
+        background: var(--lcr-signal) !important;
+        color: #fff !important;
+        padding: 0 4px;
+        font: 800 9px/1 Arial, Helvetica, sans-serif;
+      }
+
+      .lcr-panel-wrap {
+        position: absolute;
+        top: 100%;
+        right: 0;
+        width: min(348px, calc(100vw - 24px));
+        box-sizing: border-box;
+        padding-top: 7px;
+        display: none;
+      }
+
+      #${UI.root}.is-expanded .lcr-panel-wrap { display: block; }
+
+      #${UI.panel} {
+        width: 100%;
+        box-sizing: border-box;
+        border: 1px solid var(--lcr-border) !important;
+        border-radius: 10px;
+        background: var(--lcr-surface) !important;
+        color: var(--lcr-text) !important;
+        box-shadow: 0 10px 32px rgba(0, 0, 0, .22);
+        overflow: hidden;
+      }
+
+      .lcr-panel-head {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding: 10px 11px 9px;
+        border-bottom: 1px solid var(--lcr-border) !important;
+        background: var(--lcr-surface) !important;
+      }
+
+      .lcr-status-dot {
+        width: 9px;
+        height: 9px;
+        flex: 0 0 auto;
+        border-radius: 50%;
+        background: var(--lcr-signal) !important;
+        box-shadow: 0 0 0 3px rgba(var(--lcr-signal-rgb), .14);
+      }
+
+      .lcr-panel-heading { min-width: 0; flex: 1; }
+      .lcr-panel-heading strong {
+        display: block;
+        color: var(--lcr-text) !important;
+        font-size: 12px;
+      }
+      .lcr-panel-heading small {
+        display: block;
+        margin-top: 2px;
+        color: var(--lcr-muted) !important;
         font-size: 10px;
       }
 
-      .lcr-chevron {
-        color: var(--lcr-muted);
-        font-size: 12px;
-        transition: transform .12s ease;
+      .lcr-pin {
+        border: 0;
+        background: transparent !important;
+        color: var(--lcr-muted) !important;
+        padding: 4px 5px;
+        cursor: pointer;
+        font: 700 10px/1 Arial, Helvetica, sans-serif;
       }
-
-      #${UI.root}.is-expanded .lcr-chevron { transform: rotate(180deg); }
-
-      .lcr-preview {
-        border-top: 1px solid #e4eaee;
-        background: #fff;
-      }
-
-      .lcr-preview .lcr-item:nth-child(n+3) { display: none; }
-
-      #${UI.panel} {
-        display: none;
-        border-top: 1px solid #dfe7ec;
-        background: #fff;
-      }
-
-      #${UI.root}.is-expanded .lcr-preview { display: none; }
-      #${UI.root}.is-expanded #${UI.panel} { display: block; }
 
       #${UI.list} {
-        max-height: min(52vh, 430px);
+        max-height: min(50vh, 420px);
         overflow-y: auto;
         overscroll-behavior: contain;
+        background: var(--lcr-surface) !important;
       }
 
       .lcr-item {
         display: block;
-        position: relative;
         box-sizing: border-box;
-        padding: 9px 10px 9px 13px;
-        border-bottom: 1px solid #edf1f3;
-        color: inherit;
-        text-decoration: none;
-        background: #fff;
+        border: 0;
+        border-bottom: 1px solid var(--lcr-border) !important;
+        background: var(--lcr-surface) !important;
+        color: var(--lcr-text) !important;
+        padding: 9px 11px;
+        text-decoration: none !important;
       }
-
-      .lcr-item::before {
-        content: '';
-        position: absolute;
-        left: 0;
-        top: 0;
-        bottom: 0;
-        width: 3px;
-        background: #8ca8ba;
-      }
-
-      .lcr-item[data-kind='cancelled']::before,
-      .lcr-item[data-kind='removed']::before { background: #b55a4e; }
-      .lcr-item[data-kind='restored']::before,
-      .lcr-item[data-kind='added']::before { background: #5f8d69; }
-      .lcr-item[data-kind='room']::before,
-      .lcr-item[data-kind='time']::before { background: #b2873d; }
-
-      a.lcr-item:hover,
-      a.lcr-item:focus-visible {
-        background: #f7f9fa;
+      .lcr-item:last-child { border-bottom: 0 !important; }
+      a.lcr-item:hover, a.lcr-item:focus-visible {
+        background: var(--lcr-soft) !important;
         outline: none;
       }
 
-      .lcr-item-top {
-        display: flex;
-        align-items: baseline;
-        gap: 7px;
-      }
-
+      .lcr-item-top { display: flex; align-items: center; gap: 7px; }
       .lcr-kind {
         flex: 0 0 auto;
-        color: var(--lcr-muted);
+        color: var(--lcr-muted) !important;
         font-size: 9px;
-        font-weight: 700;
-        letter-spacing: .04em;
+        font-weight: 800;
+        letter-spacing: .045em;
         text-transform: uppercase;
       }
-
+      .lcr-unseen {
+        flex: 0 0 auto;
+        border-radius: 999px;
+        background: rgba(var(--lcr-signal-rgb), .13) !important;
+        color: var(--lcr-signal) !important;
+        padding: 2px 5px;
+        font-size: 8px;
+        font-weight: 800;
+        letter-spacing: .04em;
+      }
       .lcr-title {
         min-width: 0;
         flex: 1;
+        color: var(--lcr-text) !important;
         font-size: 11px;
         font-weight: 700;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
       }
-
       .lcr-detail {
         margin-top: 3px;
-        color: #425764;
+        color: var(--lcr-text) !important;
+        opacity: .90;
         font-size: 10.5px;
         overflow-wrap: anywhere;
       }
-
       .lcr-meta {
         margin-top: 4px;
-        color: #788791;
+        color: var(--lcr-muted) !important;
         font-size: 9.5px;
       }
 
       .lcr-empty {
-        padding: 14px 12px;
-        color: var(--lcr-muted);
+        padding: 18px 12px;
+        background: var(--lcr-surface) !important;
+        color: var(--lcr-muted) !important;
         text-align: center;
         font-size: 10.5px;
       }
 
       .lcr-footer {
-        display: grid;
-        grid-template-columns: 1fr auto auto;
-        gap: 7px;
+        display: flex;
         align-items: center;
+        gap: 6px;
         padding: 8px 9px;
-        background: var(--lcr-soft);
+        border-top: 1px solid var(--lcr-border) !important;
+        background: var(--lcr-soft) !important;
       }
-
       #${UI.status} {
         min-width: 0;
-        color: var(--lcr-muted);
+        flex: 1;
+        color: var(--lcr-muted) !important;
         font-size: 9.5px;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
       }
-
       .lcr-action {
-        border: 1px solid #c6d1d8;
+        border: 1px solid var(--lcr-border) !important;
         border-radius: 6px;
-        background: #fff;
-        color: #3c5667;
+        background: var(--lcr-surface) !important;
+        color: var(--lcr-text) !important;
         padding: 4px 7px;
         cursor: pointer;
-        font: 600 9.5px/1.2 Arial, Helvetica, sans-serif;
+        font: 700 9.5px/1.2 Arial, Helvetica, sans-serif;
       }
-
-      .lcr-action:hover,
-      .lcr-action:focus-visible {
-        background: #edf3f6;
+      .lcr-action:hover, .lcr-action:focus-visible {
+        background: var(--lcr-soft) !important;
         outline: none;
       }
+      .lcr-action[disabled] { opacity: .52; cursor: default; }
 
-      .lcr-action[disabled] {
-        opacity: .55;
-        cursor: default;
+      .lcr-settings {
+        max-height: min(52vh, 430px);
+        overflow-y: auto;
+        padding: 8px 11px 10px;
+        background: var(--lcr-surface) !important;
       }
+      .lcr-setting-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 10px;
+        align-items: center;
+        padding: 8px 0;
+        border-bottom: 1px solid var(--lcr-border) !important;
+      }
+      .lcr-setting-row:last-child { border-bottom: 0 !important; }
+      .lcr-setting-copy strong {
+        display: block;
+        color: var(--lcr-text) !important;
+        font-size: 10.5px;
+      }
+      .lcr-setting-copy small {
+        display: block;
+        margin-top: 2px;
+        max-width: 215px;
+        color: var(--lcr-muted) !important;
+        font-size: 9px;
+      }
+      .lcr-setting-control {
+        max-width: 132px;
+        border: 1px solid var(--lcr-border) !important;
+        border-radius: 5px;
+        background: var(--lcr-surface) !important;
+        color: var(--lcr-text) !important;
+        padding: 4px 5px;
+        font: 10px Arial, Helvetica, sans-serif;
+      }
+      .lcr-setting-toggle { width: 16px; height: 16px; accent-color: var(--lcr-signal); }
 
-      @media (max-width: 900px) {
-        #${UI.root}:not(.is-expanded) {
-          width: auto;
-          max-width: calc(100vw - 20px);
-          border-radius: 999px 0 0 999px;
-          right: 0;
-        }
-
-        #${UI.root}:not(.is-expanded) #${UI.header} {
-          width: auto;
-          padding: 7px 9px 7px 10px;
-        }
-
-        #${UI.root}:not(.is-expanded) .lcr-heading,
-        #${UI.root}:not(.is-expanded) .lcr-chevron,
-        #${UI.root}:not(.is-expanded) .lcr-preview {
-          display: none;
-        }
-
-        #${UI.root}.is-expanded {
-          width: min(326px, calc(100vw - 20px));
-          right: 10px;
-        }
+      @media (max-width: 600px) {
+        #${UI.root} { top: 82px; right: 8px; }
+        .lcr-panel-wrap { width: min(338px, calc(100vw - 16px)); right: -1px; }
       }
 
       @media (prefers-reduced-motion: reduce) {
         #${UI.root} *, #${UI.root} *::before, #${UI.root} *::after {
+          animation: none !important;
           transition: none !important;
         }
       }
     `;
-
     (document.head || document.documentElement).appendChild(style);
   }
 
@@ -744,31 +950,19 @@
     root.id = UI.root;
     root.setAttribute('aria-label', 'Lectio Change Radar');
 
-    const header = document.createElement('button');
-    header.id = UI.header;
-    header.type = 'button';
-    header.setAttribute('aria-expanded', 'false');
-    header.addEventListener('click', () => {
-      runtime.pinned = !runtime.pinned;
-      if (runtime.pinned) markViewed();
-      renderHud();
-    });
-
     root.addEventListener('mouseenter', () => {
+      if (!runtime.settings.hoverOpen) return;
       runtime.hovered = true;
       renderHud();
     });
-
     root.addEventListener('mouseleave', () => {
       runtime.hovered = false;
       renderHud();
     });
-
     root.addEventListener('focusin', () => {
       runtime.hovered = true;
       renderHud();
     });
-
     root.addEventListener('focusout', (event) => {
       if (!root.contains(event.relatedTarget)) {
         runtime.hovered = false;
@@ -779,121 +973,111 @@
     document.body.appendChild(root);
   }
 
+  function radarSvg() {
+    return `
+      <svg class="lcr-radar-svg" viewBox="0 0 30 30" aria-hidden="true">
+        <path d="M7.2 17.2c3.6 3.6 9.4 3.6 13 0l-6.5-6.5-6.5 6.5Z" fill="currentColor" fill-opacity=".13" stroke-width="1.6" stroke-linejoin="round"/>
+        <line x1="13.7" y1="17.2" x2="10.7" y2="23.1" stroke-width="1.6" stroke-linecap="round"/>
+        <line x1="8.6" y1="23.1" x2="13" y2="23.1" stroke-width="1.6" stroke-linecap="round"/>
+        <circle cx="13.7" cy="10.7" r="1.55" fill="currentColor" stroke="none"/>
+        <path class="lcr-radar-wave wave-1" d="M17.1 9.7c1.8.6 3.2 2 3.8 3.8" fill="none" stroke-width="1.55" stroke-linecap="round"/>
+        <path class="lcr-radar-wave wave-2" d="M18.5 6.4c3.2 1.1 5.8 3.6 6.9 6.9" fill="none" stroke-width="1.55" stroke-linecap="round"/>
+      </svg>`;
+  }
+
   function renderHud() {
     const root = document.getElementById(UI.root);
     if (!root) return;
 
+    syncTheme();
+
     const history = runtime.state?.history || [];
     const lastViewed = readNumber(STORAGE.lastViewed);
-    const unseen = history.filter((item) => Number(item.noticedAt) > lastViewed).length;
+    const status = getRadarState(history, lastViewed);
     const expanded = runtime.pinned || runtime.hovered;
 
+    root.className = `state-${status.level}`;
     root.classList.toggle('is-expanded', expanded);
-    root.classList.toggle('has-unseen', unseen > 0);
-    root.classList.toggle('is-error', Boolean(runtime.lastError));
-
-    const latest = history.slice(0, 2);
-    const headerSubtext = runtime.lastError
-      ? runtime.lastError
-      : runtime.inFlight
-        ? 'Checking timetable...'
-        : history.length
-          ? `${history.length} recent change${history.length === 1 ? '' : 's'}`
-          : runtime.state?.snapshot
-            ? 'Watching this week + next'
-            : 'Starting watcher...';
+    root.classList.toggle(
+      'is-urgent-animated',
+      status.level === 'red' && status.urgentUnseen > 0 && runtime.settings.attentionAnimation
+    );
 
     root.replaceChildren();
 
-    const header = document.createElement('button');
-    header.id = UI.header;
-    header.type = 'button';
-    header.setAttribute('aria-expanded', String(expanded));
-    header.innerHTML = `
-      <span class="lcr-pulse" aria-hidden="true"></span>
-      <span class="lcr-heading">
-        <strong>Change Radar</strong>
-        <small>${escapeHtml(headerSubtext)}</small>
-      </span>
-      <span class="lcr-count" title="${unseen} unseen change${unseen === 1 ? '' : 's'}">${unseen || history.length}</span>
-      <span class="lcr-chevron" aria-hidden="true">▾</span>
-    `;
-    header.addEventListener('click', () => {
+    const button = document.createElement('button');
+    button.id = UI.button;
+    button.type = 'button';
+    button.setAttribute('aria-expanded', String(expanded));
+    button.setAttribute('aria-label', status.ariaLabel);
+    button.title = status.tooltip;
+    button.innerHTML = radarSvg() + (status.unseen > 0
+      ? `<span class="lcr-count-badge">${status.unseen > 9 ? '9+' : status.unseen}</span>`
+      : '');
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
       runtime.pinned = !runtime.pinned;
-      if (runtime.pinned) markViewed();
+      runtime.settingsOpen = false;
       renderHud();
     });
-    root.appendChild(header);
+    root.appendChild(button);
 
-    const preview = document.createElement('div');
-    preview.className = 'lcr-preview';
-    if (latest.length) {
-      latest.forEach((item) => preview.appendChild(renderHistoryItem(item)));
-    } else {
-      const empty = document.createElement('div');
-      empty.className = 'lcr-empty';
-      empty.textContent = runtime.state?.snapshot
-        ? 'No timetable changes noticed yet.'
-        : 'Creating the first timetable baseline.';
-      preview.appendChild(empty);
-    }
-    root.appendChild(preview);
+    const wrap = document.createElement('div');
+    wrap.className = 'lcr-panel-wrap';
 
-    const panel = document.createElement('div');
+    const panel = document.createElement('section');
     panel.id = UI.panel;
+    panel.setAttribute('aria-label', 'Lectio Change Radar details');
 
-    const list = document.createElement('div');
-    list.id = UI.list;
-    if (history.length) {
-      history.forEach((item) => list.appendChild(renderHistoryItem(item)));
+    const head = document.createElement('div');
+    head.className = 'lcr-panel-head';
+    head.innerHTML = `
+      <span class="lcr-status-dot" aria-hidden="true"></span>
+      <span class="lcr-panel-heading">
+        <strong>${escapeHtml(runtime.settingsOpen ? 'Change Radar settings' : status.heading)}</strong>
+        <small>${escapeHtml(runtime.settingsOpen ? 'Stored only in this browser.' : status.subheading)}</small>
+      </span>`;
+
+    const pin = document.createElement('button');
+    pin.className = 'lcr-pin';
+    pin.type = 'button';
+    pin.textContent = runtime.pinned ? 'Unpin' : 'Pin';
+    pin.title = runtime.pinned ? 'Close when the pointer leaves' : 'Keep this panel open';
+    pin.addEventListener('click', (event) => {
+      event.stopPropagation();
+      runtime.pinned = !runtime.pinned;
+      renderHud();
+    });
+    head.appendChild(pin);
+    panel.appendChild(head);
+
+    if (runtime.settingsOpen) {
+      panel.appendChild(renderSettingsPanel());
     } else {
-      const empty = document.createElement('div');
-      empty.className = 'lcr-empty';
-      empty.textContent = runtime.state?.snapshot
-        ? 'No changes in the log. The radar keeps the newest 10.'
-        : 'First check creates a baseline; later differences become log entries.';
-      list.appendChild(empty);
+      const list = document.createElement('div');
+      list.id = UI.list;
+      if (history.length) {
+        history.forEach((item) => list.appendChild(renderHistoryItem(item, lastViewed)));
+      } else {
+        const empty = document.createElement('div');
+        empty.className = 'lcr-empty';
+        empty.textContent = runtime.state?.snapshot
+          ? 'No timetable changes noticed yet.'
+          : 'Creating the first timetable baseline. Later differences will appear here.';
+        list.appendChild(empty);
+      }
+      panel.appendChild(list);
     }
-    panel.appendChild(list);
 
-    const footer = document.createElement('div');
-    footer.className = 'lcr-footer';
+    panel.appendChild(renderFooter(status, history));
+    wrap.appendChild(panel);
+    root.appendChild(wrap);
 
-    const status = document.createElement('div');
-    status.id = UI.status;
-    status.textContent = getStatusText();
-    footer.appendChild(status);
-
-    const refreshButton = document.createElement('button');
-    refreshButton.type = 'button';
-    refreshButton.className = 'lcr-action';
-    refreshButton.textContent = runtime.inFlight ? 'Checking...' : 'Refresh';
-    refreshButton.disabled = runtime.inFlight;
-    refreshButton.addEventListener('click', (event) => {
-      event.stopPropagation();
-      void refresh({ reason: 'manual', force: true });
-    });
-    footer.appendChild(refreshButton);
-
-    const clearButton = document.createElement('button');
-    clearButton.type = 'button';
-    clearButton.className = 'lcr-action';
-    clearButton.textContent = 'Clear';
-    clearButton.disabled = history.length === 0;
-    clearButton.title = 'Clear the recent-change log but keep the current timetable baseline.';
-    clearButton.addEventListener('click', (event) => {
-      event.stopPropagation();
-      clearHistory();
-    });
-    footer.appendChild(clearButton);
-
-    panel.appendChild(footer);
-    root.appendChild(panel);
+    scheduleAutoSeen(expanded && !runtime.settingsOpen, status.unseen);
   }
 
-  function renderHistoryItem(item) {
-    const tag = item.url ? 'a' : 'div';
-    const node = document.createElement(tag);
+  function renderHistoryItem(item, lastViewed) {
+    const node = document.createElement(item.url ? 'a' : 'div');
     node.className = 'lcr-item';
     node.dataset.kind = item.kind || 'changed';
 
@@ -902,34 +1086,198 @@
       node.title = 'Open activity in Lectio';
     }
 
+    const unseen = Number(item.noticedAt) > lastViewed;
     const when = formatHistoryEventTime(item);
     const noticed = formatNoticed(item.noticedAt);
 
     node.innerHTML = `
       <div class="lcr-item-top">
         <span class="lcr-kind">${escapeHtml(kindLabel(item.kind))}</span>
+        ${unseen ? '<span class="lcr-unseen">UNSEEN</span>' : ''}
         <span class="lcr-title">${escapeHtml(item.title || 'Lectio activity')}</span>
       </div>
       <div class="lcr-detail">${escapeHtml(item.detail || 'Schedule changed')}</div>
-      <div class="lcr-meta">${escapeHtml(when)}${when && noticed ? ' · ' : ''}${escapeHtml(noticed)}</div>
-    `;
-
+      <div class="lcr-meta">${escapeHtml(when)}${when && noticed ? ' · ' : ''}${escapeHtml(noticed)}</div>`;
     return node;
+  }
+
+  function renderFooter(status, history) {
+    const footer = document.createElement('div');
+    footer.className = 'lcr-footer';
+
+    const statusText = document.createElement('div');
+    statusText.id = UI.status;
+    statusText.textContent = getStatusText();
+    footer.appendChild(statusText);
+
+    if (status.unseen > 0 && !runtime.settingsOpen) {
+      const seenButton = actionButton('Mark seen', () => markViewed());
+      footer.appendChild(seenButton);
+    }
+
+    const settingsButton = actionButton(runtime.settingsOpen ? 'Done' : 'Settings', () => {
+      runtime.settingsOpen = !runtime.settingsOpen;
+      runtime.pinned = true;
+      renderHud();
+    });
+    footer.appendChild(settingsButton);
+
+    if (!runtime.settingsOpen) {
+      const refreshButton = actionButton(runtime.inFlight ? 'Checking...' : 'Refresh', () => {
+        void refresh({ reason: 'manual', force: true });
+      });
+      refreshButton.disabled = runtime.inFlight;
+      footer.appendChild(refreshButton);
+
+      const clearButton = actionButton('Clear', clearHistory);
+      clearButton.disabled = history.length === 0;
+      clearButton.title = 'Clear the change log but keep the current timetable baseline.';
+      footer.appendChild(clearButton);
+    }
+
+    return footer;
+  }
+
+  function actionButton(label, handler) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'lcr-action';
+    button.textContent = label;
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      handler();
+    });
+    return button;
+  }
+
+  function renderSettingsPanel() {
+    const host = document.createElement('div');
+    host.className = 'lcr-settings';
+
+    for (const schema of SETTING_SCHEMA) {
+      const row = document.createElement('label');
+      row.className = 'lcr-setting-row';
+
+      const copy = document.createElement('span');
+      copy.className = 'lcr-setting-copy';
+      copy.innerHTML = `<strong>${escapeHtml(schema.label)}</strong><small>${escapeHtml(schema.description || '')}</small>`;
+      row.appendChild(copy);
+
+      let control;
+      if (schema.type === 'boolean') {
+        control = document.createElement('input');
+        control.type = 'checkbox';
+        control.className = 'lcr-setting-toggle';
+        control.checked = Boolean(runtime.settings[schema.key]);
+        control.addEventListener('change', () => applySetting(schema.key, control.checked));
+      } else {
+        control = document.createElement('select');
+        control.className = 'lcr-setting-control';
+        for (const option of schema.options || []) {
+          const element = document.createElement('option');
+          element.value = String(option.value);
+          element.textContent = option.label;
+          if (String(runtime.settings[schema.key]) === String(option.value)) element.selected = true;
+          control.appendChild(element);
+        }
+        control.addEventListener('change', () => applySetting(schema.key, coerceSettingValue(schema.key, control.value)));
+      }
+
+      row.appendChild(control);
+      host.appendChild(row);
+    }
+
+    return host;
+  }
+
+  function getRadarState(history, lastViewed) {
+    if (runtime.lastError) {
+      return {
+        level: 'error', unseen: 0, urgentUnseen: 0,
+        heading: 'Radar check problem',
+        subheading: runtime.lastError,
+        tooltip: `Change Radar: ${runtime.lastError}`,
+        ariaLabel: `Lectio Change Radar. Check problem: ${runtime.lastError}`
+      };
+    }
+
+    const now = Date.now();
+    const unseenItems = history.filter((item) => Number(item.noticedAt) > lastViewed);
+    const urgentCutoff = now + (Number(runtime.settings.urgentHours) || 24) * 60 * 60 * 1000;
+    const urgentItems = unseenItems.filter((item) => {
+      const time = historyEventTimestamp(item);
+      return time && time >= now && time <= urgentCutoff;
+    });
+
+    if (urgentItems.length) {
+      return {
+        level: 'red',
+        unseen: unseenItems.length,
+        urgentUnseen: urgentItems.length,
+        heading: 'Urgent change',
+        subheading: `${urgentItems.length} unseen change${urgentItems.length === 1 ? '' : 's'} coming up soon`,
+        tooltip: `Urgent: ${urgentItems.length} unseen upcoming timetable change${urgentItems.length === 1 ? '' : 's'}.`,
+        ariaLabel: `Lectio Change Radar. Red alert. ${urgentItems.length} urgent unseen change${urgentItems.length === 1 ? '' : 's'}.`
+      };
+    }
+
+    const recentCutoff = now - (Number(runtime.settings.recentHours) || 24) * 60 * 60 * 1000;
+    const recent = history.filter((item) => Number(item.noticedAt) >= recentCutoff);
+
+    if (unseenItems.length || recent.length) {
+      const subheading = unseenItems.length
+        ? `${unseenItems.length} unseen change${unseenItems.length === 1 ? '' : 's'} to review`
+        : `Recent changes have been seen`;
+      return {
+        level: 'yellow',
+        unseen: unseenItems.length,
+        urgentUnseen: 0,
+        heading: unseenItems.length ? 'Changes to review' : 'Recent change',
+        subheading,
+        tooltip: unseenItems.length ? `${unseenItems.length} unseen timetable change${unseenItems.length === 1 ? '' : 's'}.` : 'Recent timetable changes have been reviewed.',
+        ariaLabel: `Lectio Change Radar. Amber. ${subheading}.`
+      };
+    }
+
+    return {
+      level: 'green', unseen: 0, urgentUnseen: 0,
+      heading: 'All clear',
+      subheading: runtime.inFlight ? 'Checking timetable...' : 'No recent changes need attention',
+      tooltip: 'Change Radar: all clear.',
+      ariaLabel: 'Lectio Change Radar. Green. All clear.'
+    };
+  }
+
+  function historyEventTimestamp(item) {
+    if (!item?.eventDate) return 0;
+    const time = /^\d{2}:\d{2}$/.test(item.eventStart || '') ? item.eventStart : '08:00';
+    const timestamp = Date.parse(`${item.eventDate}T${time}:00`);
+    return Number.isFinite(timestamp) ? timestamp : 0;
+  }
+
+  function scheduleAutoSeen(expanded, unseenCount) {
+    if (runtime.viewTimer) {
+      window.clearTimeout(runtime.viewTimer);
+      runtime.viewTimer = null;
+    }
+    if (!expanded || unseenCount <= 0) return;
+
+    runtime.viewTimer = window.setTimeout(() => {
+      runtime.viewTimer = null;
+      if (runtime.pinned || runtime.hovered) markViewed();
+    }, BASE_CONFIG.autoSeenDelayMs);
   }
 
   function markViewed() {
     writeNumber(STORAGE.lastViewed, Date.now());
+    renderHud();
   }
 
   function clearHistory() {
     if (!runtime.state) return;
-    runtime.state = {
-      ...runtime.state,
-      history: []
-    };
+    runtime.state = { ...runtime.state, history: [] };
     saveState(runtime.state);
     markViewed();
-    renderHud();
   }
 
   function getStatusText() {
@@ -937,7 +1285,109 @@
     if (runtime.inFlight) return 'Checking now...';
     const checkedAt = Number(runtime.state?.checkedAt || 0);
     if (!checkedAt) return 'Waiting for first check';
-    return `Checked ${formatClock(checkedAt)} · every 10 min`;
+    return `Checked ${formatClock(checkedAt)} · every ${runtime.settings.pollMinutes} min`;
+  }
+
+  function syncTheme() {
+    const root = document.getElementById(UI.root);
+    if (!root) return;
+
+    const candidates = [
+      document.querySelector('.islandContent'),
+      document.querySelector('.lectioTabContent'),
+      document.querySelector('.ls-paper'),
+      document.querySelector('.ls-master-container2'),
+      document.getElementById('masterContent'),
+      document.body
+    ].filter(Boolean);
+
+    let surface = '';
+    let text = '';
+    let border = '';
+
+    for (const node of candidates) {
+      const css = getComputedStyle(node);
+      if (!surface && isVisibleColor(css.backgroundColor)) surface = css.backgroundColor;
+      if (!text && isVisibleColor(css.color)) text = css.color;
+      if (!border && isVisibleColor(css.borderColor)) border = css.borderColor;
+      if (surface && text) break;
+    }
+
+    const dark = document.body?.dataset?.theme === 'dark' || document.documentElement?.dataset?.theme === 'dark';
+    surface ||= dark ? 'rgb(41, 41, 41)' : 'rgb(255, 255, 255)';
+    text ||= dark ? 'rgb(100, 173, 213)' : 'rgb(36, 55, 70)';
+    border ||= dark ? 'rgb(82, 91, 98)' : 'rgb(200, 212, 220)';
+
+    root.style.setProperty('--lcr-surface', surface);
+    root.style.setProperty('--lcr-text', text);
+    root.style.setProperty('--lcr-border', border);
+    root.style.setProperty('--lcr-muted', mixWithSurface(text, surface, .62));
+    root.style.setProperty('--lcr-soft', mixWithSurface(text, surface, .055));
+  }
+
+  function installThemeObserver() {
+    const callback = () => window.requestAnimationFrame(syncTheme);
+    const observer = new MutationObserver(callback);
+    if (document.body) observer.observe(document.body, { attributes: true, attributeFilter: ['class', 'style', 'data-theme'] });
+    if (document.documentElement) observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme'] });
+  }
+
+  function isVisibleColor(value) {
+    if (!value) return false;
+    return !/rgba\([^)]*,\s*0(?:\.0+)?\s*\)$/i.test(value) && value !== 'transparent';
+  }
+
+  function mixWithSurface(foreground, background, amount) {
+    const fg = parseRgb(foreground);
+    const bg = parseRgb(background);
+    if (!fg || !bg) return amount > .5 ? foreground : background;
+    const mix = (a, b) => Math.round((a * amount) + (b * (1 - amount)));
+    return `rgb(${mix(fg[0], bg[0])}, ${mix(fg[1], bg[1])}, ${mix(fg[2], bg[2])})`;
+  }
+
+  function parseRgb(value) {
+    const match = String(value || '').match(/rgba?\(\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)/i);
+    return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
+  }
+
+  function loadSettings() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(STORAGE.settings) || '{}');
+      return sanitizeSettings(parsed);
+    } catch (_) {
+      return { ...DEFAULT_SETTINGS };
+    }
+  }
+
+  function sanitizeSettings(values) {
+    const out = { ...DEFAULT_SETTINGS };
+    const allowed = {
+      pollMinutes: [5, 10, 15, 30],
+      weeksAhead: [0, 1, 2],
+      urgentHours: [6, 12, 24, 48],
+      recentHours: [12, 24, 48, 72],
+      historyLimit: [5, 10, 20]
+    };
+
+    for (const [key, options] of Object.entries(allowed)) {
+      const n = Number(values?.[key]);
+      if (options.includes(n)) out[key] = n;
+    }
+    for (const key of ['attentionAnimation', 'hoverOpen']) {
+      if (typeof values?.[key] === 'boolean') out[key] = values[key];
+      else if (values?.[key] === 'true' || values?.[key] === 1 || values?.[key] === '1') out[key] = true;
+      else if (values?.[key] === 'false' || values?.[key] === 0 || values?.[key] === '0') out[key] = false;
+    }
+    return out;
+  }
+
+  function coerceSettingValue(key, value) {
+    if (['attentionAnimation', 'hoverOpen'].includes(key)) return Boolean(value);
+    return Number(value);
+  }
+
+  function saveSettings(settings) {
+    try { localStorage.setItem(STORAGE.settings, JSON.stringify(settings)); } catch (_) {}
   }
 
   function loadState() {
@@ -945,33 +1395,22 @@
       const parsed = JSON.parse(localStorage.getItem(STORAGE.state) || 'null');
       if (!parsed || parsed.version !== 1) return null;
       if (!parsed.snapshot || typeof parsed.snapshot.events !== 'object') return null;
-      return {
-        ...parsed,
-        history: Array.isArray(parsed.history) ? parsed.history.slice(0, CONFIG.maxHistory) : []
-      };
+      return { ...parsed, history: Array.isArray(parsed.history) ? parsed.history.slice(0, getHistoryLimit()) : [] };
     } catch (_) {
       return null;
     }
   }
 
   function saveState(state) {
-    try {
-      localStorage.setItem(STORAGE.state, JSON.stringify(state));
-    } catch (_) {}
+    try { localStorage.setItem(STORAGE.state, JSON.stringify(state)); } catch (_) {}
   }
 
   function readNumber(key) {
-    try {
-      return Number(localStorage.getItem(key) || 0) || 0;
-    } catch (_) {
-      return 0;
-    }
+    try { return Number(localStorage.getItem(key) || 0) || 0; } catch (_) { return 0; }
   }
 
   function writeNumber(key, value) {
-    try {
-      localStorage.setItem(key, String(value));
-    } catch (_) {}
+    try { localStorage.setItem(key, String(value)); } catch (_) {}
   }
 
   function getSchoolId() {
