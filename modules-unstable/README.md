@@ -25,5 +25,8 @@ The extra patch bump at promotion is not ceremony. A tester's installed copy poi
 
 ## What is here now
 
+### `Lectio-English-Mode.user.js`
+Stable `1.9.3` with the translation cache written on a flush instead of on every learned string (issue #26). Measured over a page that learns 200 new strings with 2,000 already cached: 200 storage writes and 47 MB serialised before, 2 writes and 0.48 MB after, with a third write on `pagehide`. Cache contents and eviction policy are unchanged.
+
 ### `Lectio-Change-Radar.user.js`
 An experimental timetable watcher — a compact themed radar HUD with urgency states, unseen-change tracking, configurable polling and a rotating local change log. Unstable-only so far; it has never had a stable release, so promoting it would be its first.

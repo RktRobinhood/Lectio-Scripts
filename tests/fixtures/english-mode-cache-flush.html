@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio English Mode cache flush fixture</title>
+    <script>
+        /*
+         * Issue #26. English Mode used to write its whole translation cache on
+         * every learned string. This fixture drives the real module through a
+         * page that learns ~200 strings with a realistically sized cache
+         * already in storage, counts the writes, and pins down the two things
+         * a future refactor could quietly drop: cachePut must not write, and
+         * pagehide must flush what it learned.
+         *
+         *   ?module=modules            the frozen stable copy (old behaviour)
+         *   ?module=modules-unstable   the copy under test (default)
+         *   ?strings=200               how many new strings the page learns
+         *   ?seed=2000                 cache entries already in storage
+         */
+        const params = new URLSearchParams(location.search);
+        const moduleFolder = params.get('module') || 'modules-unstable';
+        const TOTAL = Number(params.get('strings') || 200);
+        const SEED = Number(params.get('seed') || 2000);
+        const CACHE_KEY = 'lectioEnglish.learned.v5';
+        const storagePrefix = 'gm.';
+
+        const stats = {
+            writes: 0,
+            cacheWrites: 0,
+            bytes: 0,
+            googleCalls: 0
+        };
+
+        // A cache the size real users end up with, so a write costs what it
+        // costs in the field rather than what it costs when empty.
+        const seeded = {};
+        for (let index = 0; index < SEED; index += 1) {
+            seeded[`indlaert frase nummer ${index} paa siden`] = {
+                raw: `learned phrase number ${index} on the page`,
+                lang: 'da',
+                ts: Date.now() - index
+            };
+        }
+        localStorage.setItem(`${storagePrefix}${CACHE_KEY}`, JSON.stringify(seeded));
+        localStorage.setItem(`${storagePrefix}lectioEnglish.mode`, JSON.stringify('en'));
+        localStorage.removeItem(`${storagePrefix}lectioEnglish.switchPosition`);
+
+        window.GM_getValue = (key, fallback) => {
+            const saved = localStorage.getItem(`${storagePrefix}${key}`);
+            return saved === null ? fallback : JSON.parse(saved);
+        };
+        window.GM_setValue = (key, value) => {
+            const serialised = JSON.stringify(value);
+            stats.writes += 1;
+            if (key === CACHE_KEY) {
+                stats.cacheWrites += 1;
+                stats.bytes += serialised.length;
+            }
+            localStorage.setItem(`${storagePrefix}${key}`, serialised);
+        };
+
+        // Stands in for the Google fallback so the page really does learn.
+        window.GM_xmlhttpRequest = (details) => {
+            const source = decodeURIComponent((details.url.match(/[?&]q=([^&]*)/) || [])[1] || '');
+            stats.googleCalls += 1;
+            setTimeout(() => {
+                details.onload({
+                    status: 200,
+                    responseText: JSON.stringify([[[`EN::${source}`, source, null, null, 10]], null, 'da'])
+                });
+            }, 0);
+        };
+
+        // Nonsense, but Danish-looking (the "å" is what makes the module treat
+        // it as translatable content rather than an identifier) and guaranteed
+        // absent from the module's own dictionary, so every one of them takes
+        // the learn-and-cache path.
+        window.phraseFor = (index) => `blåfrø kvimter zarnip ${index} tilrand`;
+    </script>
+</head>
+<body>
+    <main id="page"></main>
+    <script>
+        const main = document.getElementById('page');
+        for (let index = 0; index < TOTAL; index += 1) {
+            const line = document.createElement('p');
+            line.textContent = window.phraseFor(index);
+            main.appendChild(line);
+        }
+    </script>
+    <script>
+        document.write(`<script src="../../${moduleFolder}/Lectio-English-Mode.user.js"><\/script>`);
+    </script>
+    <script>
+        const report = [];
+        function assert(condition, message) {
+            if (!condition) throw new Error(message);
+        }
+        const delay = (ms) => new Promise((done) => setTimeout(done, ms));
+        async function waitFor(condition, limit) {
+            const deadline = Date.now() + limit;
+            while (Date.now() < deadline) {
+                if (condition()) return true;
+                await delay(25);
+            }
+            return false;
+        }
+
+        async function run() {
+            assert(await waitFor(() => stats.googleCalls >= TOTAL, 30000),
+                `only ${stats.googleCalls} of ${TOTAL} strings reached the fallback`);
+
+            const duringLearning = stats.cacheWrites;
+            await delay(3000);
+            const afterSettling = stats.cacheWrites;
+
+            report.push(`module=${moduleFolder} strings=${TOTAL} seeded=${SEED}`);
+            report.push(`cache writes while learning: ${duringLearning}`);
+            report.push(`cache writes after settling: ${afterSettling}`);
+            report.push(`bytes serialised to storage: ${stats.bytes}`);
+
+            /*
+             * One more string, watched closely: the module renders the
+             * translation in the same turn as it caches it, so a write seen at
+             * that point is a write cachePut did itself.
+             */
+            const probe = 'blåfrø kvimter zarnip probe tilrand';
+            const baseline = stats.cacheWrites;
+            let atTranslation = null;
+            let afterPagehide = null;
+
+            const span = document.createElement('p');
+            span.textContent = probe;
+
+            const observer = new MutationObserver(() => {
+                if (afterPagehide !== null || !span.textContent.includes('EN::')) return;
+                atTranslation = stats.cacheWrites;
+                window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: false }));
+                afterPagehide = stats.cacheWrites;
+                observer.disconnect();
+            });
+            observer.observe(span, { subtree: true, characterData: true });
+            main.appendChild(span);
+
+            assert(await waitFor(() => afterPagehide !== null, 30000),
+                'the probe string was never learned');
+
+            report.push(`writes at the moment the probe was cached: ${atTranslation - baseline}`);
+            report.push(`writes after pagehide: ${afterPagehide - baseline}`);
+
+            const stored = JSON.parse(localStorage.getItem(`${storagePrefix}${CACHE_KEY}`));
+            const settledWrites = stats.cacheWrites;
+            await delay(3000);
+
+            if (moduleFolder === 'modules-unstable') {
+                assert(afterSettling > 0, 'nothing was ever persisted');
+                assert(afterSettling < TOTAL / 10,
+                    `learning ${TOTAL} strings still cost ${afterSettling} cache writes`);
+                assert(atTranslation === baseline,
+                    'cachePut wrote to storage instead of only marking the cache dirty');
+                assert(afterPagehide === baseline + 1,
+                    `pagehide produced ${afterPagehide - baseline} writes, expected exactly 1`);
+                assert(stored[probe] && stored[probe].raw.includes('EN::'),
+                    'the string learned just before pagehide was not persisted');
+                assert(stats.cacheWrites === settledWrites,
+                    'a flush stayed pending after pagehide, so its timer outlived the page');
+
+                window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: false }));
+                assert(stats.cacheWrites === settledWrites,
+                    'a second pagehide wrote again, so the listener was not torn down');
+            }
+
+            report.push('result: pass');
+            return true;
+        }
+
+        window.addEventListener('load', () => {
+            run().then(() => {
+                document.getElementById('detail').textContent = report.join('\n');
+                document.documentElement.dataset.testResult = 'pass';
+            }).catch((error) => {
+                report.push(`result: fail: ${error.message}`);
+                document.getElementById('detail').textContent = report.join('\n');
+                document.documentElement.dataset.testResult = `fail: ${error.message}`;
+            });
+        });
+    </script>
+    <pre id="detail"></pre>
+</body>
+</html>
