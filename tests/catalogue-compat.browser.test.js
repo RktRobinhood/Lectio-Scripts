@@ -53,7 +53,8 @@ const SHIPPED_MANAGERS = [
     { version: '1.23.0', commit: '8e6077c' },
     { version: '1.24.0', commit: 'd6fc699' },
     { version: '1.25.1', commit: '934b55f' },
-    { version: '1.26.0', commit: '9d068ca' }
+    { version: '1.26.0', commit: '9d068ca' },
+    { version: '1.27.0', commit: '4be2312' }
 ];
 
 /*
