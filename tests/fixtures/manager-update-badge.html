@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio Manager update-badge fixture</title>
+</head>
+<body>
+    <script>
+        // The gear is eager and the panel is lazy, so the count on the gear has
+        // to come from catalogue-versus-registration state rather than from the
+        // update lines the panel renders. Everything below the first open is
+        // checked with no panel in the document at all.
+        const catalogue = {
+            schemaVersion: 1,
+            generatedAt: '2026-09-20T00:00:00.000Z',
+            manager: {
+                // Older than the running Manager, so nothing here is the
+                // Manager's own self-update - that is the other fixture.
+                version: '1.0.0',
+                installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/manager/Lectio-Manager.user.js'
+            },
+            modules: ['current', 'alpha', 'beta', 'gamma', 'delta'].map((id) => ({
+                id,
+                name: id[0].toUpperCase() + id.slice(1),
+                description: `Catalogue entry for ${id}.`,
+                category: 'Interface',
+                audience: ['student'],
+                status: 'stable',
+                version: '2.0.0',
+                installUrl: `https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/${id}.user.js`
+            }))
+        };
+
+        // One module installed and already current: installed modules exist, so
+        // an empty badge here is "nothing to update", not "nothing to compare".
+        const storage = new Map([
+            ['lectioManager.catalogue.v1', JSON.stringify(catalogue)],
+            ['lectioManager.lastRefresh.v1', Date.now()],
+            ['lectioManager.updateTipDismissed.v1', true],
+            ['lectioManager.installed.v1', JSON.stringify({
+                current: { name: 'Current', version: '2.0.0', lastSeenAt: Date.now() - 60000 }
+            })]
+        ]);
+
+        window.GM_getValue = (key, fallback) => storage.has(key) ? storage.get(key) : fallback;
+        window.GM_setValue = (key, value) => storage.set(key, value);
+        // No network at all, in either direction: the badge must not cause one.
+        let networkCalls = 0;
+        window.GM_xmlhttpRequest = () => { networkCalls += 1; };
+
+        window.pageErrors = [];
+        window.addEventListener('error', (event) => window.pageErrors.push(String(event.message)));
+
+        function register(id, version) {
+            window.dispatchEvent(new CustomEvent('lectio-module:register', {
+                detail: { id, name: id[0].toUpperCase() + id.slice(1), version, settingsSchema: [] }
+            }));
+        }
+    </script>
+    <script src="../../manager/Lectio-Manager.user.js"></script>
+    <script>
+        function assert(condition, message) {
+            if (!condition) throw new Error(message);
+        }
+
+        window.addEventListener('load', async () => {
+            try {
+                const gear = document.querySelector('#lectio-manager-toggle');
+                assert(gear, 'The gear was not built');
+
+                const badge = () => gear.getAttribute('data-update-count');
+                const label = () => gear.getAttribute('aria-label');
+                const panelBuilt = () => Boolean(document.querySelector('#lectio-manager-panel'));
+                const size = () => {
+                    const box = gear.getBoundingClientRect();
+                    return `${Math.round(box.width)}x${Math.round(box.height)}`;
+                };
+
+                const unbadgedSize = size();
+
+                // 1. Nothing to update: no badge, and the gear's name is just
+                //    the Manager's, exactly as it was before this existed.
+                assert(!panelBuilt(), 'The panel was built without a gear click');
+                assert(badge() === null, `A badge appeared with nothing to update: ${badge()}`);
+                assert(label() === 'Lectio Tools', `The gear's name changed with nothing to update: ${label()}`);
+                assert(!document.querySelector('[data-dock-key]'), 'The update badge put something in the dock');
+
+                // 2. One update, with the panel still never opened. This is the
+                //    whole point: the count is state, not rendered panel DOM.
+                register('alpha', '1.0.0');
+                assert(!panelBuilt(), 'Registering a module built the panel');
+                assert(badge() === '1', `One outdated module did not count as one: ${badge()}`);
+                assert(label() === 'Lectio Tools — 1 update available',
+                    `The single-update name is wrong or missing: ${label()}`);
+                assert(size() === unbadgedSize, `The badge resized the gear: ${unbadgedSize} → ${size()}`);
+
+                // 3. Several.
+                register('beta', '1.0.0');
+                register('gamma', '1.9.9');
+                assert(!panelBuilt(), 'The panel appeared before it was asked for');
+                assert(badge() === '3', `Three outdated modules did not count as three: ${badge()}`);
+                assert(label() === 'Lectio Tools — 3 updates available',
+                    `The plural name is wrong: ${label()}`);
+                assert(size() === unbadgedSize, `The badge resized the gear: ${unbadgedSize} → ${size()}`);
+
+                // 4. Back to current, from a state that had a badge.
+                register('alpha', '2.0.0');
+                register('beta', '2.0.0');
+                register('gamma', '2.0.0');
+                assert(badge() === null, `The badge survived every module catching up: ${badge()}`);
+                assert(label() === 'Lectio Tools', `The gear's name kept a stale count: ${label()}`);
+
+                // 5. Both indicators at once. The problem mark (1.23.0) owns the
+                //    top corner and the count owns the bottom one, so neither
+                //    can hide the other, and the name carries both.
+                register('alpha', '1.0.0');
+                register('beta', '1.0.0');
+                register('gamma', '1.0.0');
+                window.dispatchEvent(new CustomEvent('lectio-module:report', {
+                    detail: { moduleId: 'alpha', kind: 'drift', code: 'lesson-blocks', found: 0 }
+                }));
+
+                assert(gear.classList.contains('has-problems'), 'The badge suppressed the problem mark');
+                assert(badge() === '3', `The problem mark suppressed the badge: ${badge()}`);
+                assert(label().includes('1 problem recorded') && label().includes('3 updates available'),
+                    `The gear's name does not carry both signals: ${label()}`);
+
+                const mark = getComputedStyle(gear, '::after');
+                const count = getComputedStyle(gear, '::before');
+                assert(mark.content !== 'none', 'The problem mark is not drawn');
+                assert(count.content.includes('3'), `The badge does not draw the count: ${count.content}`);
+                assert(parseFloat(mark.top) === 5 && parseFloat(count.bottom) === 3,
+                    `The two indicators are not in opposite corners: top ${mark.top}, bottom ${count.bottom}`);
+                assert(count.pointerEvents === 'none', 'The badge can swallow a click meant for the gear');
+                assert(size() === unbadgedSize, `Two indicators resized the gear: ${unbadgedSize} → ${size()}`);
+
+                // 6. Nothing threw while all of that happened with no panel.
+                assert(window.pageErrors.length === 0,
+                    `The Manager threw before its panel existed: ${window.pageErrors.join(' | ')}`);
+
+                // 7. Opening the panel is having looked. The badge clears, and
+                //    what it counted is what the panel lists.
+                gear.click();
+                assert(panelBuilt(), 'The first gear click did not build the panel');
+                assert(document.querySelectorAll('.lectio-manager-status-update').length === 3,
+                    'The badge counted something the panel does not show as an update');
+                assert(badge() === null, `The badge survived the panel being opened: ${badge()}`);
+                assert(label().includes('1 problem recorded'),
+                    `Clearing the badge threw away the problem mark's name: ${label()}`);
+
+                // 8. Closing and reopening does not bring it back.
+                gear.click();
+                gear.click();
+                assert(badge() === null, `A seen update badged again on reopen: ${badge()}`);
+
+                // 9. A genuinely new update does badge again, after closing.
+                gear.click();
+                register('delta', '1.0.0');
+                assert(badge() === '4', `A new update did not reappear on the gear: ${badge()}`);
+
+                // 10. None of this touched the dock or the network.
+                assert(!document.querySelector('[data-dock-key]'), 'The update badge put something in the dock');
+                assert(networkCalls === 0, `The badge caused ${networkCalls} network requests`);
+                assert(window.pageErrors.length === 0,
+                    `The update badge threw: ${window.pageErrors.join(' | ')}`);
+
+                document.documentElement.dataset.testResult = 'pass';
+            } catch (error) {
+                document.documentElement.dataset.testResult = `fail: ${error.message}`;
+            }
+        });
+    </script>
+</body>
+</html>

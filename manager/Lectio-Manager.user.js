@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.23.0
+// @version      1.24.0
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules, including their settings and shared dock controls.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
@@ -135,6 +135,7 @@
             problemLogClear: 'Clear log',
             problemLogPreview: 'This is exactly what will be copied',
             problemLogUnseen: (count) => `${count} problem${count === 1 ? '' : 's'} recorded`,
+            updatesWaiting: (count) => `${count} update${count === 1 ? '' : 's'} available`,
             logKindError: 'Error',
             logKindDrift: 'Not found',
             logKindNotice: 'Note',
@@ -230,6 +231,7 @@
             problemLogClear: 'Ryd loggen',
             problemLogPreview: 'Det her er præcis det, der bliver kopieret',
             problemLogUnseen: (count) => `${count} problem${count === 1 ? '' : 'er'} registreret`,
+            updatesWaiting: (count) => count === 1 ? '1 opdatering tilgængelig' : `${count} opdateringer tilgængelige`,
             logKindError: 'Fejl',
             logKindDrift: 'Ikke fundet',
             logKindNotice: 'Note',
@@ -290,7 +292,7 @@
     // Kept in step with the @version header by scripts/check-versions.mjs. The
     // header is metadata Tampermonkey reads; this is the only copy the running
     // script can see, and it is what the self-update notice compares.
-    const MANAGER_VERSION = '1.23.0';
+    const MANAGER_VERSION = '1.24.0';
 
     const STABLE_CATALOGUE_URL =
         'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/catalogue/modules.json';
@@ -345,6 +347,9 @@
     const STORAGE_DOCK = 'lectioManager.dock.v1';
     const STORAGE_LOG = 'lectioManager.log.v1';
     const STORAGE_LOG_SEEN = 'lectioManager.logSeen.v1';
+    // The set of updates the panel has already shown, so the gear's count badge
+    // goes quiet once they have been looked at and comes back for a new one.
+    const STORAGE_UPDATES_SEEN = 'lectioManager.updatesSeen.v1';
 
     /*
      * PROBLEM LOG
@@ -421,6 +426,9 @@
     // be long before - or entirely without - a panel to render it into.
     let problemLog = null;
     let logSeenAt = null;
+    // Like the log's own seen marker: read from storage the first time it is
+    // wanted, which can be long before there is a panel to render anything in.
+    let updatesSeenSignature = null;
     let logCopiedTimer = null;
     let updatedLabelTimer = null;
     let currentView = 'installed';
@@ -1014,8 +1022,8 @@
         if (languageSelect) languageSelect.value = language;
 
         // Last, because it writes the gear's label over the one set above when
-        // there is something waiting in the log.
-        updateLauncherLogIndicator();
+        // there is something waiting in the log or an update to install.
+        updateLauncherIndicators();
     }
 
     function normalizeReleaseChannel(value) {
@@ -1454,7 +1462,7 @@
             }
 
             saveProblemLog();
-            updateLauncherLogIndicator();
+            updateLauncherIndicators();
             renderProblemLog();
         } catch (_) {
             // Deliberately silent.
@@ -1515,7 +1523,7 @@
             // Not worth failing an open for.
         }
 
-        updateLauncherLogIndicator();
+        updateLauncherIndicators();
     }
 
     function clearProblemLog() {
@@ -1529,20 +1537,118 @@
     // PROBLEM LOG: PRESENT
     // ============================================================
 
-    // The gear is built eagerly and the panel is not, so the only global signal
-    // the log has is this one - which is also where the repo wants it, rather
-    // than adding anything to the dock.
-    function updateLauncherLogIndicator() {
+    /*
+     * The gear is built eagerly and the panel is not, so the gear is where both
+     * of the Manager's global signals live - which is also where the repo wants
+     * them, rather than adding anything to the dock. One function owns both,
+     * because they share one 44px button and one accessible name.
+     *
+     * They compose by sitting in opposite corners: the problem mark keeps the
+     * top right corner 1.23.0 gave it, and the update count takes the bottom
+     * right, so neither can cover the other and both can show at once. Neither
+     * is colour-only - the count is a number, and both are named in the label
+     * below, which is the gear's accessible name as well as its tooltip.
+     */
+    function updateLauncherIndicators() {
         if (!launcher?.toggle) {
             return;
         }
 
-        const count = unseenLogCount();
-        const title = count > 0 ? `${t('appTitle')} — ${t('problemLogUnseen', count)}` : t('appTitle');
+        // An open panel lists every update this counts, so it is the user
+        // having looked. Marking here covers opening it, refreshing inside it,
+        // and switching channel in it, without any of those knowing about this.
+        if (elements && !elements.panel.hasAttribute('hidden')) {
+            rememberUpdatesSeen();
+        }
 
-        launcher.toggle.classList.toggle('has-problems', count > 0);
+        const problems = unseenLogCount();
+        const updates = unseenUpdateCount();
+        const parts = [t('appTitle')];
+
+        if (problems > 0) parts.push(t('problemLogUnseen', problems));
+        if (updates > 0) parts.push(t('updatesWaiting', updates));
+
+        const title = parts.join(' — ');
+
+        launcher.toggle.classList.toggle('has-problems', problems > 0);
+
+        if (updates > 0) {
+            launcher.toggle.dataset.updateCount = String(updates);
+        } else {
+            delete launcher.toggle.dataset.updateCount;
+        }
+
         launcher.toggle.title = title;
         launcher.toggle.setAttribute('aria-label', title);
+    }
+
+    // ============================================================
+    // UPDATES: COUNT ON THE GEAR
+    // ============================================================
+
+    /*
+     * Which updates are waiting, as stable ids - computed from catalogue and
+     * registration state, never from the panel, which usually does not exist
+     * when this runs. This is the same comparison a module card makes, plus the
+     * Manager's own self-update notice, which is invisible for the same reason.
+     * Generic version state: nothing here knows what any module does.
+     */
+    function availableUpdates() {
+        const waiting = [];
+
+        for (const module of getInstalledDisplayModules()) {
+            // Installed but not on the selected channel: the card deliberately
+            // offers no update for it either.
+            if (module.outsideSelectedChannel) continue;
+
+            const record = getModuleRecord(module.id);
+            if (!record) continue;
+
+            const comparison = compareVersions(record.version, module.version);
+
+            if (comparison !== null && comparison < 0) {
+                waiting.push(`${module.id}@${module.version}`);
+            }
+        }
+
+        const manager = catalogue?.manager;
+        const managerComparison = manager ? compareVersions(MANAGER_VERSION, manager.version) : null;
+
+        if (managerComparison !== null && managerComparison < 0) {
+            waiting.push(`manager@${manager.version}`);
+        }
+
+        return waiting.sort();
+    }
+
+    function unseenUpdateCount() {
+        const waiting = availableUpdates();
+
+        if (!waiting.length) return 0;
+
+        return waiting.join(',') === loadUpdatesSeen() ? 0 : waiting.length;
+    }
+
+    function loadUpdatesSeen() {
+        if (updatesSeenSignature === null) {
+            updatesSeenSignature = String(GM_getValue(STORAGE_UPDATES_SEEN, '') || '');
+        }
+
+        return updatesSeenSignature;
+    }
+
+    function rememberUpdatesSeen() {
+        const signature = availableUpdates().join(',');
+
+        if (signature === loadUpdatesSeen()) return;
+
+        updatesSeenSignature = signature;
+
+        try {
+            GM_setValue(STORAGE_UPDATES_SEEN, signature);
+        } catch (_) {
+            // Not worth failing an open for.
+        }
     }
 
     function logEntryKindLabel(kind) {
@@ -2630,6 +2736,7 @@
 
             if (elements.panel.hasAttribute('hidden')) {
                 elements.panel.removeAttribute('hidden');
+                updateLauncherIndicators();
                 requestDiscovery();
             } else {
                 closePanel();
@@ -3199,6 +3306,11 @@
     // ============================================================
 
     function renderModuleList({ refreshFocusedSettings = true } = {}) {
+        // Above the guard on purpose: the gear is eager and the panel is not,
+        // so every caller that changes catalogue or registration state has to
+        // reach the gear's count even on a page where nothing is ever opened.
+        updateLauncherIndicators();
+
         if (!elements) {
             return;
         }
@@ -4800,6 +4912,29 @@
                 border-radius: 50%;
                 background: var(--lectio-theme-danger, #b42318);
                 border: 2px solid #ffffff;
+            }
+
+            /* The opposite corner from the problem mark above, so a page with
+               both shows both. Absolute and pointer-events: none, so it neither
+               resizes the 44px gear nor takes a click away from it. Text and
+               surface are the one pair of theme colours guaranteed to contrast
+               (ADR-0006), used the other way round so the count reads as a
+               quiet chip rather than a second alert. */
+            #lectio-manager-toggle[data-update-count]::before {
+                content: attr(data-update-count);
+                position: absolute;
+                bottom: 3px;
+                right: 3px;
+                min-width: 11px;
+                height: 11px;
+                padding: 0 3px;
+                border-radius: 9px;
+                border: 2px solid #ffffff;
+                background: var(--lectio-theme-text, #10201e);
+                color: var(--lectio-theme-surface, #ffffff);
+                font: 600 10px/11px Roboto, Arial, sans-serif;
+                text-align: center;
+                pointer-events: none;
             }
 
             #lectio-manager-toggle:hover {

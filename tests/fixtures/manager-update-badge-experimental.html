@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio Manager update-badge fixture (Experimental)</title>
+</head>
+<body>
+    <script>
+        // Two things the plain fixture cannot show: the count follows the
+        // effective catalogue, so on Experimental it compares against the
+        // overlay entry that replaced the stable one by id; and the Manager's
+        // own self-update notice is counted too, because it is invisible for
+        // exactly the same reason the module update lines are.
+        const stable = {
+            schemaVersion: 1,
+            generatedAt: '2026-09-20T00:00:00.000Z',
+            manager: {
+                version: '9.9.9',
+                installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/manager/Lectio-Manager.user.js'
+            },
+            modules: [
+                {
+                    id: 'overlaid',
+                    name: 'Overlaid',
+                    description: 'Current on Stable, behind on Experimental.',
+                    category: 'Interface',
+                    audience: ['student'],
+                    status: 'stable',
+                    version: '1.5.0',
+                    installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Overlaid.user.js'
+                }
+            ]
+        };
+
+        const unstable = {
+            schemaVersion: 1,
+            generatedAt: '2026-09-20T00:00:00.000Z',
+            modules: [
+                {
+                    id: 'overlaid',
+                    name: 'Overlaid',
+                    description: 'The Experimental copy, ahead of Stable.',
+                    category: 'Interface',
+                    audience: ['student'],
+                    status: 'unstable',
+                    version: '2.0.0',
+                    installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Overlaid.user.js'
+                }
+            ]
+        };
+
+        // Installed at the Stable number. On Stable that is current and only
+        // the Manager's own update counts; on Experimental the overlay replaces
+        // the entry and it is an update too.
+        const storage = new Map([
+            ['lectioManager.catalogue.v1', JSON.stringify(stable)],
+            ['lectioManager.lastRefresh.v1', Date.now()],
+            ['lectioManager.catalogue.unstable.v1', JSON.stringify(unstable)],
+            ['lectioManager.lastRefresh.unstable.v1', Date.now()],
+            ['lectioManager.releaseChannel.v1', 'unstable'],
+            ['lectioManager.language.v1', 'da'],
+            ['lectioManager.updateTipDismissed.v1', true],
+            ['lectioManager.installed.v1', JSON.stringify({
+                overlaid: { name: 'Overlaid', version: '1.5.0', lastSeenAt: Date.now() - 60000 }
+            })]
+        ]);
+
+        window.GM_getValue = (key, fallback) => storage.has(key) ? storage.get(key) : fallback;
+        window.GM_setValue = (key, value) => storage.set(key, value);
+        let networkCalls = 0;
+        window.GM_xmlhttpRequest = () => { networkCalls += 1; };
+
+        window.pageErrors = [];
+        window.addEventListener('error', (event) => window.pageErrors.push(String(event.message)));
+    </script>
+    <script src="../../manager/Lectio-Manager.user.js"></script>
+    <script>
+        function assert(condition, message) {
+            if (!condition) throw new Error(message);
+        }
+
+        window.addEventListener('load', () => {
+            try {
+                const gear = document.querySelector('#lectio-manager-toggle');
+                const label = () => gear.getAttribute('aria-label');
+
+                // The overlay's 2.0.0 and the Manager's own 9.9.9, with the
+                // panel never built and nothing fetched.
+                assert(!document.querySelector('#lectio-manager-panel'),
+                    'The panel was built without a gear click');
+                assert(gear.getAttribute('data-update-count') === '2',
+                    `The Experimental count is wrong: ${gear.getAttribute('data-update-count')}`);
+
+                // ADR-0013: the name is in the language the Manager is set to,
+                // from the same table as everything else.
+                assert(label() === 'Lectio Tools — 2 opdateringer tilgængelige',
+                    `The Danish name for the badge is wrong: ${label()}`);
+                assert(gear.title === label(), 'The tooltip and the accessible name disagree');
+
+                // Opening it lists both, and clears the gear.
+                gear.click();
+                const notice = document.querySelector('.lectio-manager-self-update');
+                assert(notice && !notice.hidden, 'The Manager self-update the badge counted is not shown');
+                assert(document.querySelectorAll('.lectio-manager-status-update').length === 1,
+                    'The overlaid module the badge counted is not shown as an update');
+                assert(gear.getAttribute('data-update-count') === null,
+                    'The badge survived the panel being opened');
+                assert(label() === 'Lectio Tools', `The gear's name kept a stale count: ${label()}`);
+
+                assert(networkCalls === 0, `The badge caused ${networkCalls} network requests`);
+                assert(!document.querySelector('[data-dock-key]'), 'The update badge put something in the dock');
+                assert(window.pageErrors.length === 0,
+                    `The update badge threw: ${window.pageErrors.join(' | ')}`);
+
+                document.documentElement.dataset.testResult = 'pass';
+            } catch (error) {
+                document.documentElement.dataset.testResult = `fail: ${error.message}`;
+            }
+        });
+    </script>
+</body>
+</html>
