@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>Unread Message Notifications background-fetch safety fixture</title>
+    <script>
+        /* A Forside that never answers, which is what a captive portal or a
+           wedged Lectio looks like from the browser. Nothing here resolves on
+           its own: the only way a request settles is the module aborting it,
+           so a module without the safety net simply hangs and the assertions
+           below time out. */
+        window.fetchLog = [];
+        window.maxConcurrentFetches = 0;
+
+        let concurrentFetches = 0;
+
+        window.fetch = (url, init) => {
+            const record = {
+                url: String(url),
+                credentials: init && init.credentials,
+                hasSignal: Boolean(init && init.signal),
+                startedAt: Date.now(),
+                aborted: false,
+                abortedAfterMs: -1
+            };
+
+            window.fetchLog.push(record);
+
+            concurrentFetches += 1;
+            window.maxConcurrentFetches = Math.max(window.maxConcurrentFetches, concurrentFetches);
+
+            return new Promise((_, reject) => {
+                const signal = init && init.signal;
+
+                if (!signal) return;
+
+                signal.addEventListener('abort', () => {
+                    record.aborted = true;
+                    record.abortedAfterMs = Date.now() - record.startedAt;
+                    concurrentFetches -= 1;
+                    reject(new DOMException('The user aborted a request.', 'AbortError'));
+                });
+            });
+        };
+
+        /* Four unread, cached 599.5 seconds ago. Two things follow, both
+           deliberate: the module keeps the cache at init (it discards at ten
+           minutes) so the badge starts out reading 4, and half a second later
+           the count is old enough that returning to the tab asks for a
+           refresh - which is how this fixture drives the poll without waiting
+           out a ten-minute interval. */
+        window.SEEDED_CACHE = JSON.stringify({
+            checkedAt: Date.now() - 599500,
+            unreadCount: 4,
+            messages: []
+        });
+
+        localStorage.clear();
+        localStorage.setItem('lectioUnreadMessages.cache.v4.223', window.SEEDED_CACHE);
+    </script>
+</head>
+<body>
+    <div id="masterContent">
+        <div id="topnav">
+            <a id="messages-link" href="/lectio/223/beskeder2.aspx">Beskeder</a>
+        </div>
+    </div>
+
+    <script src="/modules-unstable/Lectio-Unread-Message-Notifications.user.js"></script>
+
+    <script>
+        const CACHE_KEY = 'lectioUnreadMessages.cache.v4.223';
+
+        const failures = [];
+        const assert = (condition, message) => {
+            if (!condition) failures.push(message);
+        };
+
+        const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+        const waitFor = async (predicate, label) => {
+            for (let attempt = 0; attempt < 260; attempt += 1) {
+                if (predicate()) return true;
+                await wait(50);
+            }
+            failures.push('timed out waiting for ' + label);
+            return false;
+        };
+
+        const badge = () => document.querySelector('.lectio-unread-badge');
+        const badgeCount = () => {
+            const element = document.querySelector('.lectio-unread-badge .lectio-unread-count');
+            return element ? element.textContent : '(no badge)';
+        };
+        const badgeHidden = () => {
+            const element = badge();
+            return element ? element.hidden : true;
+        };
+        const storedCache = () => localStorage.getItem(CACHE_KEY);
+
+        /* The rule this whole issue turns on: no failure path may ever render
+           a zero or take the badge away. Sampling at the end is not enough - a
+           badge that blinked to 0 and back would pass that. This watches every
+           mutation of the badge for the whole run instead. */
+        const wrongBadgeSightings = [];
+
+        const watchBadge = () => {
+            const element = badge();
+            if (!element) return;
+
+            new MutationObserver(() => {
+                if (element.hidden || badgeCount() !== '4') {
+                    wrongBadgeSightings.push('hidden=' + element.hidden + ' count=' + badgeCount());
+                }
+            }).observe(element, {
+                attributes: true,
+                childList: true,
+                characterData: true,
+                subtree: true
+            });
+        };
+
+        const checkNothingMovedAfter = (what) => {
+            assert(badgeCount() === '4', what + ' changed the badge to ' + badgeCount());
+            assert(badgeHidden() === false, what + ' hid the badge');
+            assert(storedCache() === window.SEEDED_CACHE, what + ' rewrote the stored count');
+        };
+
+        /* Returning to the tab with a stale count is the module's own refresh
+           trigger, and the cheapest way to ask it for another check. */
+        const nudge = () => document.dispatchEvent(new Event('visibilitychange'));
+
+        (async () => {
+            const log = window.fetchLog;
+
+            /* --- The badge starts from the cache --------------------------- */
+
+            await waitFor(() => badge(), 'the badge to be built from the cached count');
+            watchBadge();
+
+            assert(badgeCount() === '4', 'the badge should start at the cached 4, was ' + badgeCount());
+            assert(badgeHidden() === false, 'the badge started hidden');
+
+            /* --- The first check is a real Forside request ----------------- */
+
+            await waitFor(() => log.length >= 1, 'the first Forside check to start');
+
+            if (log.length >= 1) {
+                assert(
+                    /\/forside\.aspx$/i.test(new URL(log[0].url, location.origin).pathname),
+                    'the first request was not for Forside: ' + log[0].url
+                );
+                assert(log[0].hasSignal, 'the Forside request carried no abort signal');
+                assert(
+                    log[0].credentials === 'include',
+                    'the Forside request stopped sending the Lectio session cookie'
+                );
+            }
+
+            /* --- Never stack ----------------------------------------------- */
+
+            /* Five refresh requests while one is still in flight. None may
+               start a second request. This is not vacuous: the same nudge
+               starts a real request twice further down, once the previous one
+               has finished. */
+            for (let attempt = 0; attempt < 5; attempt += 1) {
+                nudge();
+                await wait(20);
+            }
+
+            assert(
+                log.length === 1,
+                'a request started while another was in flight, got ' + log.length
+            );
+            assert(
+                log.length >= 1 && !log[0].aborted,
+                'the first request ended before the never-stack nudges were done'
+            );
+
+            /* --- Hard timeout ---------------------------------------------- */
+
+            await waitFor(() => log[0] && log[0].aborted, 'the hung Forside request to be timed out');
+
+            if (log[0]) {
+                assert(
+                    log[0].abortedAfterMs >= 4000 && log[0].abortedAfterMs <= 12000,
+                    'the hung request should have been timed out near eight seconds, was ' +
+                        log[0].abortedAfterMs + 'ms'
+                );
+            }
+
+            await wait(100);
+            checkNothingMovedAfter('a timeout');
+
+            /* --- pagehide aborts what is in flight -------------------------- */
+
+            nudge();
+            await waitFor(() => log.length >= 2, 'a second check to start once the first had failed');
+
+            await wait(50);
+            window.dispatchEvent(new Event('pagehide'));
+
+            await waitFor(() => log[1] && log[1].aborted, 'pagehide to abort the in-flight request');
+
+            if (log[1]) {
+                assert(
+                    log[1].abortedAfterMs <= 3000,
+                    'pagehide should have aborted the in-flight request immediately, took ' +
+                        log[1].abortedAfterMs + 'ms'
+                );
+            }
+
+            await wait(100);
+            checkNothingMovedAfter('a pagehide abort');
+
+            /* --- A page restored from the bfcache goes back to work ---------- */
+
+            let restored;
+
+            try {
+                restored = new PageTransitionEvent('pageshow', { persisted: true });
+            } catch (_) {
+                restored = new Event('pageshow');
+                Object.defineProperty(restored, 'persisted', { value: true });
+            }
+
+            window.dispatchEvent(restored);
+
+            nudge();
+            await waitFor(() => log.length >= 3, 'a third check after the page came back');
+            await waitFor(() => log[2] && log[2].aborted, 'the third hung request to be timed out');
+
+            /* --- A backed-off tick is skipped, not run ---------------------- */
+
+            /* Three consecutive failures now, so the next minute of checks is
+               meant to be skipped outright. */
+            const beforeBackoff = log.length;
+
+            for (let attempt = 0; attempt < 5; attempt += 1) {
+                nudge();
+                await wait(20);
+            }
+
+            assert(
+                log.length === beforeBackoff,
+                'the module kept fetching after three consecutive failures (' +
+                    beforeBackoff + ' -> ' + log.length + ')'
+            );
+            checkNothingMovedAfter('a backed-off skip');
+
+            /* --- Over the whole run ------------------------------------------ */
+
+            assert(
+                window.maxConcurrentFetches === 1,
+                'requests overlapped (peak ' + window.maxConcurrentFetches + ' at once)'
+            );
+            assert(
+                log.length === 3,
+                'expected exactly three Forside requests, got ' + log.length
+            );
+            assert(
+                wrongBadgeSightings.length === 0,
+                'the badge stopped reading 4 during the run: ' + wrongBadgeSightings.join(' ; ')
+            );
+            assert(
+                storedCache() === window.SEEDED_CACHE,
+                'the stored count was rewritten at some point during the run'
+            );
+
+            const output = document.createElement('pre');
+            output.id = 'test-result';
+            output.textContent = failures.length ? failures.join(' | ') : 'pass';
+            document.body.dataset.testResult = failures.length ? 'fail' : 'pass';
+            document.body.appendChild(output);
+        })();
+    </script>
+</body>
+</html>

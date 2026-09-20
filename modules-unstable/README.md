@@ -31,5 +31,8 @@ Stable `1.9.3` with the translation cache written on a flush instead of on every
 ### `Lectio-Chairs-Up.user.js`
 Stable `1.1.1` with a safety net around its background fetches (issue #36): an eight-second `AbortController` timeout on every request, an abort of anything in flight on `pagehide`, a jittered first request, a backoff that doubles from two seconds to a one-minute ceiling after three consecutive failures and clears on the first success, and one request at a time instead of a `Promise.all()` burst, so a request never starts while another is in flight. The ~30-day room-id cache and its expiry are untouched.
 
+### `Lectio-Unread-Message-Notifications.user.js`
+Stable `0.6.1` with a safety net around its Forside poll (issue #37): an eight-second `AbortController` timeout on every background request, an abort of anything in flight on `pagehide`, a random offset of up to 1.5s on the first check of a page view, and a backoff that doubles from one minute to a fifteen-minute ceiling after three consecutive failures and clears on the first success. A tick still never stacks on a running refresh — and now cannot be wedged by a request that never answers. The module's rule that a failure is never "zero unread" covers all three new failure paths: a timeout, an abort and a backed-off skip each leave the badge and the stored count exactly as they were.
+
 ### `Lectio-Change-Radar.user.js`
 An experimental timetable watcher — a compact themed radar HUD with urgency states, unseen-change tracking, configurable polling and a rotating local change log. Unstable-only so far; it has never had a stable release, so promoting it would be its first.
