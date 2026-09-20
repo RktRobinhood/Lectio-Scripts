@@ -25,12 +25,30 @@ body:
     id: script
     attributes:
       label: Script
+      description: Pick the name as it appears on the module's card in the Lectio Manager.
       options:
         - Chairs Up
         - English Mode
         - Unread Message Notifications
+        - Lectio Theming
+        - Subject Colours
+        - Schedule Summary
+        - Lectio Change Radar
+        - Lectio Manager
         - More than one script
         - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: channel
+    attributes:
+      label: Release channel
+      description: The Manager's settings show this as "Release channel". Pick "Not sure" if you have never changed it.
+      options:
+        - Stable
+        - Experimental
+        - Not sure
     validations:
       required: true
 
@@ -38,7 +56,8 @@ body:
     id: script-version
     attributes:
       label: Script version
-      placeholder: "Value from the @version line"
+      description: Open the Lectio Manager — each installed module's version is shown on its card. If you installed without the Manager, use the @version line near the top of the userscript instead.
+      placeholder: "Example: 0.6.1"
     validations:
       required: true
 
@@ -69,7 +88,7 @@ body:
     id: page
     attributes:
       label: Lectio page / area
-      placeholder: "Example: timetable / messages / room schedule"
+      placeholder: "Example: front page / timetable / room schedule"
     validations:
       required: true
 
@@ -80,7 +99,7 @@ body:
       description: Describe what differs at your school or where the script stops matching your Lectio setup.
       placeholder: |
         Example:
-        The script expects room links in ..., but our timetable shows ...
+        The unread count is never picked up, because our front page labels the section ...
     validations:
       required: true
 

@@ -13,10 +13,16 @@ body:
     id: script
     attributes:
       label: Which script does this relate to?
+      description: Pick the name as it appears on the module's card in the Lectio Manager.
       options:
         - Chairs Up
         - English Mode
         - Unread Message Notifications
+        - Lectio Theming
+        - Subject Colours
+        - Schedule Summary
+        - Lectio Change Radar
+        - Lectio Manager
         - All / shared infrastructure
         - New script idea
         - Other
@@ -28,7 +34,7 @@ body:
     attributes:
       label: What problem are you trying to solve?
       description: Start with the real Lectio annoyance or workflow, not just the code change.
-      placeholder: "Example: I keep missing ... / At our school ... / I would like ..."
+      placeholder: "Example: I never notice when a lesson moves / At our school ... / I would like ..."
     validations:
       required: true
 
@@ -37,6 +43,7 @@ body:
     attributes:
       label: What should the script do?
       description: Describe the behaviour you would like.
+      placeholder: "Example: let me pick which activities count as a class before they are coloured."
     validations:
       required: true
 
