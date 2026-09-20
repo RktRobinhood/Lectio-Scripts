@@ -35,20 +35,20 @@ They run locally in your browser while you use Lectio. Install only the modules 
 - shows a **catalogue** of modules that are still available to install, fetched from this repository (`catalogue/modules.json`),
 - lets you **install** a module with one click, using Tampermonkey's own install screen,
 - remembers every module it has ever seen as **installed**, and shows whether that module is also running on the page you are on,
-- caches the catalogue locally and refreshes it automatically at most once every 24 hours, with a manual refresh button whenever you want the latest list,
+- caches the catalogue locally and refreshes it automatically at most once every 24 hours — five minutes for the Experimental channel's overlay — with a manual refresh button whenever you want the latest list,
 - opens on a compact **Installed** tab, with a counted **Available** tab for discovering modules you have not installed yet; its audience and category filters narrow only that available set, and an installed module never appears in both,
 - sorts either tab by Category or Name immediately, without interrupting navigation,
 - explains a setting when you click the small **ⓘ** next to it, instead of always showing that text, so a module's settings panel doesn't read as more overwhelming than it needs to; and keeps a settings group most people will never need — such as Lectio Theming's **Custom palette** — collapsed behind a click, so the built-in themes stay what you see first,
 - owns a compact **shared dock** for modules that need an always-available control, including consistent icons, badges, flyouts, adaptive sizing, and saved drag ordering; it sits on the left edge by default, can be moved to any screen edge, and disappears completely when no module uses it. The dock is frosted glass rather than a white panel, its icons come from [Lucide](https://lucide.dev) and follow the active theme's colour, and hovering one magnifies it and its neighbours the way a desktop dock does,
 - tells you when **the Manager itself** is out of date. Every module gets an "Update available" row because the Manager compares what the module reports against the catalogue, but nothing does that for the Manager — so the catalogue carries the Manager's own version too, and a notice appears at the top of the panel when a newer one exists. Without it, the Manager relies entirely on Tampermonkey's update check, which is off by default,
-- has one **wrench button** in the header that opens Tampermonkey's own dashboard directly, for disabling, updating, or removing any script — since that dashboard already lists everything installed, there's no need for a separate button per module,
+- has a **?** button in the header that says where disabling, updating, and removing a script actually happens — the Tampermonkey icon in your browser toolbar, then **Dashboard**. That dashboard already lists everything installed, so there is no separate button per module,
 - has a **Report a bug or idea** link at the bottom of the panel, straight to this repository's GitHub Issue templates.
 
 The Manager itself contains **no feature logic**. Translation, message polling, room logic, and every other feature live entirely inside their own independent module. Installing only the Manager and one module means only that module's code ever runs — nothing else is downloaded or executed.
 
 Look for a small teal gear button in the bottom-right corner of any Lectio page after installing it.
 
-The settings button inside the Manager header opens Manager preferences. **Release channel** is a single dropdown for the Stable/Unstable choice, with an **ⓘ** beside it that explains what a channel is; the extra warning appears only while Unstable is selected. Every module change lands on Unstable first and reaches Stable only when it has been used and promoted deliberately, so Unstable is where new work actually appears — and where it can be rough. The Manager itself is the exception: it ships to Stable directly, because it is what the channel switch lives in. Under **Dock**, **Screen edge** puts the dock on the left (the default), right, top, or bottom of the window, and **Position on edge** slides it along that edge — top/middle/bottom for a left or right dock, left/centre/right for a top or bottom one. The same section sets icon size, whether icons shrink to fit the screen, auto-hide, and a reset for the saved order. **Dock background** and **Icon background** are separate opacity sliders for the panel and for the plates behind the icons, starting at 30% and 60% so the page reads through both; the icons themselves stay fully opaque at every setting. Each slider moves everything that paints inside its shape - fill, blur, saturation, inner highlight and drop shadow - so 0% leaves nothing but the edge line and 100% is the glass as it was before either was adjustable. Dock controls can also be reordered directly by dragging them or by focusing one and pressing **Ctrl** with an arrow key.
+The settings button inside the Manager header opens Manager preferences. **Language** switches the Manager itself between English and Dansk and tells any module that supports it which language you prefer; Lectio is Danish, so a module on its own stays Danish until you choose otherwise. **Release channel** is a single dropdown for the Stable/Experimental choice, with an **ⓘ** beside it that explains what a channel is; the extra warning appears only while Experimental is selected, and switching channel immediately asks the channel you moved to what it offers rather than waiting for the next scheduled refresh. Every module change lands on Experimental first and reaches Stable only when it has been used and promoted deliberately, so Experimental is where new work actually appears — and where it can be rough. The Manager itself is the exception: it ships to Stable directly, because it is what the channel switch lives in. Under **Dock**, **Screen edge** puts the dock on the left (the default), right, top, or bottom of the window, and **Position on edge** slides it along that edge — top/middle/bottom for a left or right dock, left/centre/right for a top or bottom one. The same section sets icon size, whether icons shrink to fit the screen, auto-hide, and a reset for the saved order. **Dock background** and **Icon background** are separate opacity sliders for the panel and for the plates behind the icons, starting at 30% and 60% so the page reads through both; the icons themselves stay fully opaque at every setting. Each slider moves everything that paints inside its shape - fill, blur, saturation, inner highlight and drop shadow - so 0% leaves nothing but the edge line and 100% is the glass as it was before either was adjustable. Dock controls can also be reordered directly by dragging them or by focusing one and pressing **Ctrl** with an arrow key.
 
 > [!NOTE]
 > A module tells the Manager it exists by replying to a handshake, which it can only do on pages its own `@match` covers — Schedule Summary only runs on the schedule page, for example. The Manager therefore **remembers** each module it has seen and keeps counting it as installed everywhere, marking it *"Not active on this page"* where it isn't running. Settings stay hidden there, because a module that isn't running cannot receive them.
@@ -56,15 +56,9 @@ The settings button inside the Manager header opens Manager preferences. **Relea
 > The trade-off is that the Manager cannot see a module you remove in Tampermonkey; it has no API to check. Use **Remove** on the module's card to forget it.
 
 > [!NOTE]
-> Tampermonkey has no API for a userscript to uninstall or disable *another* script, so the Manager can't do that directly — that stays Tampermonkey's job by design. The header's wrench button is a shortcut to Tampermonkey's dashboard, not a bypass, and its reliability depends on your browser:
+> Tampermonkey has no API for a userscript to uninstall or disable *another* script, so the Manager can't do that directly — that stays Tampermonkey's job by design. Open the Tampermonkey icon in your browser toolbar and choose **Dashboard**; on Safari, Tampermonkey's settings live inside Safari's own Settings → Extensions panel rather than a normal browser tab, so open them from there. The Manager's **?** button says the same thing inside the panel, at the moment you need it.
 >
-> | Browser | What happens |
-> |---|---|
-> | Chrome, Edge, Brave, Opera, Vivaldi (Chromium-based) | Opens directly, using that browser's own fixed Tampermonkey extension ID. |
-> | Firefox | Assigns a random per-profile extension ID that can never be hardcoded, so it asks **once** for your own dashboard link (open your Tampermonkey icon → Dashboard, copy the address bar URL, paste it in) and remembers it after that. |
-> | Safari | Tampermonkey's settings live inside Safari's own Settings → Extensions panel rather than a normal browser tab, so there's usually no link to paste at all — open it from there instead. |
->
-> Use the **Set dashboard link** button at the bottom of the panel to add, fix, or clear a saved link at any time (useful if a Chromium guess is wrong, or after Tampermonkey gets reinstalled and Firefox assigns it a new ID). The wrench icon is a real link (not a script-driven popup), so it always reflects whatever URL was last saved or guessed — click it directly rather than expecting anything to happen automatically right after saving a link.
+> Earlier versions had a wrench button that tried to open that dashboard for you. It was removed because it could not be made to work everywhere: Firefox gives Tampermonkey a random per-profile extension ID that can never be hardcoded, and Safari has no dashboard tab to link to at all. Two clicks that always work beat one that sometimes doesn't.
 
 ---
 
@@ -75,11 +69,22 @@ All modules are designed for Lectio and are intended to work across Lectio insta
 | Module | What it does | Best for |
 |---|---|---|
 | **[English Mode](modules/Lectio-English-Mode.user.js)** | Adds a **DA / EN** switch and translates the Lectio interface into context-aware English. | Students and staff |
-| **[Chairs Up](modules/Lectio-Chairs-Up.user.js)** | Marks a lesson when it is the **last booking of the day in that room**. | Teachers |
+| **[Chairs Up](modules/Lectio-Chairs-Up.user.js)** | Marks a lesson when it is the **last booking of the day in that room**, as a chair badge, an outline, or a quiet dot. | Teachers |
 | **[Schedule Summary](modules/Lectio-Schedule-Summary.user.js)** | Collapses the schedule's tall **week-information row** into a compact strip; hover to preview it or click to expand it. | Students and staff |
-| **[Unread Message Notifications](modules/Lectio-Unread-Message-Notifications.user.js)** | Shows an unread-message badge beside **Beskeder / Messages**. Currently limited to Lectio school `223`. | Students and staff at that school |
+| **[Unread Message Notifications](modules/Lectio-Unread-Message-Notifications.user.js)** | Shows an unread-message badge beside **Beskeder / Messages**, with an optional preview of what is waiting when you hover it. Works at any Lectio school, reading the school id from the page address. | Students and staff |
 | **[Subject Colours](modules/Lectio-Subject-Colours.user.js)** | Works out which classes are really yours from your own timetable and gives each one its own colour, keeping one-off activities in a separate muted spectrum. | Students and staff |
 | **[Lectio Theming](modules/Lectio-Theming.user.js)** | Applies a soft, translucent glass shell with **46 built-in colour schemes** (Catppuccin, Nord, Dracula, Cyberpunk, plus sports, social-app, IB and Danish-landscape palettes), each with its own distinct background photo, or build your own: pick the key colours yourself, derive them from an **image or website URL**, and use **your own picture** as the background. | Students and staff |
+
+### On the Experimental channel
+
+One more module exists but has never had a Stable release, so it appears in the Manager only once **Release channel** is set to **Experimental** in Manager preferences. It lives in [`modules-unstable/`](modules-unstable/) rather than `modules/`.
+
+| Module | What it does | Best for |
+|---|---|---|
+| **[Change Radar](modules-unstable/Lectio-Change-Radar.user.js)** | Watches your own Lectio for the changes you choose to track and keeps a compact radar with a rotating log of what changed — cancellations, moves, rooms, teachers and homework in the timetable, plus optional assignment, absence and document watching, and a warning when an assignment deadline comes inside your chosen lookahead. | Students and staff |
+
+> [!WARNING]
+> Experimental means what it says. Change Radar is still being built, so it can change or break between versions. Its timetable watching is the part that has had real use; the optional assignment, absence and document watching has not yet been verified against live Lectio pages, and the way it fails is to report nothing rather than to report an error — so if one of those stays silent when you know something changed, that is worth an Issue.
 
 You can install one, several, or all of them, either through the Manager or by copying a file directly (see below).
 
@@ -103,9 +108,11 @@ For Lectio Theming, open the **Theme** dropdown and hover any option to preview 
 
 The **Background** section is independent of all of that. **Choose picture** puts a picture from your device behind Lectio whichever colour theme is selected; it is scaled down, stored in this browser only, and never uploaded. **Background tint** controls how much of the theme's page colour is laid over it — raise it if text is hard to read — and **Remove background picture** hands the selected theme its own background back. Large pictures are re-encoded smaller automatically, and if there is no room left in browser storage the module says so and keeps the background you already had.
 
-Unread Message Notifications includes a **Bubble size** setting from 75% to 175%. Its count text automatically switches between light and dark text as themes change so the badge remains readable.
+Unread Message Notifications sets how often it looks for new messages under **Check for messages** — every 2 to 30 minutes, while Lectio is visible — and **Message preview** shows the recent unread messages when you hover the badge. **Bubble size** scales the badge from 75% to 175%, and its count text automatically switches between light and dark text as themes change so the badge remains readable.
 
-A hold that Lectio uses to mean everyone — **Alle Lærere**, **Alle 1i-elever** and the like — is never treated as one of your classes, however reliably it recurs, and neither is a block that lists more than three holds at once. Subject Colours has nothing to set up: it reads your own timetable, works out which holds keep coming back week after week, and gives each of those its own colour. Everything else on your schedule — assemblies, meetings, trips, a lesson you covered once — is deliberately kept out of that colour space and marked instead in a muted grey-toned spectrum with a broken edge line, so a glance separates "one of my classes" from "something else today" without having to read anything. Under **Colours** you can switch between filling a lesson block, marking only its leading edge, or both; set how strong the colours are; and turn the one-off marking off entirely. Under **Detection**, **What counts as a class** decides how much evidence a hold needs before it earns a colour, **Weeks to learn from** sets how much of your timetable is read in the background (0 means it only learns from pages you open yourself), and **Read my timetable again** starts a fresh scan. Every class it has found is listed under **Your classes** with a colour picker, so you can overrule any colour you don't like; **Reset chosen colours** hands them all back. The colours themselves are derived from whatever theme is active, so installing Lectio Theming or switching its scheme re-derives them to suit — a dark scheme gets deep colours with light text, a light one gets soft colours with dark text, and text is contrast-checked against its own block either way. If you would rather a colour you picked stayed exactly as you picked it, **Keep my colours exactly** stops the theme having any say in it: the colour and the edge line and the text that goes with it are all worked out from that one colour and stay put whichever scheme is running. It applies only to classes you have picked a colour for — everything else carries on following the theme. Text is still contrast-checked, because a colour nobody can read on is not what anyone is asking for.
+Chairs Up chooses how strongly the last lesson of the day stands out under **Timetable marker** — a chair badge, an outline, or a quiet dot — and **Lesson-page notice** turns the large notice on activity pages on or off. Schedule Summary sets **Strip size** (slim, compact, or comfortable), whether hovering the strip previews the full week information, and whether it starts collapsed or expanded.
+
+A hold that Lectio uses to mean everyone — **Alle Lærere**, **Alle 1i-elever** and the like — is never treated as one of your classes, however reliably it recurs, and neither is a block that lists more than three holds at once. Subject Colours has nothing to set up: it reads your own timetable, works out which holds keep coming back week after week, and gives each of those its own colour. Everything else on your schedule — assemblies, meetings, trips, a lesson you covered once — is deliberately kept out of that colour space and marked instead in a muted grey-toned spectrum with a broken edge line, so a glance separates "one of my classes" from "something else today" without having to read anything. Under **Colours** you can switch between filling a lesson block, marking only its leading edge, or both; set how strong the colours are; and turn the one-off marking off entirely. **Show colour key** (off by default) adds a compact key listing the classes currently on screen — hover an entry to highlight its blocks, or click its swatch to recolour that class there and then — and **Colour key location** decides whether the key sits in the Manager's dock or floats on the page. Under **Accessibility**, **Mark each class with a shape too** adds a corner mark to every class block on top of its colour, so classes can still be told apart on a washed-out projector, in bright sunlight, or without colour vision at all; **Shape marker size** scales that mark, and one-off activities keep their dashed edge instead. Under **Detection**, **What counts as a class** decides how much evidence a hold needs before it earns a colour, **Weeks to learn from** sets how much of your timetable is read in the background (0 means it only learns from pages you open yourself), and **Read my timetable again** starts a fresh scan. Every class it has found is listed under **Your classes** with a colour picker, so you can overrule any colour you don't like; **Reset chosen colours** hands them all back. The colours themselves are derived from whatever theme is active, so installing Lectio Theming or switching its scheme re-derives them to suit — a dark scheme gets deep colours with light text, a light one gets soft colours with dark text, and text is contrast-checked against its own block either way. If you would rather a colour you picked stayed exactly as you picked it, **Keep my colours exactly** stops the theme having any say in it: the colour and the edge line and the text that goes with it are all worked out from that one colour and stay put whichever scheme is running. It applies only to classes you have picked a colour for — everything else carries on following the theme. Text is still contrast-checked, because a colour nobody can read on is not what anyone is asking for.
 
 > [!NOTE]
 > A class needs to be seen in more than one week before it earns a colour, so a freshly installed Subject Colours has some learning to do. It does most of that in the background within a few seconds of opening your schedule; the class list in Settings is built when the module registers, so reopen **Settings** after a scan to see newly found classes.
@@ -176,7 +183,12 @@ Current raw files:
 - [Chairs Up — Raw](https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Chairs-Up.user.js)
 - [Schedule Summary — Raw](https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Schedule-Summary.user.js)
 - [Unread Message Notifications — Raw](https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Unread-Message-Notifications.user.js)
+- [Subject Colours — Raw](https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Subject-Colours.user.js)
 - [Lectio Theming — Raw](https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Theming.user.js)
+
+On the Experimental channel:
+
+- [Change Radar — Raw](https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Change-Radar.user.js)
 
 Installing this way (rather than copy-paste) lets Tampermonkey check that raw URL for updates automatically.
 
@@ -237,14 +249,14 @@ These are two separate, independent things:
 
 | What | How it updates |
 |---|---|
-| **The catalogue** (which modules exist, their description/version) | The Manager fetches `catalogue/modules.json` on its own, at most once every 24 hours, or immediately when you click its refresh button. |
+| **The catalogue** (which modules exist, their description/version) | The Manager fetches `catalogue/modules.json` on its own, at most once every 24 hours, or immediately when you click its refresh button. On the Experimental channel it also fetches `modules-unstable/modules.json` over the top of it, at most once every five minutes. |
 | **The Manager's own code** | Normal Tampermonkey update check against `manager/Lectio-Manager.user.js`. |
 | **A module's own code** | Normal Tampermonkey update check against that module's own file in `modules/`. |
 
 > [!TIP]
 > Every file in `manager/` and `modules/` includes an `@updateURL`/`@downloadURL` in its header, so Tampermonkey can check for updates **no matter how you installed it** — through the Manager, via GitHub Raw, or by copy-paste (as long as you copied the header too). This only works if Tampermonkey's own update checking is turned on: **Tampermonkey Dashboard → Settings → Update**, and confirm an interval is set (Tampermonkey checks in the background on that schedule; it does not update instantly the moment a new version is published here). The Manager shows a one-time dismissible reminder about this the first time you open its panel.
 >
-> There's no way around that manual step: Tampermonkey gives userscripts no API to read or change its own settings, and no reliable cross-browser way to deep-link straight to its Settings tab (only the general dashboard, which the **Manage** button already opens).
+> There's no way around that manual step: Tampermonkey gives userscripts no API to read or change its own settings, and no reliable cross-browser way to deep-link into its dashboard at all — which is why the Manager explains where the dashboard is instead of trying to open it for you.
 
 When the Catalogue lists a newer version than an installed module reports, the Manager marks that module **Update available** and shows an **Update** link. The link opens the module's approved GitHub Raw userscript URL, where Tampermonkey can show its normal update/reinstall confirmation page.
 
@@ -270,7 +282,8 @@ To remove it completely, delete it from the Dashboard, then click **Remove** on 
 | **A module shows "Not active on this page"** | Expected when that module doesn't run everywhere — Schedule Summary only runs on the schedule page. It still counts as installed. Open a page it covers to change its settings. |
 | **A module I removed still shows as installed** | The Manager can't see removals in Tampermonkey. Click **Remove** on its card to forget it. |
 | **A module never appears as installed** | Confirm it is **enabled** (not just installed) in the Tampermonkey Dashboard, then load a Lectio page that module actually runs on. |
-| **The wrench (Tampermonkey) button doesn't open anything** | On Chromium browsers it should work automatically. On Firefox it prompts you once for your own dashboard link (Tampermonkey icon → Dashboard → copy the address bar URL). On Safari, open it from Safari's own Settings → Extensions instead. Use **Set dashboard link** at the bottom of the panel to add, fix, or clear a saved link manually. |
+| **I can't find the Tampermonkey dashboard** | The Manager no longer links to it, because no link works on every browser. Click the Tampermonkey icon in your browser toolbar and choose **Dashboard**; on Safari, open Safari's own Settings → Extensions instead. The Manager's **?** button repeats this inside the panel. |
+| **A module is missing from the Manager's list** | Some modules are only on the Experimental channel. Open Manager preferences (the settings button in the header), set **Release channel** to **Experimental**, and look again. |
 | **GitHub Raw only shows JavaScript** | Copy the complete file and use **Create a new script...** instead. |
 | **English translation is incomplete** | Reload, switch **DA → EN**, and report repeatable untranslated text. |
 | **English Mode requests extra permissions** | It can use Tampermonkey storage and Google Translate fallback; review the permissions before installing. |
@@ -312,7 +325,7 @@ A report like this is actionable:
 
 ```text
 Module: Unread Message Notifications
-Version: 0.2.x
+Version: 0.6.1
 Browser: Firefox 154
 Tampermonkey: 5.x
 Page: Timetable
@@ -497,7 +510,7 @@ Before installing or modifying anything:
 
 ### Lectio Manager and the catalogue
 
-The Manager fetches `catalogue/modules.json` from this repository over HTTPS and reads it as **text data only** — names, descriptions, versions, and install links. It never executes catalogue content as code, and it only opens install links that point at this repository's own `raw.githubusercontent.com` files.
+The Manager fetches `catalogue/modules.json` from this repository over HTTPS — and, on the Experimental channel, `modules-unstable/modules.json` as well — and reads both as **text data only**: names, descriptions, versions, and install links. It never executes catalogue content as code, and it only opens install links that point at this repository's own `raw.githubusercontent.com` files.
 
 Detecting whether a module is running uses a small, namespaced browser event (`lectio-manager:discover` / `lectio-module:register`) rather than reading another script's private Tampermonkey storage.
 
@@ -526,6 +539,10 @@ A picture you choose with **Choose image** or **Choose picture**, by contrast, n
 
 Subject Colours learns from your own Lectio schedule pages, which it reads the same way your browser already does — a signed-in request to `www.lectio.dk` for your own timetable, a handful of weeks at a time, spaced out and capped. It contacts no other host, declares no `@connect` permission, and has no code path that sends anything anywhere. What it works out (your holds, how often each appears, and the colour assigned to each) is kept in this browser's storage for lectio.dk and nowhere else; clearing your site data for Lectio removes it, as does **Forget what was learned** in its settings. Set **Weeks to learn from** to 0 if you would rather it made no background requests at all and learned only from pages you open yourself.
 
+### Change Radar and background checks
+
+Change Radar reads your own Lectio pages the same way your browser already does — signed-in requests to `www.lectio.dk` for your own timetable, and for your assignment, absence or document pages if you have turned those on. It contacts no other host, declares no `@connect` permission, and runs with `@grant none`, so it has no way to send anything anywhere. **Check frequency** decides how often it looks while a Lectio tab is open, and each extra page it watches costs one more request per check, at most twice an hour. What it finds — a snapshot of the weeks it watches and the rotating change log — is kept in this browser's storage for lectio.dk and nowhere else; clearing your site data for Lectio removes it.
+
 ### GitHub Issues are public
 
 Assume anything attached to an Issue can be seen publicly. Redact screenshots and diagnostic output before posting.
@@ -539,7 +556,7 @@ Lectio-Scripts/
 ├── manager/
 │   └── Lectio-Manager.user.js       Discovery + install UI. No feature logic.
 ├── catalogue/
-│   └── modules.json                 Metadata only: what modules exist and where to install them.
+│   └── modules.json                 Stable channel. Metadata only: what modules exist and where to install them.
 ├── modules/
 │   ├── Lectio-English-Mode.user.js
 │   ├── Lectio-Chairs-Up.user.js
@@ -547,12 +564,20 @@ Lectio-Scripts/
 │   ├── Lectio-Subject-Colours.user.js
 │   ├── Lectio-Theming.user.js
 │   └── Lectio-Unread-Message-Notifications.user.js
+├── modules-unstable/                Experimental channel: the module files and a catalogue overlay.
+│   ├── Lectio-Change-Radar.user.js
+│   └── modules.json
+├── docs/                            Architecture decision records, the dock contract, audits.
+├── scripts/                         Version and icon checks (Node, no build step).
+├── tests/                           Browser tests for the Manager and every module.
 ├── assets/
 ├── .github/                         Issue templates
+├── AGENTS.md                        How changes are made here.
+├── CONTEXT.md                       What the words in this project mean.
 └── README.md
 ```
 
-Each module owns its own `@version` and update URL. Adding a new module means adding its file under `modules/` and adding a matching entry to `catalogue/modules.json` — the Manager's own code does not need to change.
+Each module owns its own `@version` and update URL. Adding a new module means adding its file and a matching catalogue entry — under `modules-unstable/` first, since every module change lands on the Experimental channel before it is promoted to Stable by hand. The Manager's own code does not need to change either way.
 
 ---
 
@@ -563,7 +588,8 @@ Each module owns its own `@version` and update URL. Adding a new module means ad
 | Repository | [RktRobinhood/Lectio-Scripts](https://github.com/RktRobinhood/Lectio-Scripts) |
 | Lectio Manager | [`manager/Lectio-Manager.user.js`](https://github.com/RktRobinhood/Lectio-Scripts/tree/main/manager) |
 | Modules | [`/modules`](https://github.com/RktRobinhood/Lectio-Scripts/tree/main/modules) |
-| Catalogue | [`catalogue/modules.json`](https://github.com/RktRobinhood/Lectio-Scripts/tree/main/catalogue) |
+| Catalogue (Stable) | [`catalogue/modules.json`](https://github.com/RktRobinhood/Lectio-Scripts/tree/main/catalogue) |
+| Experimental channel | [`/modules-unstable`](https://github.com/RktRobinhood/Lectio-Scripts/tree/main/modules-unstable) |
 | Report a problem or idea | [GitHub Issues](https://github.com/RktRobinhood/Lectio-Scripts/issues) |
 | Tampermonkey | [tampermonkey.net](https://www.tampermonkey.net/) |
 | Installing userscripts | [Tampermonkey FAQ](https://www.tampermonkey.net/faq.php?q=Q102) |
