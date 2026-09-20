@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Change Radar
 // @namespace    https://github.com/RktRobinhood/Lectio-Scripts
-// @version      0.6.0
+// @version      0.6.1
 // @description  Watches Lectio for the changes you choose to track - timetable, assignments, absence, documents - and keeps a compact recent-change HUD.
 // @author       RktRobinhood
 // @match        https://www.lectio.dk/lectio/*
@@ -20,11 +20,9 @@
     id: 'change-radar',
     aliases: ['schedule-change-radar', 'lectio-change-radar', 'change-log'],
     name: 'Lectio Change Radar',
-    version: '0.6.0',
+    version: '0.6.1',
     channel: 'unstable'
   });
-
-  const MANAGER_DISABLED_KEY = 'lectioManager.disabledModules.v1';
 
   const BASE_CONFIG = Object.freeze({
     minRefreshGapMs: 90 * 1000,
@@ -225,12 +223,10 @@
     window.addEventListener(eventName, handleManagerSettingsEvent);
   }
 
-  if (!isManagerPaused()) {
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', init, { once: true });
-    } else {
-      init();
-    }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init, { once: true });
+  } else {
+    init();
   }
 
   function makeSelectSetting(key, label, description, defaultValue, pairs, section) {
@@ -284,27 +280,13 @@
         settings: currentValues,
         setSetting: apply,
         applySetting: apply,
-        updateSettings: applyMany,
-        enabled: !isManagerPaused(),
-        capabilities: {
-          pause: true,
-          managerPause: true
-        }
+        updateSettings: applyMany
       }
     }));
 
     // The Manager can be installed after this script has already rendered.
     // Re-advertise the dock item when its discovery request arrives.
     if (document.getElementById(UI.style)) renderHud();
-  }
-
-  function isManagerPaused() {
-    try {
-      const parsed = JSON.parse(localStorage.getItem(MANAGER_DISABLED_KEY) || '[]');
-      return Array.isArray(parsed) && parsed.includes(MODULE.id);
-    } catch (_) {
-      return false;
-    }
   }
 
   function init() {
