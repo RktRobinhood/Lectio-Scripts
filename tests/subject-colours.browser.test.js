@@ -1,18 +1,17 @@
 const { execFile } = require('node:child_process');
-const { mkdtemp, rm } = require('node:fs/promises');
-const { tmpdir } = require('node:os');
 const { join, resolve } = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { promisify } = require('node:util');
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { chromeEnvironment, createProfile, releaseProfile } = require('./chrome-harness');
 
 const execFileAsync = promisify(execFile);
 const chromePath = process.env.CHROME_PATH ||
     'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe';
 
 test('subject colours are learned from a repeating timetable and keep their own colour space', async () => {
-    const profileDirectory = await mkdtemp(join(tmpdir(), 'lectio-subject-colours-'));
+    const profileDirectory = await createProfile('lectio-subject-colours-');
     const fixtureUrl = pathToFileURL(resolve(__dirname, 'fixtures', 'subject-colours.html')).href;
     // A phase that has to outlast a timer needs Chrome to keep the page alive
     // past the load event, which a virtual-time budget does by fast-forwarding
@@ -26,7 +25,7 @@ test('subject colours are learned from a repeating timetable and keep their own 
             ...(virtualTimeMs ? [`--virtual-time-budget=${virtualTimeMs}`] : []),
             '--dump-dom',
             phase ? `${fixtureUrl}?phase=${phase}` : fixtureUrl
-        ]);
+        ], { env: chromeEnvironment(profileDirectory) });
         return stdout;
     };
 
@@ -104,6 +103,6 @@ test('subject colours are learned from a repeating timetable and keep their own 
         const patternScale = await runFixture('pattern-scale');
         assert.match(patternScale, /data-test-result="pass"/, patternScale);
     } finally {
-        await rm(profileDirectory, { recursive: true, force: true });
+        await releaseProfile(profileDirectory);
     }
 });

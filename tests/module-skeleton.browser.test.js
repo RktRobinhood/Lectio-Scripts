@@ -6,14 +6,13 @@
  * Discovery, settings, preview and dock-panel parts, then through teardown.
  */
 const { execFile } = require('node:child_process');
-const { mkdtemp, rm } = require('node:fs/promises');
-const { tmpdir } = require('node:os');
 const { join, resolve } = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { promisify } = require('node:util');
 const { readFileSync } = require('node:fs');
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { chromeEnvironment, createProfile, releaseProfile } = require('./chrome-harness');
 
 const execFileAsync = promisify(execFile);
 const chromePath = process.env.CHROME_PATH ||
@@ -22,7 +21,7 @@ const chromePath = process.env.CHROME_PATH ||
 const skeletonPath = resolve(__dirname, '..', 'templates', 'Lectio-Module-Skeleton.user.js');
 
 test('the module skeleton loads clean with and without the Manager, and tears down', async () => {
-    const profileDirectory = await mkdtemp(join(tmpdir(), 'lectio-module-skeleton-'));
+    const profileDirectory = await createProfile('lectio-module-skeleton-');
     const fixtureUrl = pathToFileURL(resolve(__dirname, 'fixtures', 'module-skeleton.html')).href;
 
     try {
@@ -33,12 +32,12 @@ test('the module skeleton loads clean with and without the Manager, and tears do
             `--user-data-dir=${profileDirectory}`,
             '--dump-dom',
             fixtureUrl
-        ]);
+        ], { env: chromeEnvironment(profileDirectory) });
 
         const result = stdout.match(/data-test-result="([^"]*)"/)?.[1];
         assert.equal(result, 'pass', result || stdout);
     } finally {
-        await rm(profileDirectory, { recursive: true, force: true });
+        await releaseProfile(profileDirectory);
     }
 });
 

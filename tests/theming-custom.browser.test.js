@@ -1,18 +1,17 @@
 const { execFile } = require('node:child_process');
-const { mkdtemp, rm } = require('node:fs/promises');
-const { tmpdir } = require('node:os');
 const { join, resolve } = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { promisify } = require('node:util');
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { chromeEnvironment, createProfile, releaseProfile } = require('./chrome-harness');
 
 const execFileAsync = promisify(execFile);
 const chromePath = process.env.CHROME_PATH ||
     'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe';
 
 async function runFixture(hash) {
-    const profileDirectory = await mkdtemp(join(tmpdir(), 'lectio-theming-custom-'));
+    const profileDirectory = await createProfile('lectio-theming-custom-');
     const fixtureUrl = `${pathToFileURL(resolve(__dirname, 'fixtures', 'theming-custom.html')).href}${hash}`;
 
     try {
@@ -23,11 +22,11 @@ async function runFixture(hash) {
             `--user-data-dir=${profileDirectory}`,
             '--dump-dom',
             fixtureUrl
-        ]);
+        ], { env: chromeEnvironment(profileDirectory) });
 
         return { result: stdout.match(/data-test-result="([^"]*)"/)?.[1], stdout };
     } finally {
-        await rm(profileDirectory, { recursive: true, force: true });
+        await releaseProfile(profileDirectory);
     }
 }
 

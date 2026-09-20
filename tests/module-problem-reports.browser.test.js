@@ -11,12 +11,12 @@
 
 const { execFile } = require('node:child_process');
 const { createServer } = require('node:http');
-const { mkdtemp, readFile, rm } = require('node:fs/promises');
-const { tmpdir } = require('node:os');
+const { readFile } = require('node:fs/promises');
 const { join, resolve } = require('node:path');
 const { promisify } = require('node:util');
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { chromeEnvironment, createProfile, releaseProfile } = require('./chrome-harness');
 
 const execFileAsync = promisify(execFile);
 const chromePath = process.env.CHROME_PATH ||
@@ -45,7 +45,7 @@ const ROUTES = new Map([
 ]);
 
 test('modules report a selector that matched nothing, and still work with no Manager', async () => {
-    const profileDirectory = await mkdtemp(join(tmpdir(), 'lectio-module-reports-'));
+    const profileDirectory = await createProfile('lectio-module-reports-');
     const server = createServer(async (request, response) => {
         const route = ROUTES.get(new URL(request.url, 'http://localhost').pathname);
 
@@ -69,7 +69,7 @@ test('modules report a selector that matched nothing, and still work with no Man
             '--virtual-time-budget=20000',
             '--dump-dom',
             `http://127.0.0.1:${port}${PAGE_PATH}`
-        ], { maxBuffer: 64 * 1024 * 1024 });
+        ], { maxBuffer: 64 * 1024 * 1024, env: chromeEnvironment(profileDirectory) });
 
         const result = stdout.match(/data-test-result="([^"]*)"/)?.[1];
         const detail = stdout.match(/<pre id="test-result"[^>]*>([^<]*)<\/pre>/)?.[1];
@@ -77,6 +77,6 @@ test('modules report a selector that matched nothing, and still work with no Man
         assert.equal(result, 'pass', detail || result || stdout);
     } finally {
         await new Promise((closed) => server.close(closed));
-        await rm(profileDirectory, { recursive: true, force: true });
+        await releaseProfile(profileDirectory);
     }
 });

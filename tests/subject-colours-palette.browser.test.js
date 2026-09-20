@@ -1,11 +1,10 @@
 const { execFile } = require('node:child_process');
-const { mkdtemp, rm } = require('node:fs/promises');
-const { tmpdir } = require('node:os');
 const { join, resolve } = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { promisify } = require('node:util');
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { chromeEnvironment, createProfile, releaseProfile } = require('./chrome-harness');
 
 const execFileAsync = promisify(execFile);
 const chromePath = process.env.CHROME_PATH ||
@@ -92,7 +91,7 @@ function worstCaseGap(hexA, hexB) {
 const MIN_ACCEPTABLE_GAP = 0.005;
 
 async function runFixture(classCount, theme) {
-    const profileDirectory = await mkdtemp(join(tmpdir(), 'lectio-subject-palette-'));
+    const profileDirectory = await createProfile('lectio-subject-palette-');
     try {
         const fixtureUrl = pathToFileURL(resolve(__dirname, 'fixtures', 'subject-colours-palette.html')).href;
         const { stdout } = await execFileAsync(chromePath, [
@@ -102,10 +101,10 @@ async function runFixture(classCount, theme) {
             `--user-data-dir=${profileDirectory}`,
             '--dump-dom',
             `${fixtureUrl}?count=${classCount}&theme=${theme}`
-        ]);
+        ], { env: chromeEnvironment(profileDirectory) });
         return stdout;
     } finally {
-        await rm(profileDirectory, { recursive: true, force: true });
+        await releaseProfile(profileDirectory);
     }
 }
 

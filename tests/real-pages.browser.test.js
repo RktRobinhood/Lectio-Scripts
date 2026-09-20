@@ -13,12 +13,12 @@
 
 const { execFile } = require('node:child_process');
 const { createServer } = require('node:http');
-const { mkdtemp, readFile, rm } = require('node:fs/promises');
-const { tmpdir } = require('node:os');
+const { readFile } = require('node:fs/promises');
 const { extname, join, resolve } = require('node:path');
 const { promisify } = require('node:util');
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { chromeEnvironment, createProfile, releaseProfile } = require('./chrome-harness');
 
 const execFileAsync = promisify(execFile);
 const chromePath = process.env.CHROME_PATH ||
@@ -29,7 +29,7 @@ const pagesDirectory = resolve(__dirname, 'fixtures', 'pages');
 // Serve one corpus page at a Lectio-shaped path, with `prelude` running before
 // anything else on the page and `postlude` after the module has loaded.
 async function runAgainstPage({ page, path, prelude = '', modules = [], postlude }) {
-    const profileDirectory = await mkdtemp(join(tmpdir(), 'lectio-real-pages-'));
+    const profileDirectory = await createProfile('lectio-real-pages-');
     const html = await readFile(resolve(pagesDirectory, page), 'utf8');
 
     const scripts = modules.map((module) => `<script src="${module}"></script>`).join('');
@@ -85,7 +85,7 @@ async function runAgainstPage({ page, path, prelude = '', modules = [], postlude
             '--virtual-time-budget=25000',
             '--dump-dom',
             `http://127.0.0.1:${port}${path}`
-        ], { maxBuffer: 64 * 1024 * 1024 });
+        ], { maxBuffer: 64 * 1024 * 1024, env: chromeEnvironment(profileDirectory) });
 
         return {
             result: stdout.match(/data-test-result="([^"]*)"/)?.[1],
@@ -93,7 +93,7 @@ async function runAgainstPage({ page, path, prelude = '', modules = [], postlude
         };
     } finally {
         await new Promise((closed) => server.close(closed));
-        await rm(profileDirectory, { recursive: true, force: true });
+        await releaseProfile(profileDirectory);
     }
 }
 

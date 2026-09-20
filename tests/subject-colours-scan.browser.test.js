@@ -1,10 +1,10 @@
 const { spawn } = require('node:child_process');
 const { createServer } = require('node:http');
-const { mkdtemp, rm, readFile } = require('node:fs/promises');
-const { tmpdir } = require('node:os');
+const { readFile } = require('node:fs/promises');
 const { join, resolve } = require('node:path');
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { chromeEnvironment, createProfile, releaseProfile } = require('./chrome-harness');
 
 const chromePath = process.env.CHROME_PATH ||
     'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe';
@@ -37,7 +37,7 @@ const mondayOfIsoWeek = (week) => {
 };
 
 test('a Lectio error page is never mistaken for a scanned week', async () => {
-    const profileDirectory = await mkdtemp(join(tmpdir(), 'lectio-subject-scan-'));
+    const profileDirectory = await createProfile('lectio-subject-scan-');
     const requested = [];
     let badWeek = null;
     let reported;
@@ -92,7 +92,7 @@ test('a Lectio error page is never mistaken for a scanned week', async () => {
         '--disable-gpu',
         `--user-data-dir=${profileDirectory}`,
         `http://127.0.0.1:${port}/lectio/223/skema`
-    ], { stdio: 'ignore' });
+    ], { stdio: 'ignore', env: chromeEnvironment(profileDirectory) });
 
     try {
         const store = JSON.parse(await Promise.race([
@@ -131,6 +131,6 @@ test('a Lectio error page is never mistaken for a scanned week', async () => {
         // a passing test over.
         await new Promise(resolve => chrome.once('exit', resolve));
         server.close();
-        await rm(profileDirectory, { recursive: true, force: true }).catch(() => {});
+        await releaseProfile(profileDirectory);
     }
 });

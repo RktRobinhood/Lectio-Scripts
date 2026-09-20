@@ -1,12 +1,11 @@
 const { execFile } = require('node:child_process');
 const { createServer } = require('node:http');
 const { readFile } = require('node:fs/promises');
-const { mkdtemp, rm } = require('node:fs/promises');
-const { tmpdir } = require('node:os');
 const { join, resolve } = require('node:path');
 const { promisify } = require('node:util');
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { chromeEnvironment, createProfile, releaseProfile } = require('./chrome-harness');
 
 const execFileAsync = promisify(execFile);
 const chromePath = process.env.CHROME_PATH ||
@@ -48,7 +47,7 @@ async function startFixtureServer() {
 }
 
 test('the activity notice stays clear of the page and of Lectio overlays', async () => {
-    const profileDirectory = await mkdtemp(join(tmpdir(), 'lectio-chairs-up-'));
+    const profileDirectory = await createProfile('lectio-chairs-up-');
     const server = await startFixtureServer();
     const origin = `http://127.0.0.1:${server.address().port}`;
 
@@ -60,7 +59,7 @@ test('the activity notice stays clear of the page and of Lectio overlays', async
             `--user-data-dir=${profileDirectory}`,
             '--dump-dom',
             `${origin}${ACTIVITY_PATH}?absid=81266224407&layout=${layout}`
-        ]);
+        ], { env: chromeEnvironment(profileDirectory) });
         return stdout;
     };
 
@@ -74,6 +73,6 @@ test('the activity notice stays clear of the page and of Lectio overlays', async
         assert.match(narrow, /data-test-result="pass"/, narrow);
     } finally {
         await new Promise((done) => server.close(done));
-        await rm(profileDirectory, { recursive: true, force: true });
+        await releaseProfile(profileDirectory);
     }
 });

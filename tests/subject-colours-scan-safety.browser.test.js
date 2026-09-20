@@ -1,11 +1,11 @@
 const { execFile } = require('node:child_process');
 const { createServer } = require('node:http');
-const { mkdtemp, readFile, rm } = require('node:fs/promises');
-const { tmpdir } = require('node:os');
+const { readFile } = require('node:fs/promises');
 const { join, resolve } = require('node:path');
 const { promisify } = require('node:util');
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { chromeEnvironment, createProfile, releaseProfile } = require('./chrome-harness');
 
 const execFileAsync = promisify(execFile);
 const chromePath = process.env.CHROME_PATH ||
@@ -31,7 +31,7 @@ const ROUTES = new Map([
 ]);
 
 test('a hung week scan times out, never stacks, backs off, survives the bfcache and keeps what it learned', async () => {
-    const profileDirectory = await mkdtemp(join(tmpdir(), 'lectio-subject-scan-safety-'));
+    const profileDirectory = await createProfile('lectio-subject-scan-safety-');
     const server = createServer(async (request, response) => {
         const route = ROUTES.get(new URL(request.url, 'http://localhost').pathname);
 
@@ -59,7 +59,7 @@ test('a hung week scan times out, never stacks, backs off, survives the bfcache 
             '--virtual-time-budget=180000',
             '--dump-dom',
             `http://127.0.0.1:${port}${PAGE_PATH}`
-        ], { maxBuffer: 64 * 1024 * 1024 });
+        ], { maxBuffer: 64 * 1024 * 1024, env: chromeEnvironment(profileDirectory) });
 
         const result = stdout.match(/data-test-result="([^"]*)"/)?.[1];
         const detail = stdout.match(/<pre id="test-result"[^>]*>([^<]*)<\/pre>/)?.[1];
@@ -67,6 +67,6 @@ test('a hung week scan times out, never stacks, backs off, survives the bfcache 
         assert.equal(result, 'pass', detail || result || stdout);
     } finally {
         await new Promise((closed) => server.close(closed));
-        await rm(profileDirectory, { recursive: true, force: true });
+        await releaseProfile(profileDirectory);
     }
 });

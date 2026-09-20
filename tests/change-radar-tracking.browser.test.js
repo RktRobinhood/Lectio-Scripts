@@ -1,11 +1,11 @@
 const { execFile } = require('node:child_process');
 const { createServer } = require('node:http');
-const { mkdtemp, readFile, rm } = require('node:fs/promises');
-const { tmpdir } = require('node:os');
+const { readFile } = require('node:fs/promises');
 const { extname, join, resolve } = require('node:path');
 const { promisify } = require('node:util');
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { chromeEnvironment, createProfile, releaseProfile } = require('./chrome-harness');
 
 const execFileAsync = promisify(execFile);
 const chromePath = process.env.CHROME_PATH ||
@@ -13,7 +13,7 @@ const chromePath = process.env.CHROME_PATH ||
 const repositoryRoot = resolve(__dirname, '..');
 
 test('Change Radar reports only what its trackers are switched on for', async () => {
-    const profileDirectory = await mkdtemp(join(tmpdir(), 'lectio-change-radar-tracking-'));
+    const profileDirectory = await createProfile('lectio-change-radar-tracking-');
     const fixture = resolve(__dirname, 'fixtures', 'change-radar-tracking.html');
     const server = createServer(async (request, response) => {
         try {
@@ -42,13 +42,13 @@ test('Change Radar reports only what its trackers are switched on for', async ()
             '--virtual-time-budget=25000',
             '--dump-dom',
             `http://127.0.0.1:${port}/lectio/223/change-radar-tracking.html`
-        ], { maxBuffer: 64 * 1024 * 1024 });
+        ], { maxBuffer: 64 * 1024 * 1024, env: chromeEnvironment(profileDirectory) });
 
         const result = stdout.match(/data-test-result="([^"]*)"/)?.[1];
         const detail = stdout.match(/<pre id="test-result"[^>]*>([^<]*)<\/pre>/)?.[1];
         assert.equal(result, 'pass', detail || result || stdout);
     } finally {
         await new Promise((resolveClose) => server.close(resolveClose));
-        await rm(profileDirectory, { recursive: true, force: true });
+        await releaseProfile(profileDirectory);
     }
 });

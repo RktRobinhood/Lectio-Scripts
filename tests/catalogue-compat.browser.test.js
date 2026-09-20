@@ -24,6 +24,7 @@ const { pathToFileURL } = require('node:url');
 const { promisify } = require('node:util');
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { chromeEnvironment, createProfile, releaseProfile } = require('./chrome-harness');
 
 const execFileAsync = promisify(execFile);
 const chromePath = process.env.CHROME_PATH ||
@@ -126,7 +127,7 @@ function check() {
 
 async function runAgainst({ version, commit }, expectedCount) {
     const directory = await mkdtemp(join(tmpdir(), `lectio-compat-${version}-`));
-    const profile = await mkdtemp(join(tmpdir(), 'lectio-compat-profile-'));
+    const profile = await createProfile('lectio-compat-profile-');
 
     try {
         const manager = execFileSync('git', ['show', `${commit}:manager/Lectio-Manager.user.js`], {
@@ -151,13 +152,13 @@ async function runAgainst({ version, commit }, expectedCount) {
             '--virtual-time-budget=6000',
             '--dump-dom',
             pathToFileURL(join(directory, 'compat.html')).href
-        ], { maxBuffer: 64 * 1024 * 1024 });
+        ], { maxBuffer: 64 * 1024 * 1024, env: chromeEnvironment(profile) });
 
         const result = stdout.match(/data-test-result="([^"]*)"/)?.[1];
         assert.equal(result, 'pass', `Manager ${version}: ${result || 'never reported a result'}`);
     } finally {
         await rm(directory, { recursive: true, force: true });
-        await rm(profile, { recursive: true, force: true });
+        await releaseProfile(profile);
     }
 }
 
