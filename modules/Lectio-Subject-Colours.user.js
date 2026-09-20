@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Subject Colours
 // @namespace    https://www.lectio.dk/
-// @version      0.6.0
+// @version      0.7.0
 // @description  Learns which classes are actually yours from your own timetable and gives each one its own colour, with a separate muted spectrum for one-off activities like assemblies and meetings.
 // @match        https://www.lectio.dk/lectio/*
 // @grant        none
@@ -15,7 +15,7 @@
 
     const MODULE_ID = 'subject-colours';
     const MODULE_NAME = 'Lectio - Subject Colours';
-    const MODULE_VERSION = '0.6.0';
+    const MODULE_VERSION = '0.7.0';
     const LOG = '[Lectio Subject Colours]';
     const STYLE_ID = 'lectio-subject-colours-styles';
 
@@ -46,6 +46,7 @@
     // rather than depending on one page's row structure.
     const LEGEND_ID = 'lectio-subject-colours-legend';
     const LEGEND_PANEL_ID = 'lectio-subject-colours-legend-panel';
+    const DOCK_ITEM_ID = 'colour-key';
     const HIGHLIGHT_CLASS = 'lectio-subject-colours-highlight';
 
     const SETTINGS_KEY = 'lectioSubjectColours.settings.v1';
@@ -83,6 +84,10 @@
         { value: 'balanced', label: 'Balanced' },
         { value: 'strict', label: 'Strict — only firm weekly classes' }
     ];
+    const LEGEND_LOCATION_OPTIONS = [
+        { value: 'floating', label: 'Floating on the page' },
+        { value: 'dock', label: 'Shared Manager dock' }
+    ];
     const REGULARITY_THRESHOLDS = Object.freeze({
         loose: { minWeeks: 1, minOccurrences: 2 },
         balanced: { minWeeks: 2, minOccurrences: 3 },
@@ -97,6 +102,7 @@
         scanWeeks: 8,
         colourOther: true,
         showLegend: false,
+        legendLocation: 'floating',
         patternMarkers: false,
         patternScale: 100,
         lockColours: false,
@@ -149,6 +155,7 @@
     ensureLockedTheme();
     let previewStyle = null;
     let legendExpanded = false;
+    let dockLegendMount = null;
     let scanning = false;
     let applyHandle = 0;
     let themeHandle = 0;
@@ -186,6 +193,9 @@
             showLegend: typeof saved.showLegend === 'boolean'
                 ? saved.showLegend
                 : DEFAULT_SETTINGS.showLegend,
+            legendLocation: hasOption(LEGEND_LOCATION_OPTIONS, saved.legendLocation)
+                ? saved.legendLocation
+                : DEFAULT_SETTINGS.legendLocation,
             patternMarkers: typeof saved.patternMarkers === 'boolean'
                 ? saved.patternMarkers
                 : DEFAULT_SETTINGS.patternMarkers,
@@ -1335,6 +1345,10 @@
                 padding: 0;
             }
 
+            .lectio-subject-colours-legend__dock-panel {
+                min-width: 220px;
+            }
+
             .lectio-subject-colours-legend__entry {
                 align-items: center;
                 background: none;
@@ -1438,10 +1452,7 @@
     }
 
     function setEntryHighlighted(key, on) {
-        const container = document.getElementById(LEGEND_ID);
-        if (!container) return;
-
-        for (const row of container.querySelectorAll('.lectio-subject-colours-legend__row')) {
+        for (const row of document.querySelectorAll('.lectio-subject-colours-legend__row')) {
             if (row.dataset.key === key) row.classList.toggle('is-hover', on);
         }
     }
@@ -1586,10 +1597,67 @@
         return container;
     }
 
-    function removeLegend() {
+    function removeFloatingLegend() {
         const container = document.getElementById(LEGEND_ID);
         if (container) container.remove();
         legendSignature = '';
+    }
+
+    function removeDockLegend() {
+        dockLegendMount = null;
+        window.dispatchEvent(new CustomEvent('lectio-manager:dock:remove', {
+            detail: { moduleId: MODULE_ID, itemId: DOCK_ITEM_ID }
+        }));
+    }
+
+    function removeLegend() {
+        removeFloatingLegend();
+        removeDockLegend();
+    }
+
+    function registerDockLegend(keys) {
+        const strings = legendLabels();
+        window.dispatchEvent(new CustomEvent('lectio-manager:dock:register', {
+            detail: {
+                moduleId: MODULE_ID,
+                itemId: DOCK_ITEM_ID,
+                type: 'panel',
+                icon: 'palette',
+                label: strings.heading,
+                tooltip: strings.show,
+                state: 'default',
+                defaultPriority: 200
+            }
+        }));
+    }
+
+    function renderDockLegendPanel(keys = visibleClassKeys()) {
+        if (!dockLegendMount?.isConnected) {
+            dockLegendMount = null;
+            return;
+        }
+
+        const panel = document.createElement('div');
+        panel.className = 'lectio-subject-colours-legend__dock-panel';
+
+        const header = document.createElement('div');
+        header.className = 'lectio-subject-colours-legend__header';
+        header.textContent = legendLabels().heading;
+
+        const list = document.createElement('ul');
+        list.className = 'lectio-subject-colours-legend__list';
+        for (const key of keys) list.appendChild(buildLegendRow(key));
+
+        panel.append(header, list);
+        dockLegendMount.replaceChildren(panel);
+    }
+
+    function handleDockPanelRender(event) {
+        const detail = event.detail || {};
+        if (detail.moduleId !== MODULE_ID || detail.itemId !== DOCK_ITEM_ID || !detail.mount) return;
+
+        dockLegendMount = detail.mount;
+        renderDockLegendPanel();
     }
 
     function renderLegend() {
@@ -1603,6 +1671,15 @@
             removeLegend();
             return;
         }
+
+        if (settings.legendLocation === 'dock') {
+            removeFloatingLegend();
+            registerDockLegend(keys);
+            renderDockLegendPanel(keys);
+            return;
+        }
+
+        removeDockLegend();
 
         const container = ensureLegendContainer();
         const signature = keys.map(key => `${key}:${paletteFor(key, 'class').fill}`).join('|');
@@ -1805,11 +1882,21 @@
             {
                 key: 'showLegend',
                 type: 'toggle',
-                label: 'Show colour key on the schedule',
+                label: 'Show colour key',
                 section: 'Colours',
-                description: 'Off by default. A small, collapsed key on the page listing the classes currently on screen. '
+                description: 'Off by default. A compact key listing the classes currently on screen. '
                     + 'Hover an entry to highlight its blocks, or click its swatch to recolour it there and then.'
             },
+            ...(settings.showLegend
+                ? [{
+                    key: 'legendLocation',
+                    type: 'select',
+                    label: 'Colour key location',
+                    section: 'Colours',
+                    description: 'Keep the key floating on the page or place it in Lectio Manager\'s shared dock.',
+                    options: LEGEND_LOCATION_OPTIONS
+                }]
+                : []),
             {
                 key: 'patternMarkers',
                 type: 'toggle',
@@ -1896,6 +1983,7 @@
             intensity: settings.intensity,
             colourOther: settings.colourOther,
             showLegend: settings.showLegend,
+            legendLocation: settings.legendLocation,
             patternMarkers: settings.patternMarkers,
             patternScale: settings.patternScale,
             lockColours: settings.lockColours,
@@ -1920,6 +2008,7 @@
                 currentValues: currentValues()
             }
         }));
+        renderLegend();
     }
 
     function handleSetting(event) {
@@ -1943,6 +2032,8 @@
             settings.colourOther = value;
         } else if (key === 'showLegend' && typeof value === 'boolean') {
             settings.showLegend = value;
+        } else if (key === 'legendLocation' && hasOption(LEGEND_LOCATION_OPTIONS, value)) {
+            settings.legendLocation = value;
         } else if (key === 'patternMarkers' && typeof value === 'boolean') {
             settings.patternMarkers = value;
         } else if (key === 'patternScale') {
@@ -2064,7 +2155,11 @@
     window.addEventListener('lectio-manager:set-setting', handleSetting, { signal: lifecycle.signal });
     window.addEventListener('lectio-manager:preview-setting', handlePreview, { signal: lifecycle.signal });
     window.addEventListener('lectio-manager:clear-setting-preview', handleClearPreview, { signal: lifecycle.signal });
-    window.addEventListener('pagehide', () => lifecycle.abort(), { once: true });
+    window.addEventListener('lectio-manager:dock:render-panel', handleDockPanelRender, { signal: lifecycle.signal });
+    window.addEventListener('pagehide', () => {
+        removeDockLegend();
+        lifecycle.abort();
+    }, { once: true });
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', start, { once: true, signal: lifecycle.signal });

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.15.0
+// @version      1.16.0
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules, including their settings and shared dock controls.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
@@ -1056,6 +1056,9 @@
         hideDockTooltip();
         openDockPanelKey = key;
         dockElements.flyoutContent.replaceChildren();
+        const mount = document.createElement('div');
+        mount.className = 'lectio-manager-dock-module-content';
+        dockElements.flyoutContent.appendChild(mount);
         dockElements.flyout.hidden = false;
         dockElements.root.classList.add('has-open-panel');
         dockElements.items.querySelector(`[data-dock-key="${CSS.escape(key)}"]`)?.classList.add('is-active');
@@ -1064,7 +1067,7 @@
             detail: {
                 moduleId: item.moduleId,
                 itemId: item.itemId,
-                mount: dockElements.flyoutContent,
+                mount,
                 close: closeDockPanel
             }
         }));
@@ -1181,6 +1184,8 @@
             info: '<circle cx="12" cy="12" r="9"></circle><path d="M12 11v6M12 7h.01"></path>',
             bell: '<path d="M6 17h12l-1.5-2V10a4.5 4.5 0 0 0-9 0v5zM10 20h4"></path>',
             wrench: '<path d="M14 6a4 4 0 0 0-5 5L3 17l4 4 6-6a4 4 0 0 0 5-5l-3 3-3-3z"></path>',
+            palette: '<path d="M12 3a9 9 0 0 0 0 18h1.5a2 2 0 0 0 0-4H12a2 2 0 0 1 0-4h3a6 6 0 0 0 0-12z"></path><circle cx="7.5" cy="10" r="1"></circle><circle cx="9" cy="6.5" r="1"></circle><circle cx="13.5" cy="6" r="1"></circle>',
+            radar: '<circle cx="12" cy="12" r="8"></circle><circle cx="12" cy="12" r="4"></circle><path d="M12 12 17.5 6.5M12 3v2M21 12h-2M12 21v-2M3 12h2"></path>',
             default: '<circle cx="12" cy="12" r="9"></circle><path d="M12 8v4M12 16h.01"></path>'
         };
 

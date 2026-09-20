@@ -27,10 +27,13 @@
             window.dockActivations.push(event.detail);
         });
         window.addEventListener('lectio-manager:dock:render-panel', (event) => {
-            if (event.detail.moduleId !== 'test-module' || event.detail.itemId !== 'panel') return;
+            if (event.detail.moduleId !== 'test-module' || !['panel', 'panel-two'].includes(event.detail.itemId)) return;
+            window.lastPanelMount = event.detail.mount;
             const content = document.createElement('p');
             content.className = 'test-panel-content';
-            content.textContent = 'Panel rendered by module';
+            content.textContent = event.detail.itemId === 'panel'
+                ? 'Panel rendered by module'
+                : 'Second panel rendered by module';
             event.detail.mount.appendChild(content);
         });
     </script>
@@ -99,6 +102,19 @@
                 document.querySelector('[data-dock-key="test-module:panel"]').click();
                 assert(!document.querySelector('.lectio-manager-dock-flyout').hidden, 'Panel flyout did not open');
                 assert(document.querySelector('.test-panel-content')?.textContent === 'Panel rendered by module', 'Module did not receive a panel mount');
+                const firstMount = window.lastPanelMount;
+                register({
+                    moduleId: 'test-module', itemId: 'panel-two', type: 'panel', icon: 'info',
+                    label: 'Open second panel', defaultPriority: 40
+                });
+                document.querySelector('[data-dock-key="test-module:panel-two"]').click();
+                assert(!firstMount.isConnected, 'Opening another panel left the previous module mount connected');
+                firstMount.replaceChildren(document.createTextNode('Stale content'));
+                assert(document.querySelector('.test-panel-content')?.textContent === 'Second panel rendered by module', 'A stale module mount replaced the active panel');
+                window.dispatchEvent(new CustomEvent('lectio-manager:dock:remove', {
+                    detail: { moduleId: 'test-module', itemId: 'panel-two' }
+                }));
+                document.querySelector('[data-dock-key="test-module:panel"]').click();
                 window.dispatchEvent(new CustomEvent('lectio-manager:dock:update', {
                     detail: { moduleId: 'test-module', itemId: 'action', patch: { badge: 8 } }
                 }));

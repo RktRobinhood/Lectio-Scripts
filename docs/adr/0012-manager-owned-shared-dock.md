@@ -18,6 +18,8 @@ Feature behavior remains inside each module. The Manager must not branch on a mo
 
 A module using the dock must fail quietly when the Manager is absent. It must not recreate fixed-position placement as a fallback. Its underlying page-local or background feature should remain standalone where that feature has behavior independent of its global control. A diagnostic whose sole purpose is to test Manager integration may intentionally have no standalone UI, provided that dependency is explicit in its name and documentation.
 
+During incremental migration, a persistent control that existed before this decision may retain an explicit user-selectable legacy floating location for compatibility. That exception does not permit dock mode to fall back to module-owned coordinates when the Manager is absent, and it does not apply to newly introduced persistent controls.
+
 The canonical event contract is [`docs/manager-dock-api.md`](../manager-dock-api.md).
 
 ## Consequences

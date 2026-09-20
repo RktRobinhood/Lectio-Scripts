@@ -68,6 +68,11 @@ test('subject colours are learned from a repeating timetable and keep their own 
         const legend = await runFixture('legend');
         assert.match(legend, /data-test-result="pass"/, legend);
 
+        // The same colour key can be handed to the Manager-owned dock without
+        // leaving its old floating control behind.
+        const dock = await runFixture('dock');
+        assert.match(dock, /data-test-result="pass"/, dock);
+
         // Turning the key off in settings removes it from the page entirely.
         const legendOff = await runFixture('legend-off');
         assert.match(legendOff, /data-test-result="pass"/, legendOff);

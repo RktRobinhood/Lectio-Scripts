@@ -24,7 +24,7 @@ window.dispatchEvent(new CustomEvent('lectio-manager:dock:register', {
 }));
 ```
 
-Stable identifiers are required. `moduleId` and `itemId` must start with a letter or digit and then use only letters, digits, `.`, `_`, or `-`; `:` is reserved as the Manager's collision-free compound-key separator. Labels are accessible names, not identifiers. Supported bundled icon keys are `mail`, `translate`, `chair`, `refresh`, `settings`, `calendar`, `warning`, `info`, `bell`, and `wrench`; unknown keys receive a safe fallback icon.
+Stable identifiers are required. `moduleId` and `itemId` must start with a letter or digit and then use only letters, digits, `.`, `_`, or `-`; `:` is reserved as the Manager's collision-free compound-key separator. Labels are accessible names, not identifiers. Supported bundled icon keys are `mail`, `translate`, `chair`, `refresh`, `settings`, `calendar`, `warning`, `info`, `bell`, `wrench`, `palette`, and `radar`; unknown keys receive a safe fallback icon.
 
 The Manager owns icon size, badge rendering, tooltip placement, item order, adaptive overflow, screen position, z-index, and flyout chrome. Do not include positioning data or raw button HTML in a registration.
 
@@ -83,6 +83,7 @@ window.addEventListener('lectio-manager:dock:render-panel', (event) => {
 ```
 
 Only one dock panel is open at once. The Manager closes it on Escape, outside click, a second activation, or item removal. The module may style content inside `mount`, but must not position the flyout shell or inject styles into the shared dock chrome.
+Each opening receives a disposable mount node. It is disconnected when that panel closes or another panel opens; modules should treat `mount.isConnected === false` as the end of that rendering session.
 
 ## Ordering and cleanup
 
@@ -98,7 +99,8 @@ The unstable channel test module in [`modules-unstable/Lectio-Unstable-Channel-T
 |---|---|---|---|---|
 | Unstable Channel Test | Diagnostic launcher and details | Former fixed chip/panel | `panel` | Migrated as the v1 reference; no module-owned coordinates remain. |
 | English Mode | Global DA/EN switch and transient toast | Fixed viewport control | `toggle` | Good next candidate, but medium complexity because users already configure the switch position. Keep the toast module-owned. |
-| Subject Colours | Collapsible colour key on schedule pages | Fixed contextual legend | Possibly `panel` | Defer: the legend is page-specific and may remain page-local under the dock rule. |
+| Subject Colours | Optional colour key on schedule pages | Floating or Manager dock | `panel` | Migrated; users choose the location in the module settings. |
+| Lectio Change Radar | Floating radar HUD and change log | Floating or Manager dock | `panel` | Migrated; the unseen count and urgency state become the dock badge and item state. |
 | Unread Message Notifications | Badge attached to Lectio's Messages navigation | In-page navigation badge | Possibly `status`/`panel` | Defer: its current UI belongs to the Messages link rather than a free-floating HUD. |
 | Chairs Up | Urgent notice/dialog surfaces | Page-local overlays | Poor | Keep page-local because the warning is contextual and time-sensitive, not a global launcher. |
 | Schedule Summary | Compact schedule row | In-page schedule content | None | Keep page-local; it is not persistent global UI. |

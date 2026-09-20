@@ -29,8 +29,12 @@
         window.GM_xmlhttpRequest = () => {};
 
         window.registrations = new Map();
+        window.dockRegistrations = new Map();
         window.addEventListener('lectio-module:register', (event) => {
             window.registrations.set(event.detail.id, event.detail);
+        });
+        window.addEventListener('lectio-manager:dock:register', (event) => {
+            window.dockRegistrations.set(`${event.detail.moduleId}:${event.detail.itemId}`, event.detail);
         });
 
         const phase = new URLSearchParams(location.search).get('phase') || 'first';
@@ -59,6 +63,7 @@
             scanWeeks: 0,
             colourOther: true,
             showLegend: phase !== 'legend-off',
+            legendLocation: phase === 'dock' ? 'dock' : 'floating',
             patternMarkers: phase === 'pattern' || phase === 'pattern-scale',
             patternScale: phase === 'pattern-scale' ? 150 : 100,
             // The locked phase pins one class to a colour of its own and asks
@@ -442,6 +447,27 @@
                 if (phase === 'legend-off') {
                     if (document.getElementById('lectio-subject-colours-legend')) {
                         throw new Error('the colour key stayed on screen with its setting turned off');
+                    }
+                }
+
+                if (phase === 'dock') {
+                    if (document.getElementById('lectio-subject-colours-legend')) {
+                        throw new Error('the floating colour key remained visible in dock mode');
+                    }
+
+                    const dockItem = window.dockRegistrations.get('subject-colours:colour-key');
+                    if (!dockItem || dockItem.type !== 'panel' || dockItem.icon !== 'palette' || dockItem.badge !== undefined) {
+                        throw new Error('the colour key did not register a complete dock panel item');
+                    }
+
+                    const mount = document.createElement('div');
+                    document.body.appendChild(mount);
+                    window.dispatchEvent(new CustomEvent('lectio-manager:dock:render-panel', {
+                        detail: { moduleId: 'subject-colours', itemId: 'colour-key', mount }
+                    }));
+                    const rows = mount.querySelectorAll('.lectio-subject-colours-legend__row');
+                    if (rows.length !== 2) {
+                        throw new Error(`the dock colour key listed ${rows.length} classes instead of 2`);
                     }
                 }
 

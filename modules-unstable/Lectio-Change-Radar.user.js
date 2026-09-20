@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Change Radar
 // @namespace    https://github.com/RktRobinhood/Lectio-Scripts
-// @version      0.2.0-beta.2
+// @version      0.3.0
 // @description  Watches your Lectio timetable for cancellations and schedule changes and keeps a compact recent-change HUD.
 // @author       RktRobinhood
 // @match        https://www.lectio.dk/lectio/*
@@ -20,7 +20,7 @@
     id: 'change-radar',
     aliases: ['schedule-change-radar', 'lectio-change-radar', 'change-log'],
     name: 'Lectio Change Radar',
-    version: '0.2.0-beta.2',
+    version: '0.3.0',
     channel: 'unstable'
   });
 
@@ -33,6 +33,7 @@
   });
 
   const DEFAULT_SETTINGS = Object.freeze({
+    displayMode: 'floating',
     pollMinutes: 10,
     weeksAhead: 1,
     urgentHours: 24,
@@ -43,6 +44,9 @@
   });
 
   const SETTING_SCHEMA = Object.freeze([
+    makeSelectSetting('displayMode', 'Radar location', 'Keep the radar floating on the page or place it in Lectio Manager\'s shared dock.', 'floating', [
+      ['floating', 'Floating on the page'], ['dock', 'Shared Manager dock']
+    ]),
     makeSelectSetting('pollMinutes', 'Check frequency', 'How often Change Radar checks Lectio while a Lectio tab is open.', 10, [
       [5, 'Every 5 minutes'], [10, 'Every 10 minutes'], [15, 'Every 15 minutes'], [30, 'Every 30 minutes']
     ]),
@@ -92,6 +96,7 @@
     settingsOpen: false,
     timer: null,
     viewTimer: null,
+    dockMount: null,
     lastError: ''
   };
 
@@ -100,6 +105,13 @@
 
   registerWithManager();
   window.addEventListener('lectio-manager:discover', registerWithManager);
+  window.addEventListener('lectio-manager:set-setting', handleManagerSettingsEvent);
+  window.addEventListener('lectio-manager:dock:render-panel', handleDockPanelRender);
+  window.addEventListener('pagehide', () => {
+    removeDockItem();
+    window.clearInterval(runtime.timer);
+    window.clearTimeout(runtime.viewTimer);
+  }, { once: true });
 
   for (const eventName of [
     'lectio-manager:setting-change',
@@ -140,7 +152,7 @@
     return {
       id: key,
       key,
-      type: 'boolean',
+      type: 'toggle',
       control: 'toggle',
       kind: 'toggle',
       inputType: 'checkbox',
@@ -176,6 +188,10 @@
         }
       }
     }));
+
+    // The Manager can be installed after this script has already rendered.
+    // Re-advertise the dock item when its discovery request arrives.
+    if (document.getElementById(UI.style)) renderHud();
   }
 
   function isManagerPaused() {
@@ -191,7 +207,6 @@
     if (!document.body) return;
 
     installStyles();
-    installHud();
     syncTheme();
     installThemeObserver();
     renderHud();
@@ -244,16 +259,15 @@
     const detail = event?.detail;
     if (!detail || typeof detail !== 'object') return;
 
-    const moduleRef = detail.moduleId || detail.module?.id || detail.module;
-    if (moduleRef && moduleRef !== MODULE.id && !MODULE.aliases.includes(moduleRef)) return;
+    const moduleRef = detail.moduleId || detail.module?.id || detail.module || (detail.key ? detail.id : '');
+    if (!moduleRef || (moduleRef !== MODULE.id && !MODULE.aliases.includes(moduleRef))) return;
 
     if (detail.values && typeof detail.values === 'object') {
       applySettings(detail.values, { source: 'manager-event' });
       return;
     }
 
-    const key = detail.key || detail.settingId || detail.settingKey ||
-      (moduleRef ? detail.id : '') || detail.name;
+    const key = detail.key || detail.settingId || detail.settingKey || detail.name;
     if (!key || !Object.prototype.hasOwnProperty.call(DEFAULT_SETTINGS, key)) return;
     applySetting(key, detail.value, { source: 'manager-event' });
   }
@@ -655,9 +669,21 @@
         font: 12px/1.35 Arial, Helvetica, sans-serif;
       }
 
-      #${UI.root}.state-yellow { --lcr-signal: #d79619; --lcr-signal-rgb: 215, 150, 25; }
-      #${UI.root}.state-red { --lcr-signal: #d94b43; --lcr-signal-rgb: 217, 75, 67; }
-      #${UI.root}.state-error { --lcr-signal: #7a8790; --lcr-signal-rgb: 122, 135, 144; }
+      #${UI.panel}.is-dock-panel {
+        --lcr-surface: #ffffff;
+        --lcr-text: #243746;
+        --lcr-muted: #667783;
+        --lcr-border: #c8d4dc;
+        --lcr-soft: #f4f7f9;
+        --lcr-signal: #3b9a58;
+        --lcr-signal-rgb: 59, 154, 88;
+        min-width: min(330px, calc(100vw - 48px));
+        font: 12px/1.35 Arial, Helvetica, sans-serif;
+      }
+
+      #${UI.root}.state-yellow, #${UI.panel}.state-yellow { --lcr-signal: #d79619; --lcr-signal-rgb: 215, 150, 25; }
+      #${UI.root}.state-red, #${UI.panel}.state-red { --lcr-signal: #d94b43; --lcr-signal-rgb: 217, 75, 67; }
+      #${UI.root}.state-error, #${UI.panel}.state-error { --lcr-signal: #7a8790; --lcr-signal-rgb: 122, 135, 144; }
 
       #${UI.button} {
         position: relative;
@@ -1004,14 +1030,25 @@
   }
 
   function renderHud() {
-    const root = document.getElementById(UI.root);
-    if (!root) return;
-
     syncTheme();
 
     const history = runtime.state?.history || [];
     const lastViewed = readNumber(STORAGE.lastViewed);
     const status = getRadarState(history, lastViewed);
+    const view = { status, history, lastViewed };
+
+    if (runtime.settings.displayMode === 'dock') {
+      document.getElementById(UI.root)?.remove();
+      registerDockItem(status);
+      renderDockPanel(view);
+      return;
+    }
+
+    removeDockItem();
+    installHud();
+    const root = document.getElementById(UI.root);
+    if (!root) return;
+
     const expanded = runtime.pinned || runtime.hovered;
 
     root.className = `state-${status.level}`;
@@ -1042,9 +1079,65 @@
 
     const wrap = document.createElement('div');
     wrap.className = 'lcr-panel-wrap';
+    wrap.appendChild(buildRadarPanel(view, false));
+    root.appendChild(wrap);
 
+    scheduleAutoSeen(expanded && !runtime.settingsOpen, status.unseen);
+  }
+
+  function registerDockItem(status) {
+    const state = status.level === 'red' || status.level === 'error'
+      ? 'error'
+      : status.level === 'yellow' ? 'warning' : 'default';
+
+    window.dispatchEvent(new CustomEvent('lectio-manager:dock:register', {
+      detail: {
+        moduleId: MODULE.id,
+        itemId: 'radar',
+        type: 'panel',
+        icon: 'radar',
+        label: 'Lectio Change Radar',
+        tooltip: status.tooltip,
+        badge: status.unseen || null,
+        state,
+        defaultPriority: 100
+      }
+    }));
+  }
+
+  function removeDockItem() {
+    runtime.dockMount = null;
+    window.dispatchEvent(new CustomEvent('lectio-manager:dock:remove', {
+      detail: { moduleId: MODULE.id, itemId: 'radar' }
+    }));
+  }
+
+  function handleDockPanelRender(event) {
+    const detail = event.detail || {};
+    if (detail.moduleId !== MODULE.id || detail.itemId !== 'radar' || !detail.mount) return;
+
+    runtime.dockMount = detail.mount;
+    syncTheme();
+    const history = runtime.state?.history || [];
+    const lastViewed = readNumber(STORAGE.lastViewed);
+    renderDockPanel({ status: getRadarState(history, lastViewed), history, lastViewed });
+  }
+
+  function renderDockPanel(view) {
+    if (!runtime.dockMount?.isConnected) {
+      runtime.dockMount = null;
+      return;
+    }
+
+    runtime.dockMount.replaceChildren(buildRadarPanel(view, true));
+    scheduleAutoSeen(!runtime.settingsOpen, view.status.unseen);
+  }
+
+  function buildRadarPanel({ status, history, lastViewed }, inDock) {
     const panel = document.createElement('section');
     panel.id = UI.panel;
+    panel.classList.toggle('is-dock-panel', inDock);
+    panel.classList.add(`state-${status.level}`);
     panel.setAttribute('aria-label', 'Lectio Change Radar details');
 
     const head = document.createElement('div');
@@ -1056,17 +1149,19 @@
         <small>${escapeHtml(runtime.settingsOpen ? 'Stored only in this browser.' : status.subheading)}</small>
       </span>`;
 
-    const pin = document.createElement('button');
-    pin.className = 'lcr-pin';
-    pin.type = 'button';
-    pin.textContent = runtime.pinned ? 'Unpin' : 'Pin';
-    pin.title = runtime.pinned ? 'Close when the pointer leaves' : 'Keep this panel open';
-    pin.addEventListener('click', (event) => {
-      event.stopPropagation();
-      runtime.pinned = !runtime.pinned;
-      renderHud();
-    });
-    head.appendChild(pin);
+    if (!inDock) {
+      const pin = document.createElement('button');
+      pin.className = 'lcr-pin';
+      pin.type = 'button';
+      pin.textContent = runtime.pinned ? 'Unpin' : 'Pin';
+      pin.title = runtime.pinned ? 'Close when the pointer leaves' : 'Keep this panel open';
+      pin.addEventListener('click', (event) => {
+        event.stopPropagation();
+        runtime.pinned = !runtime.pinned;
+        renderHud();
+      });
+      head.appendChild(pin);
+    }
     panel.appendChild(head);
 
     if (runtime.settingsOpen) {
@@ -1088,10 +1183,7 @@
     }
 
     panel.appendChild(renderFooter(status, history));
-    wrap.appendChild(panel);
-    root.appendChild(wrap);
-
-    scheduleAutoSeen(expanded && !runtime.settingsOpen, status.unseen);
+    return panel;
   }
 
   function renderHistoryItem(item, lastViewed) {
@@ -1182,7 +1274,7 @@
       row.appendChild(copy);
 
       let control;
-      if (schema.type === 'boolean') {
+      if (schema.type === 'toggle' || schema.type === 'boolean') {
         control = document.createElement('input');
         control.type = 'checkbox';
         control.className = 'lcr-setting-toggle';
@@ -1307,8 +1399,8 @@
   }
 
   function syncTheme() {
-    const root = document.getElementById(UI.root);
-    if (!root) return;
+    const target = document.getElementById(UI.root) || runtime.dockMount;
+    if (!target) return;
 
     const candidates = [
       document.querySelector('.islandContent'),
@@ -1336,11 +1428,11 @@
     text ||= dark ? 'rgb(100, 173, 213)' : 'rgb(36, 55, 70)';
     border ||= dark ? 'rgb(82, 91, 98)' : 'rgb(200, 212, 220)';
 
-    root.style.setProperty('--lcr-surface', surface);
-    root.style.setProperty('--lcr-text', text);
-    root.style.setProperty('--lcr-border', border);
-    root.style.setProperty('--lcr-muted', mixWithSurface(text, surface, .62));
-    root.style.setProperty('--lcr-soft', mixWithSurface(text, surface, .055));
+    target.style.setProperty('--lcr-surface', surface);
+    target.style.setProperty('--lcr-text', text);
+    target.style.setProperty('--lcr-border', border);
+    target.style.setProperty('--lcr-muted', mixWithSurface(text, surface, .62));
+    target.style.setProperty('--lcr-soft', mixWithSurface(text, surface, .055));
   }
 
   function installThemeObserver() {
@@ -1379,6 +1471,9 @@
 
   function sanitizeSettings(values) {
     const out = { ...DEFAULT_SETTINGS };
+    if (['floating', 'dock'].includes(values?.displayMode)) {
+      out.displayMode = values.displayMode;
+    }
     const allowed = {
       pollMinutes: [5, 10, 15, 30],
       weeksAhead: [0, 1, 2],
@@ -1401,6 +1496,7 @@
 
   function coerceSettingValue(key, value) {
     if (['attentionAnimation', 'hoverOpen'].includes(key)) return Boolean(value);
+    if (key === 'displayMode') return value;
     return Number(value);
   }
 

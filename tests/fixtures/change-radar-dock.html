@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio Change Radar dock fixture</title>
+    <script>
+        const catalogue = {
+            schemaVersion: 1,
+            generatedAt: '2026-09-20T00:00:00.000Z',
+            modules: [{
+                id: 'change-radar',
+                name: 'Lectio Change Radar',
+                version: '0.3.0',
+                description: 'Test radar',
+                status: 'unstable',
+                installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Change-Radar.user.js'
+            }]
+        };
+        const storage = new Map([
+            ['lectioManager.catalogue.v1', JSON.stringify(catalogue)],
+            ['lectioManager.lastRefresh.v1', Date.now()],
+            ['lectioManager.updateTipDismissed.v1', true]
+        ]);
+
+        window.GM_getValue = (key, fallback) => storage.has(key) ? storage.get(key) : fallback;
+        window.GM_setValue = (key, value) => storage.set(key, value);
+        window.GM_xmlhttpRequest = () => {};
+        window.fetch = async (url) => ({
+            ok: true,
+            status: 200,
+            url: String(url),
+            text: async () => '<!doctype html><html><body></body></html>'
+        });
+
+        window.registrations = new Map();
+        window.addEventListener('lectio-module:register', (event) => {
+            window.registrations.set(event.detail.id, event.detail);
+        });
+    </script>
+    <script src="/manager/Lectio-Manager.user.js"></script>
+    <script src="/modules-unstable/Lectio-Change-Radar.user.js"></script>
+</head>
+<body>
+    <main id="masterContent">Lectio fixture</main>
+    <script>
+        const assert = (condition, message) => {
+            if (!condition) throw new Error(message);
+        };
+
+        window.addEventListener('load', () => {
+            const result = document.createElement('pre');
+            result.id = 'test-result';
+
+            try {
+                const registration = window.registrations.get('change-radar');
+                assert(registration, 'Change Radar did not register with the Manager');
+                assert(registration.settingsSchema.find((item) => item.key === 'displayMode')?.type === 'select', 'Radar location was not exposed as a select setting');
+                assert(registration.settingsSchema.find((item) => item.key === 'hoverOpen')?.type === 'toggle', 'Radar toggle settings did not use the Manager schema');
+                assert(document.getElementById('lectio-change-radar'), 'The default floating radar was missing');
+
+                window.dispatchEvent(new CustomEvent('lectio-manager:set-setting', {
+                    detail: { id: 'another-module', key: 'displayMode', value: 'dock' }
+                }));
+                assert(document.getElementById('lectio-change-radar'), 'An unrelated module setting moved the radar');
+
+                window.dispatchEvent(new CustomEvent('lectio-manager:set-setting', {
+                    detail: { id: 'change-radar', key: 'displayMode', value: 'dock' }
+                }));
+
+                assert(!document.getElementById('lectio-change-radar'), 'The floating radar remained visible in dock mode');
+                const dock = document.getElementById('lectio-manager-dock-root');
+                const button = document.querySelector('[data-dock-key="change-radar:radar"]');
+                assert(button && button.dataset.type === 'panel', 'Change Radar did not register a dock panel');
+                assert(!dock.hidden, 'The dock stayed hidden after the radar registered');
+                assert(button.querySelector('.lectio-manager-dock-icon svg'), 'The radar dock item had no icon');
+
+                button.click();
+                const panel = document.querySelector('.lectio-manager-dock-flyout-content #lectio-change-radar-panel');
+                assert(panel?.classList.contains('is-dock-panel'), `The radar did not render inside the Manager flyout (${document.querySelector('.lectio-manager-dock-flyout-content')?.innerHTML || 'empty'})`);
+                assert(!panel.querySelector('.lcr-pin'), 'The Manager-owned panel retained its floating pin control');
+
+                window.dispatchEvent(new CustomEvent('lectio-manager:set-setting', {
+                    detail: { id: 'change-radar', key: 'displayMode', value: 'floating' }
+                }));
+                assert(document.getElementById('lectio-change-radar'), 'The floating radar did not return');
+                assert(!document.querySelector('[data-dock-key="change-radar:radar"]'), 'The radar dock item was not removed');
+                assert(dock.hidden && dock.hasAttribute('inert'), 'The empty dock remained visible or interactive');
+
+                result.dataset.testResult = 'pass';
+                result.textContent = 'PASS';
+            } catch (error) {
+                result.dataset.testResult = 'fail';
+                result.textContent = `FAIL: ${error.message}`;
+            }
+
+            document.body.appendChild(result);
+        });
+    </script>
+</body>
+</html>
