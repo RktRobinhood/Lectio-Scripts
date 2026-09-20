@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.21.2
+// @version      1.22.0
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules, including their settings and shared dock controls.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
@@ -260,7 +260,7 @@
     // Kept in step with the @version header by scripts/check-versions.mjs. The
     // header is metadata Tampermonkey reads; this is the only copy the running
     // script can see, and it is what the self-update notice compares.
-    const MANAGER_VERSION = '1.21.2';
+    const MANAGER_VERSION = '1.22.0';
 
     const STABLE_CATALOGUE_URL =
         'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/catalogue/modules.json';
@@ -347,6 +347,10 @@
     let dockElements = null;
     let dockPreferences = null;
     let pointerDockDrag = null;
+    // A module re-registering mid-drag would rebuild the very tiles the drag is
+    // holding element references to and moving with inline transforms, so the
+    // row is left alone until the drag settles.
+    let dockRenderDeferredByDrag = false;
     let suppressDockClickKey = null;
     let openDockPanelKey = null;
 
@@ -1349,6 +1353,10 @@
 
     function renderDock() {
         if (!dockElements) return;
+        if (pointerDockDrag?.dragging) {
+            dockRenderDeferredByDrag = true;
+            return;
+        }
 
         const entries = sortedDockEntries();
         const visibleKeys = new Set(entries.map(([key]) => key));
@@ -1524,9 +1532,10 @@
             pointerId: event.pointerId,
             startX: event.clientX,
             startY: event.clientY,
-            targetKey: key,
+            toIndex: null,
             dragging: false,
-            button
+            button,
+            layout: null
         };
         try {
             button.setPointerCapture?.(event.pointerId);
@@ -1535,36 +1544,90 @@
         }
     }
 
+    /*
+     * The slot geometry a drag reasons in, measured from offsetTop/offsetLeft
+     * rather than getBoundingClientRect. A rect reports transforms as geometry,
+     * and the tile a drag starts on is by definition the one under the pointer -
+     * so it is magnified to 1.26 and its neighbours to 1.11 at exactly the
+     * moment the measurement is taken. Layout offsets are the untransformed
+     * slots, which is what the tiles have to be moved between.
+     */
+    function measureDockDragLayout(key) {
+        const vertical = isVerticalDock();
+        const items = [...dockElements.items.children].map((element) => ({
+            key: element.dataset.dockKey,
+            element,
+            centre: vertical
+                ? element.offsetTop + (element.offsetHeight / 2)
+                : element.offsetLeft + (element.offsetWidth / 2)
+        }));
+
+        const fromIndex = items.findIndex((item) => item.key === key);
+        if (fromIndex < 0) return null;
+
+        // Every tile is the same size, so one slot is the spacing between any
+        // two centres; averaging over the run avoids trusting a single pair.
+        const slot = items.length > 1
+            ? (items[items.length - 1].centre - items[0].centre) / (items.length - 1)
+            : (vertical ? items[0].element.offsetHeight : items[0].element.offsetWidth);
+
+        return { vertical, items, fromIndex, slot };
+    }
+
     function updatePointerDockDrag(event) {
         if (!pointerDockDrag || pointerDockDrag.pointerId !== event.pointerId) return;
 
-        const distance = Math.hypot(
-            event.clientX - pointerDockDrag.startX,
-            event.clientY - pointerDockDrag.startY
-        );
-        if (!pointerDockDrag.dragging && distance < 6) return;
+        const deltaX = event.clientX - pointerDockDrag.startX;
+        const deltaY = event.clientY - pointerDockDrag.startY;
+        if (!pointerDockDrag.dragging && Math.hypot(deltaX, deltaY) < 6) return;
 
-        pointerDockDrag.dragging = true;
-        pointerDockDrag.button.classList.add('is-dragging');
-        hideDockTooltip();
+        if (!pointerDockDrag.dragging) {
+            pointerDockDrag.layout = measureDockDragLayout(pointerDockDrag.key);
+            if (!pointerDockDrag.layout) return;
+            pointerDockDrag.dragging = true;
+            pointerDockDrag.button.classList.add('is-dragging');
+            dockElements.items.classList.add('is-reordering');
+            hideDockTooltip();
+        }
         event.preventDefault();
 
-        const target = document.elementFromPoint(event.clientX, event.clientY)
-            ?.closest('.lectio-manager-dock-item');
-        pointerDockDrag.targetKey = target?.dataset.dockKey || null;
+        const { vertical, items, fromIndex, slot } = pointerDockDrag.layout;
 
-        for (const item of dockElements.items.querySelectorAll('.is-drop-target')) {
-            item.classList.remove('is-drop-target');
-        }
-        if (target && target.dataset.dockKey !== pointerDockDrag.key) {
-            target.classList.add('is-drop-target');
-        }
+        /*
+         * The held tile follows the pointer on both axes, because that is what
+         * makes it read as picked up rather than as a tile that dimmed. Only
+         * the travel along the dock's own axis decides where it lands, so
+         * pulling it sideways out of the dock is free and harmless.
+         */
+        pointerDockDrag.button.style.transform =
+            `translate(${Math.round(deltaX)}px, ${Math.round(deltaY)}px) scale(1.12)`;
+
+        const carried = items[fromIndex].centre + (vertical ? deltaY : deltaX);
+        const others = items.filter((_, index) => index !== fromIndex);
+        const toIndex = others.filter((item) => item.centre < carried).length;
+        pointerDockDrag.toIndex = toIndex;
+
+        /*
+         * A tile the held one has passed is either where it started or exactly
+         * one slot over - never anything between, because the held tile vacates
+         * one slot and claims one. Sliding them apart is the whole point: the
+         * gap that opens up is the answer to "which icons is it going between".
+         */
+        others.forEach((item, index) => {
+            const shift = index < fromIndex
+                ? (index >= toIndex ? 1 : 0)
+                : (index < toIndex ? -1 : 0);
+            const offset = shift * slot;
+            item.element.style.transform = offset === 0
+                ? ''
+                : (vertical ? `translateY(${offset}px)` : `translateX(${offset}px)`);
+        });
     }
 
     function finishPointerDockDrag(event) {
         if (!pointerDockDrag || pointerDockDrag.pointerId !== event.pointerId) return;
 
-        const { key, targetKey, dragging, button } = pointerDockDrag;
+        const { key, toIndex, dragging, button, layout } = pointerDockDrag;
         try {
             button.releasePointerCapture?.(event.pointerId);
         } catch (_) {
@@ -1572,13 +1635,15 @@
         }
         clearPointerDockDrag();
 
-        if (dragging) {
-            suppressDockClickKey = key;
-            if (targetKey !== key) reorderDockItem(key, targetKey);
-            window.setTimeout(() => {
-                if (suppressDockClickKey === key) suppressDockClickKey = null;
-            }, 0);
+        if (!dragging) return;
+
+        suppressDockClickKey = key;
+        if (layout && toIndex !== null && toIndex !== layout.fromIndex) {
+            moveDockItemToIndex(key, toIndex);
         }
+        window.setTimeout(() => {
+            if (suppressDockClickKey === key) suppressDockClickKey = null;
+        }, 0);
     }
 
     function cancelPointerDockDrag(event) {
@@ -1588,10 +1653,24 @@
 
     function clearPointerDockDrag() {
         if (!pointerDockDrag) return;
+
         pointerDockDrag.button.classList.remove('is-dragging');
         pointerDockDrag = null;
-        for (const item of dockElements.items.querySelectorAll('.is-drop-target')) {
-            item.classList.remove('is-drop-target');
+        if (!dockElements) return;
+
+        /*
+         * Dropping the inline transforms while the tiles are still in their old
+         * DOM order is what animates the settle: the neighbours are already
+         * sitting in their final slots, so clearing them is a no-op, and the
+         * held tile eases from under the pointer back into the slot it claimed
+         * on the stylesheet's own transform transition.
+         */
+        for (const item of dockElements.items.children) item.style.transform = '';
+        dockElements.items.classList.remove('is-reordering');
+
+        if (dockRenderDeferredByDrag) {
+            dockRenderDeferredByDrag = false;
+            renderDock();
         }
     }
 
@@ -1660,15 +1739,21 @@
         }
     }
 
-    function reorderDockItem(movingKey, beforeKey) {
-        const visibleKeys = sortedDockEntries().map(([key]) => key);
-        const fromIndex = visibleKeys.indexOf(movingKey);
+    /*
+     * A drop lands at a slot, not on a neighbour. The old version took the tile
+     * the pointer happened to be over and inserted before it, which had no
+     * answer for the pointer being over the dragged tile itself (the common
+     * case, since it sits under the cursor) or over no tile at all - that one
+     * silently meant "send it to the end".
+     */
+    function moveDockItemToIndex(key, toIndex) {
+        const keys = sortedDockEntries().map(([entryKey]) => entryKey);
+        const fromIndex = keys.indexOf(key);
         if (fromIndex < 0) return;
 
-        visibleKeys.splice(fromIndex, 1);
-        const toIndex = beforeKey === null ? visibleKeys.length : visibleKeys.indexOf(beforeKey);
-        visibleKeys.splice(toIndex < 0 ? visibleKeys.length : toIndex, 0, movingKey);
-        persistDockOrder(visibleKeys, movingKey);
+        keys.splice(fromIndex, 1);
+        keys.splice(Math.max(0, Math.min(keys.length, toIndex)), 0, key);
+        persistDockOrder(keys, key);
     }
 
     function moveDockItemByKeyboard(key, offset) {
@@ -5374,22 +5459,47 @@
             #lectio-manager-dock-root[data-edge='top'] .lectio-manager-dock-item { --lectio-dock-grow: center top; }
             #lectio-manager-dock-root[data-edge='bottom'] .lectio-manager-dock-item { --lectio-dock-grow: center bottom; }
 
-            /* Dragging owns the transform; magnification must not fight it. */
-            .lectio-manager-dock-item.is-dragging,
-            .lectio-manager-dock-item.is-dragging:hover {
-                transform: none;
-            }
-
+            /*
+             * A dragged tile is held, not hidden. Dimming it to .45 in its own
+             * slot and drawing a hairline on whichever neighbour the pointer
+             * was over meant the only thing that ever moved was the hairline -
+             * so a reorder read as two icons swapping by themselves the instant
+             * the button came up. The held tile now follows the pointer (JS
+             * owns its transform) and the tiles it passes slide a slot out of
+             * its way, which makes the gap it is about to drop into the most
+             * visible thing on screen.
+             */
             .lectio-manager-dock-item.is-dragging {
-                opacity: .45;
+                z-index: 3;
+                cursor: grabbing;
+                opacity: .92;
+                /* It is pinned to the pointer; easing its transform reads as lag. */
+                transition: background-color 180ms ease, border-color 180ms ease;
+                border-color: rgba(255, 255, 255, .78);
+                background: color-mix(in srgb, var(--lectio-theme-surface, #ffffff) var(--lectio-dock-item-fill-hover, 62%), transparent);
+                /* Lifted off the shell rather than resting on it. */
+                box-shadow:
+                    0 10px 22px rgba(0, 0, 0, .28),
+                    inset 0 1px 0 rgba(255, 255, 255, var(--lectio-dock-item-sheen-lit, .7));
             }
 
-            #lectio-manager-dock-root[data-orientation='vertical'] .lectio-manager-dock-item.is-drop-target {
-                box-shadow: 0 -3px 0 var(--lectio-theme-accent, #0f6f6f);
+            /* The pointer is captured by the held tile, so it would otherwise
+               hit-test on top of the very slots it is being dropped into. */
+            .lectio-manager-dock-items.is-reordering .lectio-manager-dock-item.is-dragging {
+                pointer-events: none;
             }
 
-            #lectio-manager-dock-root[data-orientation='horizontal'] .lectio-manager-dock-item.is-drop-target {
-                box-shadow: -3px 0 0 var(--lectio-theme-accent, #0f6f6f);
+            /*
+             * Magnification is a hover effect, and during a drag the pointer is
+             * over tiles it is only passing. Letting it fire would scale a tile
+             * at the same moment it is being translated a slot, and the two
+             * transforms are the same property - last one wins, so the slide
+             * would simply stop happening under the cursor.
+             */
+            .lectio-manager-dock-items.is-reordering .lectio-manager-dock-item:hover,
+            .lectio-manager-dock-items.is-reordering .lectio-manager-dock-item:hover + .lectio-manager-dock-item,
+            .lectio-manager-dock-items.is-reordering .lectio-manager-dock-item:has(+ .lectio-manager-dock-item:hover) {
+                transform: none;
             }
 
             .lectio-manager-dock-item:disabled {
@@ -5473,6 +5583,12 @@
 
                 .lectio-manager-dock-icon.is-nudging {
                     animation: none;
+                }
+
+                /* The tiles still move out of the way - the opening gap is the
+                   information, not the slide - they just arrive without it. */
+                .lectio-manager-dock-items.is-reordering .lectio-manager-dock-item {
+                    transition: background-color 180ms ease, border-color 180ms ease;
                 }
             }
 

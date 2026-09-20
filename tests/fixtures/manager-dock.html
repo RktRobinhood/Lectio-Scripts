@@ -140,21 +140,81 @@
                 const savedOrder = JSON.parse(storage.get('lectioManager.dock.v1')).order;
                 assert(savedOrder.slice(0, 3).join('|') === keys().join('|'), 'Dock order was not persisted');
 
+                /*
+                 * Reordering by pointer is geometric: the drag lands where the
+                 * held tile has been carried to, not on whatever tile happens
+                 * to hit-test under the cursor. That distinction is the bug -
+                 * the tile under the cursor during a drag is the dragged tile
+                 * itself, so the old drop-target hairline was almost never on
+                 * screen and a reorder looked like icons swapping on release.
+                 */
+                const vertical = dock.dataset.orientation === 'vertical';
                 const pointerItem = document.querySelector('[data-dock-key="test-module:action"]');
                 const pointerTarget = document.querySelector('[data-dock-key="test-module:toggle"]');
-                const originalElementFromPoint = document.elementFromPoint.bind(document);
-                document.elementFromPoint = () => pointerTarget;
+                const panelTile = document.querySelector('[data-dock-key="test-module:panel"]');
+                const centre = (element) => (vertical
+                    ? element.offsetTop + (element.offsetHeight / 2)
+                    : element.offsetLeft + (element.offsetWidth / 2));
+
+                // Carry it just past the first tile's centre, so it claims slot 0.
+                const travel = (centre(pointerTarget) - centre(pointerItem)) - 5;
+                const dockItems = document.querySelector('.lectio-manager-dock-items');
+                const at = (distance) => (vertical
+                    ? { clientX: 5, clientY: 200 + distance }
+                    : { clientX: 200 + distance, clientY: 5 });
+
                 pointerItem.dispatchEvent(new PointerEvent('pointerdown', {
-                    pointerId: 41, pointerType: 'touch', button: 0, clientX: 5, clientY: 5, bubbles: true
+                    pointerId: 41, pointerType: 'touch', button: 0, bubbles: true, ...at(0)
                 }));
                 pointerItem.dispatchEvent(new PointerEvent('pointermove', {
-                    pointerId: 41, pointerType: 'touch', clientX: 5, clientY: 30, bubbles: true
+                    pointerId: 41, pointerType: 'touch', bubbles: true, ...at(travel)
                 }));
+
+                assert(pointerItem.classList.contains('is-dragging'), 'A dragged tile was not marked as held');
+                assert(dockItems.classList.contains('is-reordering'), 'The dock row did not enter its reordering state');
+                assert(/translate\(/.test(pointerItem.style.transform),
+                    `A dragged tile did not follow the pointer: ${pointerItem.style.transform}`);
+                assert(getComputedStyle(pointerItem).pointerEvents === 'none',
+                    'A dragged tile kept hit-testing over its own drop slot');
+
+                // The two tiles it was carried past must have opened a gap for
+                // it, and they move one slot each - never a fraction of one.
+                const slotSize = Math.abs(centre(panelTile) - centre(pointerTarget));
+                const shiftOf = (element) => {
+                    const matched = element.style.transform.match(/-?[\d.]+/);
+                    return matched ? Math.abs(Number(matched[0])) : 0;
+                };
+                assert(Math.abs(shiftOf(pointerTarget) - slotSize) < 2,
+                    `The tile being passed did not slide a full slot: ${pointerTarget.style.transform}`);
+                assert(Math.abs(shiftOf(panelTile) - slotSize) < 2,
+                    `The second passed tile did not slide a full slot: ${panelTile.style.transform}`);
+
                 pointerItem.dispatchEvent(new PointerEvent('pointerup', {
-                    pointerId: 41, pointerType: 'touch', clientX: 5, clientY: 30, bubbles: true
+                    pointerId: 41, pointerType: 'touch', bubbles: true, ...at(travel)
                 }));
-                document.elementFromPoint = originalElementFromPoint;
                 assert(keys().join('|') === 'test-module:action|test-module:toggle|test-module:panel', `Pointer reorder failed: ${keys()}`);
+                assert(!pointerItem.classList.contains('is-dragging') && !dockItems.classList.contains('is-reordering'),
+                    'The dock stayed in its drag state after the drop');
+                assert([...dockItems.children].every((tile) => tile.style.transform === ''),
+                    'A settled drag left an inline transform behind');
+
+                // Dragging away from the dock entirely used to mean "send it to
+                // the end". It now lands at the nearest slot, which is where the
+                // gap was visibly sitting when the button came up.
+                const across = (distance) => (vertical
+                    ? { clientX: 5 + distance, clientY: 200 }
+                    : { clientX: 200, clientY: 5 + distance });
+                pointerTarget.dispatchEvent(new PointerEvent('pointerdown', {
+                    pointerId: 42, pointerType: 'touch', button: 0, bubbles: true, ...across(0)
+                }));
+                pointerTarget.dispatchEvent(new PointerEvent('pointermove', {
+                    pointerId: 42, pointerType: 'touch', bubbles: true, ...across(600)
+                }));
+                pointerTarget.dispatchEvent(new PointerEvent('pointerup', {
+                    pointerId: 42, pointerType: 'touch', bubbles: true, ...across(600)
+                }));
+                assert(keys().join('|') === 'test-module:action|test-module:toggle|test-module:panel',
+                    `Dragging clear of the dock reordered it anyway: ${keys()}`);
 
                 // Modules re-register their item on every internal render, and
                 // almost all of those registrations repeat what the last one
