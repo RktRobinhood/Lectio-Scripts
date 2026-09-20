@@ -116,6 +116,28 @@
           "changelog": "Med Lectio Manager installeret venter Fagfarver nu på tur, før modulet scanner en uge, så modulerne ikke rammer Lectio på én gang. Uden Manager, med en ældre en eller en, der ikke svarer, venter intet."
         }
       }
+    },
+    {
+      "id": "schedule-summary",
+      "name": "Schedule Summary",
+      "description": "Collapses the schedule's week information into a compact strip with a hover preview and click-to-expand control.",
+      "category": "Timetable",
+      "audience": [
+        "student",
+        "teacher"
+      ],
+      "status": "unstable",
+      "version": "0.2.4",
+      "changelog": "Coming back to the schedule with the browser's Back button no longer leaves the summary strip stuck. Its button, its hover preview and its settings kept working before you navigated away and now keep working after you return.",
+      "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Schedule-Summary.user.js",
+      "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
+      "i18n": {
+        "da": {
+          "name": "Skemaoversigt",
+          "description": "Folder skemaets ugeinformation sammen til en kompakt stribe med forhåndsvisning ved musen og klik for at udfolde.",
+          "changelog": "Når du vender tilbage til skemaet med browserens Tilbage-knap, går oversigtsstriben ikke længere i stå. Dens knap, forhåndsvisningen ved musen og indstillingerne virker nu også, efter du er kommet tilbage."
+        }
+      }
     }
   ]
 }

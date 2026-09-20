@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>Schedule Summary back/forward-cache fixture</title>
+    <script>
+        /* Issue #45. Schedule Summary paints its summary strip once and then
+           lives entirely off listeners: the toggle's click, the strip's
+           mouseleave, and the Manager's discover and set-setting events. All
+           four are registered with the module's lifecycle AbortController, so
+           whatever aborts that controller switches the strip off - the nodes
+           stay on screen, fully rendered, and stop responding to anything.
+
+           A page frozen for the back/forward cache is never re-executed, so
+           this fixture drives the whole lifecycle from the outside, exactly
+           as the browser would.
+
+           ?phase=restore  - a page frozen and then restored: pagehide with
+                             persisted set, then a persisted pageshow, with
+                             nothing of the page's own running in between.
+                             Everything must still work afterwards.
+           ?phase=terminal - a page genuinely going away: pagehide with
+                             persisted false, then a persisted pageshow that
+                             must not bring the module back. Teardown must
+                             still happen, or the fix has simply removed it.
+
+           Both phases fire their pair back-to-back in one task, because that
+           is what a real freeze looks like: nothing of this page's own runs
+           between pagehide and pageshow. */
+        window.PHASE = new URLSearchParams(location.search).get('phase') || 'restore';
+
+        window.registrations = [];
+        window.addEventListener('lectio-module:register', (event) => {
+            window.registrations.push(event.detail);
+        });
+
+        window.pageTransition = (type, persisted) => {
+            let event;
+
+            try {
+                event = new PageTransitionEvent(type, { persisted });
+            } catch (_) {
+                event = new Event(type);
+                Object.defineProperty(event, 'persisted', { value: persisted });
+            }
+
+            window.dispatchEvent(event);
+        };
+
+        try {
+            localStorage.removeItem('lectioScheduleSummary.settings.v1');
+        } catch (_) { /* a fixture with no storage is still a valid run */ }
+    </script>
+</head>
+<body>
+    <main id="masterContent">
+    <table id="s_m_Content_Content_SkemaNyMedNavigation_skema_skematabel">
+        <tbody>
+            <tr class="s2dayHeader">
+                <td></td>
+                <td>Mandag (14/9)</td>
+                <td>Tirsdag (15/9)</td>
+            </tr>
+            <tr id="week-information">
+                <td class="s2infoHeader s2skemabrikcontainer"></td>
+                <td class="s2infoHeader s2skemabrikcontainer">
+                    <a href="#activity-1">•2i: IA in Bio/Physics/sport</a><br>
+                    <a href="#information-1">07:55-08:00 Information</a>
+                </td>
+                <td class="s2infoHeader s2skemabrikcontainer">
+                    <a href="#activity-3">•2hf: KS-projekt</a><br>
+                    <a href="#information-2">07:55-08:00 Information</a>
+                </td>
+            </tr>
+            <tr>
+                <td><div class="s2module-info">1. modul<br>8:15 - 9:25</div></td>
+                <td><div class="s2skemabrikcontainer"><a class="s2skemabrik s2brik">1i TOK/1</a></div></td>
+                <td><div class="s2skemabrikcontainer"></div></td>
+            </tr>
+        </tbody>
+    </table>
+    </main>
+
+    <script src="../../modules-unstable/Lectio-Schedule-Summary.user.js"></script>
+
+    <script>
+        const failures = [];
+        const assert = (condition, message) => {
+            if (!condition) failures.push(message);
+        };
+
+        const report = () => {
+            const output = document.createElement('pre');
+            output.id = 'test-result';
+            output.textContent = failures.length ? failures.join(' | ') : 'pass';
+            output.dataset.testResult = failures.length ? 'fail' : 'pass';
+            document.body.appendChild(output);
+        };
+
+        window.addEventListener('load', () => {
+            const informationRow = document.querySelector('#week-information');
+            const summaryRow = document.querySelector('.lectio-schedule-summary__row');
+            const toggle = document.querySelector('.lectio-schedule-summary__toggle');
+
+            const setSetting = (key, value) => window.dispatchEvent(new CustomEvent(
+                'lectio-manager:set-setting',
+                { detail: { id: 'schedule-summary', key, value } }
+            ));
+
+            if (!summaryRow || !toggle) {
+                failures.push('the summary strip was never built, so there is nothing to freeze');
+                report();
+                return;
+            }
+
+            /* The strip works before the freeze, so anything that stops
+               working after it is the freeze's doing and not a fixture that
+               was broken to begin with. */
+            assert(toggle.getAttribute('aria-expanded') === 'false', 'the strip did not start collapsed');
+            toggle.click();
+            assert(toggle.getAttribute('aria-expanded') === 'true', 'the toggle did not work before the freeze');
+            toggle.click();
+            assert(toggle.getAttribute('aria-expanded') === 'false', 'the toggle did not collapse before the freeze');
+            assert(summaryRow.dataset.hoverArmed === 'false', 'closing did not disarm the hover preview before the freeze');
+            summaryRow.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }));
+            assert(summaryRow.dataset.hoverArmed === 'true', 'mouseleave did not re-arm the hover preview before the freeze');
+            assert(window.registrations.length >= 1, 'the module never registered with the Manager');
+
+            const registrationsBeforeFreeze = window.registrations.length;
+
+            /* --- The freeze, and the restore ---------------------------- */
+
+            window.pageTransition('pagehide', window.PHASE !== 'terminal');
+            window.pageTransition('pageshow', true);
+
+            if (window.PHASE === 'restore') {
+                /* The page the person comes back to. Every one of these
+                   worked a moment ago and is driven by a listener the
+                   lifecycle controller owns. */
+
+                toggle.click();
+                assert(
+                    toggle.getAttribute('aria-expanded') === 'true',
+                    'the toggle stopped expanding after a bfcache restore'
+                );
+                /* The reveal is animated, so `hidden` is only cleared a frame
+                   later; the class is what changes in this task. */
+                assert(
+                    informationRow.classList.contains('lectio-schedule-summary__info--visible'),
+                    'the week information never opened after a bfcache restore'
+                );
+
+                toggle.click();
+                assert(
+                    toggle.getAttribute('aria-expanded') === 'false',
+                    'the toggle stopped collapsing after a bfcache restore'
+                );
+                assert(
+                    summaryRow.dataset.hoverArmed === 'false',
+                    'the hover preview was not disarmed on close after a bfcache restore'
+                );
+
+                summaryRow.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }));
+                assert(
+                    summaryRow.dataset.hoverArmed === 'true',
+                    'the hover preview never re-armed after a bfcache restore, so it is off for good'
+                );
+
+                setSetting('stripSize', 'comfortable');
+                assert(
+                    summaryRow.dataset.stripSize === 'comfortable',
+                    'a Manager settings change was ignored after a bfcache restore'
+                );
+
+                setSetting('initialState', 'expanded');
+                assert(
+                    toggle.getAttribute('aria-expanded') === 'true',
+                    'the initial-state setting was ignored after a bfcache restore'
+                );
+
+                const registrationsAfterSettings = window.registrations.length;
+                assert(
+                    registrationsAfterSettings > registrationsBeforeFreeze,
+                    'the module stopped re-announcing its values after a bfcache restore'
+                );
+
+                window.dispatchEvent(new CustomEvent('lectio-manager:discover'));
+                assert(
+                    window.registrations.length > registrationsAfterSettings,
+                    'the module stopped answering Manager Discovery after a bfcache restore, ' +
+                        'so it vanishes from the Manager on a restored page'
+                );
+
+                /* One registration each, at module scope: a restore must not
+                   have doubled anything up. */
+                window.dispatchEvent(new CustomEvent('lectio-manager:discover'));
+                assert(
+                    window.registrations.length === registrationsAfterSettings + 2,
+                    'Discovery is being answered more than once per request, so a listener accumulated'
+                );
+            } else {
+                /* A page genuinely going away is still torn down, and the
+                   persisted pageshow fired right after it must not revive
+                   anything. The restore phase proves these same controls do
+                   work when the page comes back, so their silence here is a
+                   real result. */
+                const registrationsAfterTeardown = window.registrations.length;
+
+                toggle.click();
+                assert(
+                    toggle.getAttribute('aria-expanded') === 'false',
+                    'a terminal pagehide left the toggle live'
+                );
+
+                setSetting('stripSize', 'comfortable');
+                assert(
+                    summaryRow.dataset.stripSize !== 'comfortable',
+                    'a terminal pagehide left the module applying Manager settings'
+                );
+
+                window.dispatchEvent(new CustomEvent('lectio-manager:discover'));
+                assert(
+                    window.registrations.length === registrationsAfterTeardown,
+                    'a terminal pagehide left the module answering Manager Discovery'
+                );
+            }
+
+            report();
+        });
+    </script>
+</body>
+</html>
