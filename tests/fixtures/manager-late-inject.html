@@ -88,7 +88,26 @@
          * read at exactly the moment that caught 1.21.0 and 1.25.0: during
          * top-level evaluation, with the rest of the file still a dead zone.
          */
+        /*
+         * The same trap, one contract further on. The slot listeners are added
+         * in the boot block, above init(), so a request dispatched from here
+         * reaches slotHolders and slotQueue during top-level evaluation. Both
+         * declared below the boot block instead would throw a ReferenceError
+         * out of the listener - and a background request that is answered by
+         * nothing is one a module quietly goes ahead with, so the only visible
+         * symptom would be the serialisation silently not happening.
+         */
+        window.slotAnswers = [];
+        window.addEventListener('lectio-manager:slot:wait',
+            (event) => window.slotAnswers.push(['wait', event.detail]));
+        window.addEventListener('lectio-manager:slot:grant',
+            (event) => window.slotAnswers.push(['grant', event.detail]));
+
         window.addEventListener('lectio-manager:discover', () => {
+            window.dispatchEvent(new CustomEvent('lectio-manager:slot:request', {
+                detail: { moduleId: 'late-module', requestId: 'r1' }
+            }));
+
             window.dispatchEvent(new CustomEvent('lectio-module:register', {
                 detail: {
                     id: 'late-module',
@@ -130,6 +149,15 @@
                     // dispatcher, so nothing else here would notice.
                     assert(JSON.parse(storage.get('lectioManager.installed.v1') || '{}')['late-module'],
                         'A module registering during the Manager\'s own evaluation was dropped');
+
+                    // A slot asked for during the Manager's own evaluation was
+                    // granted. Nothing else here would notice it going
+                    // unanswered: the module would simply fetch straight away.
+                    assert(window.slotAnswers.some(([kind, detail]) =>
+                        kind === 'grant' && detail
+                        && detail.moduleId === 'late-module' && detail.requestId === 'r1'),
+                        `A slot requested during the Manager's own evaluation went unanswered: `
+                        + JSON.stringify(window.slotAnswers));
 
                     const dock = document.querySelector('#lectio-manager-dock-root');
                     assert(dock, 'Manager never built its dock');

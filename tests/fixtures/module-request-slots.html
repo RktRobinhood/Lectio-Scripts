@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio module request-slot fixture</title>
+    <script>
+        /*
+         * The module half of the request-slot contract
+         * (docs/manager-request-slots.md), for all four background-fetching
+         * modules at once, under five different Managers - which is the only
+         * way to check the property that matters, because four of the five are
+         * about a Manager that is missing, old or not answering.
+         *
+         * The scenario comes off the query string:
+         *
+         *   none    no Manager at all
+         *   silent  something that answers Discovery but has never heard of
+         *           slots, which is what an old Manager looks like from here
+         *   acked   a Manager that says "wait" and then dies
+         *   old     Manager 1.27.0, the real last release before slots existed
+         *   real    the Manager in this working tree
+         *
+         * A module must fetch in every one of them. The only thing that may
+         * differ is when.
+         */
+        window.SCENARIO = new URLSearchParams(location.search).get('scenario') || 'none';
+
+        /* Every module's start jitter is Math.random() * a window, once each.
+           Pinned to zero so all four wake as close together as the modules
+           allow: a broker that only looks like it works because nothing
+           collided would prove nothing. */
+        Math.random = () => 0;
+
+        window.pageStartedAt = Date.now();
+        window.pageErrors = [];
+        window.addEventListener('error', (event) => window.pageErrors.push(String(event.message)));
+
+        /* Slot traffic, in both directions, with timestamps. A module's own
+           wait is observable from here without reaching inside it: it asks,
+           and it releases when the work behind the turn has finished. */
+        window.slotEvents = [];
+        for (const name of ['request', 'wait', 'grant', 'release']) {
+            window.addEventListener(`lectio-manager:slot:${name}`, (event) => {
+                const detail = event.detail || {};
+                window.slotEvents.push({
+                    name,
+                    moduleId: detail.moduleId,
+                    requestId: detail.requestId,
+                    at: Date.now() - window.pageStartedAt
+                });
+            });
+        }
+
+        /* Long enough that two modules fetching at once overlap visibly, short
+           enough to stay far inside every module's own timeout. */
+        const FETCH_MS = 300;
+
+        window.fetchLog = [];
+        window.maxConcurrentFetches = 0;
+        let concurrent = 0;
+
+        const TIMETABLE = '<!DOCTYPE html><html><body><table>'
+            + '<tr class="s2dayHeader"><th>Uge 38</th></tr>'
+            + '<tr><td data-date="2026-09-14">'
+            + '<a class="s2skemabrik s2brik s2normal" href="/lectio/223/aktivitet/aktivitetforside2.aspx?absid=900001" '
+            + 'data-tooltip="Matematik A&#10;14/9-2026 08:00 til 09:30&#10;Hold: 3a MA&#10;Lokaler: A12">'
+            + '<span class="s2skemabrikcontent">Matematik A</span></a>'
+            + '</td></tr></table></body></html>';
+
+        window.fetch = (url, init) => {
+            const record = {
+                url: String(url),
+                startedAt: Date.now() - window.pageStartedAt,
+                endedAt: -1
+            };
+            window.fetchLog.push(record);
+
+            concurrent += 1;
+            window.maxConcurrentFetches = Math.max(window.maxConcurrentFetches, concurrent);
+
+            return new Promise((resolve) => {
+                setTimeout(() => {
+                    concurrent -= 1;
+                    record.endedAt = Date.now() - window.pageStartedAt;
+                    resolve(new Response(TIMETABLE, {
+                        status: 200,
+                        headers: { 'content-type': 'text/html' }
+                    }));
+                }, FETCH_MS);
+            });
+        };
+
+        /* The Manager's own storage, for the scenarios that load one. */
+        const managerStorage = new Map([
+            ['lectioManager.updateTipDismissed.v1', true],
+            ['lectioManager.lastRefresh.v1', Date.now()]
+        ]);
+        window.GM_getValue = (key, fallback) => managerStorage.has(key) ? managerStorage.get(key) : fallback;
+        window.GM_setValue = (key, value) => managerStorage.set(key, value);
+        window.GM_xmlhttpRequest = () => {};
+
+        localStorage.clear();
+
+        /* One watched week and nothing else, so Change Radar's check is a
+           small, countable number of requests. */
+        localStorage.setItem('lectioChangeRadar.v1.223.current-user.settings', JSON.stringify({
+            displayMode: 'floating',
+            pollMinutes: 5,
+            weeksAhead: 0,
+            trackAssignments: false,
+            trackAbsence: false,
+            trackDocuments: false
+        }));
+
+        if (window.SCENARIO === 'silent' || window.SCENARIO === 'acked') {
+            /* Something is here, and it answers Discovery - so a module cannot
+               tell from the handshake whether slots are understood. `silent`
+               never answers a slot request, which is exactly what every
+               Manager before 1.28.0 does. `acked` says "wait" and then never
+               comes back, which is a Manager that died holding the queue. */
+            window.addEventListener('lectio-module:register', () => {});
+            window.dispatchEvent(new CustomEvent('lectio-manager:discover'));
+
+            if (window.SCENARIO === 'acked') {
+                window.addEventListener('lectio-manager:slot:request', (event) => {
+                    const detail = event.detail || {};
+                    window.dispatchEvent(new CustomEvent('lectio-manager:slot:wait', {
+                        detail: { moduleId: detail.moduleId, requestId: detail.requestId }
+                    }));
+                });
+            }
+        }
+
+        if (window.SCENARIO === 'real' || window.SCENARIO === 'old') {
+            document.write('<scr' + 'ipt src="'
+                + (window.SCENARIO === 'old' ? '/manager-old.js' : '/manager/Lectio-Manager.user.js')
+                + '"></scr' + 'ipt>');
+        }
+    </script>
+</head>
+<body>
+    <div id="nav">
+        <a href="/lectio/223/beskeder2.aspx">Beskeder</a>
+    </div>
+
+    <table id="s_m_Content_Content_SkemaNy_skematabel">
+        <tr class="s2dayHeader"><th>Uge 38</th></tr>
+        <tr>
+            <td data-date="2026-09-14">
+                <a class="s2skemabrik s2brik s2normal" href="/lectio/223/aktivitet/aktivitetforside2.aspx?absid=900001"
+                   data-tooltip="Matematik A&#10;14/9-2026 08:00 til 09:30&#10;Hold: 3a MA&#10;Lokaler: A12">
+                    <span class="s2skemabrikcontent">Matematik A</span>
+                </a>
+            </td>
+        </tr>
+    </table>
+
+    <pre id="test-result" data-test-result="pending">PENDING</pre>
+
+    <script src="/modules-unstable/Lectio-Subject-Colours.user.js"></script>
+    <script src="/modules-unstable/Lectio-Chairs-Up.user.js"></script>
+    <script src="/modules-unstable/Lectio-Unread-Message-Notifications.user.js"></script>
+    <script src="/modules-unstable/Lectio-Change-Radar.user.js"></script>
+
+    <script>
+        const SLOT_ANSWER_MS = 1200;
+        const SLOT_MAX_WAIT_MS = 8000;
+
+        /* Every module that fetches in the background asks for a turn. */
+        const ASKERS = ['subject-colours', 'chairs-up', 'message-notifications', 'change-radar'];
+
+        function assert(condition, message) {
+            if (!condition) throw new Error(message);
+        }
+
+        /* What one module's first turn cost it: from asking to handing it back.
+           The stub answers in FETCH_MS, so this is the wait plus a known
+           constant - which is what makes a starved module visible. */
+        function turnAt(moduleId, index) {
+            const asks = window.slotEvents.filter((entry) =>
+                entry.name === 'request' && entry.moduleId === moduleId);
+            const asked = index < 0 ? asks[asks.length + index] : asks[index];
+            if (!asked) return null;
+
+            const given = window.slotEvents.find((entry) =>
+                entry.name === 'release' && entry.moduleId === moduleId
+                && entry.requestId === asked.requestId && entry.at >= asked.at);
+
+            return {
+                asks: asks.length,
+                asked: asked.at,
+                released: given ? given.at : null,
+                cost: given ? given.at - asked.at : null
+            };
+        }
+
+        const firstTurn = (moduleId) => turnAt(moduleId, 0);
+        const lastTurn = (moduleId) => turnAt(moduleId, -1);
+
+        window.addEventListener('load', async () => {
+            const output = document.getElementById('test-result');
+
+            /* Long enough for the slowest scenario: a module that has been
+               acknowledged waits out its own eight-second ceiling, and Subject
+               Colours does not even arm its scan until 1.8s. Chrome runs this
+               on a virtual clock. */
+            await new Promise((done) => setTimeout(done, 30000));
+
+            const report = {
+                scenario: window.SCENARIO,
+                maxConcurrentFetches: window.maxConcurrentFetches,
+                fetches: window.fetchLog.length,
+                turns: Object.fromEntries(ASKERS.map((id) => [id, firstTurn(id)])),
+                lastTurns: Object.fromEntries(ASKERS.map((id) => [id, lastTurn(id)]))
+            };
+
+            try {
+                assert(window.pageErrors.length === 0,
+                    `a module threw: ${window.pageErrors.join(' | ')}`);
+
+                assert(window.fetchLog.length > 0, 'no module fetched anything at all');
+
+                for (const moduleId of ASKERS) {
+                    const turn = report.turns[moduleId];
+                    assert(turn, `${moduleId} never asked for a turn`);
+                    assert(turn.released !== null,
+                        `${moduleId} asked for a turn and never finished with it - it is starved`);
+                }
+
+                if (window.SCENARIO === 'none' || window.SCENARIO === 'silent' || window.SCENARIO === 'old') {
+                    /* THE PATH THAT SILENTLY BREAKS EVERYTHING. Nothing
+                       answers, so every module has to fall through to its own
+                       timer. The ceiling below is the answer window plus the
+                       stubbed request; anything past it means a module is
+                       waiting on a reply that is never coming. */
+                    for (const moduleId of ASKERS) {
+                        const turn = report.turns[moduleId];
+                        assert(turn.cost <= SLOT_ANSWER_MS + 1000,
+                            `${moduleId} waited ${turn.cost}ms on a Manager that never answered`);
+                    }
+
+                    /* And only once. "Proceeds immediately with no wait" is
+                       the acceptance criterion, and a module that paid the
+                       answer window on every request would turn a room
+                       discovery pass into a minute and a half of nothing. */
+                    for (const moduleId of ASKERS) {
+                        const turn = report.lastTurns[moduleId];
+                        if (turn.asks < 2) continue;
+                        assert(turn.cost !== null && turn.cost < SLOT_ANSWER_MS,
+                            `${moduleId} paid the answer window again on request ${turn.asks}`
+                            + ` (${turn.cost}ms), so a page with no Manager pays it every time`);
+                    }
+                }
+
+                if (window.SCENARIO === 'acked') {
+                    /* A Manager that said "wait" and then died. The modules
+                       wait longer, because being acknowledged is worth waiting
+                       for - and then go anyway, on their own ceiling. */
+                    for (const moduleId of ASKERS) {
+                        const turn = report.turns[moduleId];
+                        assert(turn.cost > SLOT_ANSWER_MS,
+                            `${moduleId} ignored the acknowledgement and went at ${turn.cost}ms`);
+                        assert(turn.cost <= SLOT_MAX_WAIT_MS + 1000,
+                            `${moduleId} waited ${turn.cost}ms on a Manager that never came back`);
+                    }
+                }
+
+                if (window.SCENARIO === 'real') {
+                    /* The acceptance criterion: with a Manager present, the
+                       modules take turns instead of firing together. */
+                    assert(window.maxConcurrentFetches === 1,
+                        `${window.maxConcurrentFetches} background requests overlapped with the broker running`);
+                }
+
+                if (window.SCENARIO === 'silent') {
+                    /* And the proof that the line above is worth asserting:
+                       without a broker these same four modules do collide. */
+                    assert(window.maxConcurrentFetches > 1,
+                        'nothing overlapped even without a broker, so the serialisation check proves nothing');
+                }
+
+                output.dataset.testResult = 'pass';
+                output.textContent = `PASS ${JSON.stringify(report)}`;
+            } catch (error) {
+                output.dataset.testResult = 'fail';
+                output.textContent = `FAIL: ${error.message} ${JSON.stringify(report)}`;
+            }
+        });
+    </script>
+</body>
+</html>

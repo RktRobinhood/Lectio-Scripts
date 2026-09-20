@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Subject Colours
 // @namespace    https://www.lectio.dk/
-// @version      0.10.0
+// @version      0.11.0
 // @description  Learns which classes are actually yours from your own timetable and gives each one its own colour, with a separate muted spectrum for one-off activities like assemblies and meetings.
 // @match        https://www.lectio.dk/lectio/*
 // @grant        none
@@ -15,7 +15,7 @@
 
     const MODULE_ID = 'subject-colours';
     const MODULE_NAME = 'Lectio - Subject Colours';
-    const MODULE_VERSION = '0.10.0';
+    const MODULE_VERSION = '0.11.0';
     const LOG = '[Lectio Subject Colours]';
     const STYLE_ID = 'lectio-subject-colours-styles';
 
@@ -102,6 +102,28 @@
     // browsers asking for the same eight weeks in the same instant. A scan is
     // invisible, so a wide spread costs nobody anything.
     const SCAN_START_JITTER_MS = 2500;
+
+    /*
+     * The Manager's optional request-slot broker (docs/manager-request-slots.md).
+     * The jitter above keeps this module out of step with other copies of
+     * itself; a slot keeps it out of step with the other modules, which is the
+     * part no module can arrange alone because it may not know they exist.
+     *
+     * Both numbers here belong to this page, and that is what makes it safe:
+     * nothing can be starved by a Manager. A live Manager answers inside the
+     * dispatch, so no answer at all within the first window means no Manager,
+     * an old one, or one that has stopped - the same case, and it means go
+     * now. A `wait` says a live Manager is holding the request behind somebody
+     * else, which is worth waiting longer for, but only up to a ceiling this
+     * module sets: past it the scan goes ahead and hands the slot straight
+     * back. Nothing the Manager sends can ask for more patience than this.
+     */
+    const SLOT_REQUEST_EVENT = 'lectio-manager:slot:request';
+    const SLOT_WAIT_EVENT = 'lectio-manager:slot:wait';
+    const SLOT_GRANT_EVENT = 'lectio-manager:slot:grant';
+    const SLOT_RELEASE_EVENT = 'lectio-manager:slot:release';
+    const SLOT_ANSWER_MS = 1200;
+    const SLOT_MAX_WAIT_MS = 8000;
     const MAX_ENTRIES = 400;
     const MAX_TRACKED_WEEKS = 26;
 
@@ -224,6 +246,21 @@
     const liveScanControllers = new Set();
     let scanStartTimer = 0;
     let scansSuspended = false;
+
+    // Slot requests this page view is still waiting on, and the counter their
+    // names come from. Bounded exactly like the controller Set above: an entry
+    // goes in when a request is made and comes out when it is released, on
+    // every exit path, and suspendBackgroundScans empties what is left.
+    const pendingSlots = new Map();
+    let slotSeq = 0;
+
+    // Whether the last request this page made went unanswered. One page view
+    // with no Manager on it must not pay the answer window once per week
+    // scanned: the first request establishes that nothing is listening and
+    // the rest go straight through. Any answer clears it again, so a Manager
+    // evaluated after this module - or one that comes back - is picked up on
+    // the next request rather than ignored for the life of the page.
+    let slotsUnanswered = false;
 
     // ============================================================
     // SETTINGS
@@ -1971,7 +2008,114 @@
         };
     }
 
+    function emitSlot(name, requestId) {
+        window.dispatchEvent(new CustomEvent(name, {
+            detail: { moduleId: MODULE_ID, requestId }
+        }));
+    }
+
+    function handleSlotAnswer(event) {
+        const detail = event && event.detail;
+        if (!detail || detail.moduleId !== MODULE_ID) return;
+
+        // Something is listening after all, so the next request pays the
+        // answer window again rather than assuming there is no broker here.
+        slotsUnanswered = false;
+
+        const pending = pendingSlots.get(detail.requestId);
+
+        if (!pending) {
+            // A grant for work this page has already finished or already given
+            // up on. Hand it straight back, or the Manager holds a turn for
+            // nobody until its own lease runs out.
+            if (event.type === SLOT_GRANT_EVENT) emitSlot(SLOT_RELEASE_EVENT, detail.requestId);
+            return;
+        }
+
+        if (event.type === SLOT_GRANT_EVENT) pending.go();
+        else pending.hold();
+    }
+
+    /*
+     * Resolves with the function that gives the turn back, and resolves either
+     * way - on a grant, or on this page's own timer. There is no rejection
+     * path and no path that never settles, which is the whole safety property:
+     * the worst a missing, old or broken Manager can cost is SLOT_ANSWER_MS.
+     */
+    function takeManagerSlot() {
+        slotSeq += 1;
+        const requestId = `r${slotSeq}`;
+
+        return new Promise(resolve => {
+            let timer = 0;
+            let settled = false;
+            let held = false;
+
+            const release = () => {
+                pendingSlots.delete(requestId);
+                emitSlot(SLOT_RELEASE_EVENT, requestId);
+            };
+
+            const go = () => {
+                if (settled) return;
+                settled = true;
+                window.clearTimeout(timer);
+                timer = 0;
+                resolve(release);
+            };
+
+            // Going ahead because nothing answered, rather than because the
+            // page is being torn down or the Manager said so. That is the one
+            // thing worth remembering between requests.
+            const giveUp = () => {
+                slotsUnanswered = true;
+                go();
+            };
+
+            pendingSlots.set(requestId, {
+                go,
+                // Only the first wait extends anything, so a Manager repeating
+                // itself cannot keep pushing this page's ceiling further out.
+                hold() {
+                    if (settled || held) return;
+                    held = true;
+                    window.clearTimeout(timer);
+                    timer = window.setTimeout(go, SLOT_MAX_WAIT_MS);
+                }
+            });
+
+            // A live Manager answers inside the dispatch below, so even the
+            // zero here still gets a grant when there is one to get: the
+            // timer cannot fire until the current task ends, and the answer
+            // arrives inside it.
+            timer = window.setTimeout(giveUp, slotsUnanswered ? 0 : SLOT_ANSWER_MS);
+            emitSlot(SLOT_REQUEST_EVENT, requestId);
+        });
+    }
+
+    // Nothing waiting on a turn may outlive the page view, frozen or gone: the
+    // waiters are resolved so no promise is left dangling, and every turn is
+    // handed back so the Manager is not holding slots for a page that has
+    // stopped. The suspended re-check in fetchWeek is what keeps a resolved
+    // waiter from starting a request on the way out.
+    function releaseManagerSlots() {
+        for (const pending of [...pendingSlots.values()]) pending.go();
+        for (const requestId of [...pendingSlots.keys()]) {
+            pendingSlots.delete(requestId);
+            emitSlot(SLOT_RELEASE_EVENT, requestId);
+        }
+    }
+
     async function fetchWeek(week) {
+        // Ask the Manager for a turn before anything is armed, so a request
+        // that waits does not spend its own timeout waiting.
+        const releaseSlot = await takeManagerSlot();
+
+        if (lifecycle.signal.aborted || scansSuspended) {
+            releaseSlot();
+            throw new Error(`week ${week} was dropped: the page stopped scanning`);
+        }
+
         // A hard timeout per request. Without one, a Lectio that accepts the
         // connection and never answers held both the scanning flag and the
         // cross-tab scan lock for as long as the page lived, which made the
@@ -2026,6 +2170,7 @@
             window.clearTimeout(timeoutTimer);
             liveScanControllers.delete(controller);
             composed.release();
+            releaseSlot();
         }
     }
 
@@ -2097,6 +2242,7 @@
         }
 
         liveScanControllers.clear();
+        releaseManagerSlots();
     }
 
     function resumeBackgroundScans(event) {
@@ -2600,6 +2746,8 @@
     window.addEventListener('lectio-manager:preview-setting', handlePreview, { signal: lifecycle.signal });
     window.addEventListener('lectio-manager:clear-setting-preview', handleClearPreview, { signal: lifecycle.signal });
     window.addEventListener('lectio-manager:dock:render-panel', handleDockPanelRender, { signal: lifecycle.signal });
+    window.addEventListener(SLOT_WAIT_EVENT, handleSlotAnswer, { signal: lifecycle.signal });
+    window.addEventListener(SLOT_GRANT_EVENT, handleSlotAnswer, { signal: lifecycle.signal });
     // Deliberately not { once: true }, and deliberately split in two. A page
     // frozen for the back/forward cache fires pagehide with persisted set and
     // may be restored without this script ever running again, so tearing the

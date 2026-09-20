@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Change Radar
 // @namespace    https://github.com/RktRobinhood/Lectio-Scripts
-// @version      0.8.0
+// @version      0.9.0
 // @description  Watches Lectio for the changes you choose to track - timetable, assignments, absence, documents - and keeps a compact recent-change HUD.
 // @author       RktRobinhood
 // @match        https://www.lectio.dk/lectio/*
@@ -20,7 +20,7 @@
     id: 'change-radar',
     aliases: ['schedule-change-radar', 'lectio-change-radar', 'change-log'],
     name: 'Lectio Change Radar',
-    version: '0.8.0',
+    version: '0.9.0',
     channel: 'unstable'
   });
 
@@ -55,6 +55,30 @@
   // costs the user nothing visible, because the HUD renders from stored state
   // long before the first check answers.
   const FIRST_POLL_JITTER_MS = 4000;
+
+  /*
+   * The Manager's optional request-slot broker (docs/manager-request-slots.md).
+   * Jitter keeps this module from marching in step with other copies of itself;
+   * a slot keeps it from marching in step with the other modules, which is the
+   * part no module can arrange on its own because it may not know they exist.
+   *
+   * Both numbers below are this page's own, and they are what makes the whole
+   * thing safe: nothing here can be starved by a Manager. An answer of any
+   * kind is expected almost immediately, because a live Manager replies inside
+   * the dispatch - so no answer within the first window means no Manager, an
+   * old Manager, or a Manager that has stopped, all of which are the same case
+   * and all of which mean go now. A `wait` says a live Manager is holding the
+   * request behind somebody else, which is worth waiting longer for, but only
+   * up to a ceiling this module sets: past it the request goes ahead anyway
+   * and gives the slot straight back. The Manager's own numbers are never
+   * read, so it cannot ask for more patience than this.
+   */
+  const SLOT_REQUEST_EVENT = 'lectio-manager:slot:request';
+  const SLOT_WAIT_EVENT = 'lectio-manager:slot:wait';
+  const SLOT_GRANT_EVENT = 'lectio-manager:slot:grant';
+  const SLOT_RELEASE_EVENT = 'lectio-manager:slot:release';
+  const SLOT_ANSWER_MS = 1200;
+  const SLOT_MAX_WAIT_MS = 8000;
 
   const DISPLAY_MODES = Object.freeze(['auto', 'dock', 'floating']);
   // Bumped when a stored setting needs rewriting rather than merely
@@ -235,7 +259,22 @@
     startTimer: null,
     pollFailures: 0,
     backoffUntil: 0,
-    liveFetchControllers: new Set()
+    liveFetchControllers: new Set(),
+
+    // Slot requests this page view is still waiting on, and the counter their
+    // names come from. Bounded the same way liveFetchControllers is: an entry
+    // goes in when a request is made and comes out when it is released, on
+    // every exit path, and suspendPolling empties what is left.
+    slotSeq: 0,
+    pendingSlots: new Map(),
+
+    // Whether the last request this page made went unanswered. One page view
+    // with no Manager on it must not pay the answer window once per request:
+    // the first one establishes that nothing is listening and the rest go
+    // straight through. Any answer clears it again, so a Manager evaluated
+    // after this module - or one that comes back - is picked up on the next
+    // request rather than being ignored for the life of the page.
+    slotsUnanswered: false
   };
 
   // The Manager announces itself by asking every module to register. Automatic
@@ -256,6 +295,8 @@
   window.addEventListener('lectio-manager:set-setting', handleManagerSettingsEvent);
   window.addEventListener('lectio-manager:prune-storage', handlePruneStorage);
   window.addEventListener('lectio-manager:dock:render-panel', handleDockPanelRender);
+  window.addEventListener(SLOT_WAIT_EVENT, handleSlotAnswer);
+  window.addEventListener(SLOT_GRANT_EVENT, handleSlotAnswer);
   // Deliberately not { once: true }, and deliberately split in two. A page
   // frozen for the back/forward cache fires pagehide with persisted set and may
   // be restored without this script ever running again, so tearing the module
@@ -472,6 +513,7 @@
     }
 
     runtime.liveFetchControllers.clear();
+    releaseManagerSlots();
   }
 
   function resumePolling(event) {
@@ -771,7 +813,113 @@
     return { doc: await fetchLectioDocument(url), url };
   }
 
+  function emitSlot(name, requestId) {
+    window.dispatchEvent(new CustomEvent(name, {
+      detail: { moduleId: MODULE.id, requestId }
+    }));
+  }
+
+  function handleSlotAnswer(event) {
+    const detail = event && event.detail;
+    if (!detail || detail.moduleId !== MODULE.id) return;
+
+    // Something is listening after all, so the next request pays the answer
+    // window again rather than assuming this page has no broker on it.
+    runtime.slotsUnanswered = false;
+
+    const pending = runtime.pendingSlots.get(detail.requestId);
+
+    if (!pending) {
+      // A grant for work this page has already finished or already given up
+      // on. Hand it straight back, or the Manager holds a turn for nobody
+      // until its own lease runs out and everything else queues behind it.
+      if (event.type === SLOT_GRANT_EVENT) emitSlot(SLOT_RELEASE_EVENT, detail.requestId);
+      return;
+    }
+
+    if (event.type === SLOT_GRANT_EVENT) pending.go();
+    else pending.hold();
+  }
+
+  /*
+   * Resolves with the function that gives the turn back, and resolves either
+   * way - on a grant, or on this page's own timer. There is no rejection path
+   * and no path that never settles, which is the whole safety property: the
+   * worst a missing, old or broken Manager can cost is SLOT_ANSWER_MS.
+   */
+  function takeManagerSlot() {
+    runtime.slotSeq += 1;
+    const requestId = `r${runtime.slotSeq}`;
+
+    return new Promise((resolve) => {
+      let timer = 0;
+      let settled = false;
+      let held = false;
+
+      const release = () => {
+        runtime.pendingSlots.delete(requestId);
+        emitSlot(SLOT_RELEASE_EVENT, requestId);
+      };
+
+      const go = () => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        timer = 0;
+        resolve(release);
+      };
+
+      // Going ahead because nothing answered, rather than because the page is
+      // being torn down or the Manager said so. That is the one thing worth
+      // remembering between requests.
+      const giveUp = () => {
+        runtime.slotsUnanswered = true;
+        go();
+      };
+
+      runtime.pendingSlots.set(requestId, {
+        go,
+        // Only the first wait extends anything. A Manager repeating itself
+        // cannot keep pushing this page's ceiling further out.
+        hold() {
+          if (settled || held) return;
+          held = true;
+          window.clearTimeout(timer);
+          timer = window.setTimeout(go, SLOT_MAX_WAIT_MS);
+        }
+      });
+
+      // A live Manager answers inside the dispatch below, so even the zero
+      // here still gets a grant when there is one to get: the timer cannot
+      // fire until the current task ends, and the answer arrives inside it.
+      timer = window.setTimeout(giveUp, runtime.slotsUnanswered ? 0 : SLOT_ANSWER_MS);
+      emitSlot(SLOT_REQUEST_EVENT, requestId);
+    });
+  }
+
+  // Nothing waiting on a turn may outlive the page view, frozen or gone: the
+  // waiters are resolved so no promise is left dangling, and every turn is
+  // handed back so the Manager is not holding slots for a page that has
+  // stopped. The suspended re-check in fetchLectioDocument is what keeps a
+  // resolved waiter from starting a request on the way out.
+  function releaseManagerSlots() {
+    for (const pending of [...runtime.pendingSlots.values()]) pending.go();
+    for (const requestId of [...runtime.pendingSlots.keys()]) {
+      runtime.pendingSlots.delete(requestId);
+      emitSlot(SLOT_RELEASE_EVENT, requestId);
+    }
+  }
+
   async function fetchLectioDocument(url) {
+    // Ask the Manager for a turn before anything is armed, so a request that
+    // waits does not spend its own timeout waiting.
+    const releaseSlot = await takeManagerSlot();
+
+    if (runtime.suspended) {
+      releaseSlot();
+      throw new Error('The page stopped background checking.');
+    }
+
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), BASE_CONFIG.fetchTimeoutMs);
 
@@ -807,6 +955,7 @@
     } finally {
       window.clearTimeout(timeout);
       runtime.liveFetchControllers.delete(controller);
+      releaseSlot();
     }
   }
 

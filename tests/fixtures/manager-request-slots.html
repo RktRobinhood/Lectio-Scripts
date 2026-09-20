@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio Manager request-slot fixture</title>
+</head>
+<body>
+    <script>
+        /*
+         * The Manager's side of the request-slot contract
+         * (docs/manager-request-slots.md), exercised by stand-in modules that
+         * are nothing but two identifiers and a listener - which is the point.
+         * The broker is generic: it never learns what is being fetched, so a
+         * fixture that fetched anything would be testing the wrong thing.
+         *
+         * Injected after load, the way Tampermonkey injects it at
+         * document-idle, because the slot listeners are added from the boot
+         * block and the state they reach is declared above it.
+         */
+        const storage = new Map([
+            ['lectioManager.catalogue.v1', JSON.stringify({
+                schemaVersion: 1,
+                generatedAt: '2026-09-20T00:00:00.000Z',
+                modules: [{
+                    id: 'alpha',
+                    name: 'Alpha',
+                    description: 'A stand-in module.',
+                    category: 'Interface',
+                    audience: ['student'],
+                    status: 'stable',
+                    version: '1.0.0',
+                    installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/alpha.user.js',
+                    supportUrl: 'https://github.com/RktRobinhood/Lectio-Scripts/issues'
+                }]
+            })],
+            ['lectioManager.lastRefresh.v1', Date.now()],
+            ['lectioManager.updateTipDismissed.v1', true]
+        ]);
+
+        window.GM_getValue = (key, fallback) => storage.has(key) ? storage.get(key) : fallback;
+        window.GM_setValue = (key, value) => storage.set(key, value);
+        window.GM_xmlhttpRequest = () => {};
+
+        window.pageErrors = [];
+        window.addEventListener('error', (event) => window.pageErrors.push(String(event.message)));
+
+        // Every answer the Manager gives, in order, so an assertion can say
+        // both what arrived and what did not.
+        const answers = [];
+        const answered = (kind) => (event) => {
+            const detail = event.detail || {};
+            answers.push({ kind, moduleId: detail.moduleId, requestId: detail.requestId });
+        };
+        window.addEventListener('lectio-manager:slot:wait', answered('wait'));
+        window.addEventListener('lectio-manager:slot:grant', answered('grant'));
+
+        const request = (moduleId, requestId) => window.dispatchEvent(
+            new CustomEvent('lectio-manager:slot:request', { detail: { moduleId, requestId } }));
+        const release = (moduleId, requestId) => window.dispatchEvent(
+            new CustomEvent('lectio-manager:slot:release', { detail: { moduleId, requestId } }));
+
+        const answersFor = (moduleId, requestId) => answers
+            .filter((entry) => entry.moduleId === moduleId && entry.requestId === requestId)
+            .map((entry) => entry.kind);
+
+        const problemLog = () => {
+            try {
+                return JSON.parse(storage.get('lectioManager.log.v1') || '[]');
+            } catch (_) {
+                return [];
+            }
+        };
+
+        const wait = (ms) => new Promise((done) => setTimeout(done, ms));
+
+        function assert(condition, message) {
+            if (!condition) throw new Error(message);
+        }
+
+        async function run() {
+            /*
+             * 1. Serialised, not simultaneous. Two modules ask in the same
+             *    instant; only one is told to go, and the other is told it has
+             *    been heard. This is the acceptance criterion the whole thing
+             *    exists for.
+             */
+            request('alpha', 'r1');
+            request('beta', 'r1');
+
+            assert(answersFor('alpha', 'r1').join() === 'grant',
+                `first asker was not granted: ${answersFor('alpha', 'r1')}`);
+            assert(answersFor('beta', 'r1').join() === 'wait',
+                `second asker was not held: ${answersFor('beta', 'r1')}`);
+
+            // ...and the turn passes on when the first one gives it back.
+            release('alpha', 'r1');
+            assert(answersFor('beta', 'r1').join() === 'wait,grant',
+                `a released turn did not pass on: ${answersFor('beta', 'r1')}`);
+
+            /*
+             * 2. A module that gave up waiting and went ahead on its own clock
+             *    releases the same way. Its place in the queue goes with it,
+             *    rather than the turn being handed to work that has finished.
+             */
+            request('gamma', 'r1');
+            assert(answersFor('gamma', 'r1').join() === 'wait',
+                `a third asker was not held: ${answersFor('gamma', 'r1')}`);
+
+            release('gamma', 'r1');
+            release('beta', 'r1');
+
+            assert(answersFor('gamma', 'r1').join() === 'wait',
+                `a withdrawn request was still granted: ${answersFor('gamma', 'r1')}`);
+
+            request('delta', 'r1');
+            assert(answersFor('delta', 'r1').join() === 'grant',
+                `the queue did not empty after a withdrawal: ${answersFor('delta', 'r1')}`);
+            release('delta', 'r1');
+
+            /*
+             * 3. THE PATH THAT SILENTLY BREAKS EVERYTHING. A module takes a
+             *    turn and dies without handing it back. The slot has to come
+             *    back on its lease, or one dead page view wedges every other
+             *    module behind it for the rest of that page's life.
+             */
+            request('epsilon', 'r1');
+            assert(answersFor('epsilon', 'r1').join() === 'grant', 'a free slot was not granted');
+
+            request('zeta', 'r1');
+            assert(answersFor('zeta', 'r1').join() === 'wait',
+                `a request behind a holder was not held: ${answersFor('zeta', 'r1')}`);
+
+            // Nothing may move before the lease is up - a lease that expired
+            // early would be no lease at all.
+            await wait(5000);
+            assert(answersFor('zeta', 'r1').join() === 'wait',
+                'the lease released a live holder early');
+
+            await wait(40000);
+            assert(answersFor('zeta', 'r1').join() === 'wait,grant',
+                `a slot nobody handed back was never reclaimed: ${answersFor('zeta', 'r1')}`);
+
+            // The reclaim is what the problem log is for: a module whose
+            // background work keeps hanging shows up there.
+            const reclaimed = problemLog().filter((entry) => entry.code === 'slot-reclaimed');
+            assert(reclaimed.length === 1,
+                `a reclaimed slot was not logged: ${JSON.stringify(problemLog())}`);
+            assert(reclaimed[0].moduleId === 'epsilon',
+                `the reclaim was logged against ${reclaimed[0].moduleId}`);
+            assert(!('message' in reclaimed[0]) || !reclaimed[0].message,
+                'the broker put free text in the log');
+
+            release('zeta', 'r1');
+
+            /*
+             * 4. A full queue grants rather than refuses. Making somebody wait
+             *    for the Manager's own mess is the one thing this must not do.
+             */
+            request('eta', 'hold');
+            assert(answersFor('eta', 'hold').join() === 'grant', 'a free slot was not granted');
+
+            for (let index = 0; index < 24; index += 1) request('theta', `q${index}`);
+            assert(answersFor('theta', 'q23').join() === 'wait',
+                'the queue refused a request while it still had room');
+
+            request('theta', 'overflow');
+            assert(answersFor('theta', 'overflow').join() === 'grant',
+                `an overflowing request was made to wait: ${answersFor('theta', 'overflow')}`);
+            assert(problemLog().some((entry) => entry.code === 'slot-queue-full'),
+                `a full queue was not logged: ${JSON.stringify(problemLog())}`);
+
+            release('theta', 'overflow');
+            release('eta', 'hold');
+            for (let index = 0; index < 24; index += 1) release('theta', `q${index}`);
+
+            /*
+             * 5. A request the Manager cannot name is never answered at all,
+             *    so the module falls through to its own timer and goes ahead.
+             *    Answering one would also be a module id in the compound key's
+             *    own separator.
+             */
+            const before = answers.length;
+            request('has space', 'r1');
+            request('iota', 'has space');
+            request('iota', '');
+            window.dispatchEvent(new CustomEvent('lectio-manager:slot:request'));
+            assert(answers.length === before,
+                `the Manager answered a request it could not name: ${JSON.stringify(answers.slice(before))}`);
+
+            assert(window.pageErrors.length === 0,
+                `the Manager threw while brokering: ${window.pageErrors.join(' | ')}`);
+        }
+
+        window.addEventListener('load', () => {
+            const script = document.createElement('script');
+            script.src = '../../manager/Lectio-Manager.user.js';
+            script.onload = () => setTimeout(() => {
+                run().then(
+                    () => { document.documentElement.dataset.testResult = 'pass'; },
+                    (error) => { document.documentElement.dataset.testResult = `fail: ${error.message}`; }
+                );
+            }, 200);
+            document.head.appendChild(script);
+        });
+    </script>
+</body>
+</html>

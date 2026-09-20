@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.27.0
+// @version      1.28.0
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules, including their settings and shared dock controls.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
@@ -386,7 +386,7 @@
     // Kept in step with the @version header by scripts/check-versions.mjs. The
     // header is metadata Tampermonkey reads; this is the only copy the running
     // script can see, and it is what the self-update notice compares.
-    const MANAGER_VERSION = '1.27.0';
+    const MANAGER_VERSION = '1.28.0';
 
     const STABLE_CATALOGUE_URL =
         'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/catalogue/modules.json';
@@ -429,6 +429,19 @@
      * wrong loses the user's work. See docs/manager-storage-api.md.
      */
     const PRUNE_STORAGE_EVENT = 'lectio-manager:prune-storage';
+
+    /*
+     * Four events, one namespace, two fields each. A module asks for a turn at
+     * doing background work; the Manager answers straight away - either with a
+     * grant, or with a wait saying it is holding the request behind somebody
+     * else - and the module hands the turn back when it is done. Both fields
+     * are opaque strings: the Manager needs a name to answer to, and nothing
+     * else. See docs/manager-request-slots.md.
+     */
+    const SLOT_REQUEST_EVENT = 'lectio-manager:slot:request';
+    const SLOT_WAIT_EVENT = 'lectio-manager:slot:wait';
+    const SLOT_GRANT_EVENT = 'lectio-manager:slot:grant';
+    const SLOT_RELEASE_EVENT = 'lectio-manager:slot:release';
 
     // Keep the original stable cache keys so existing users do not lose their
     // last-known-good production catalogue during this upgrade.
@@ -573,6 +586,40 @@
     const SETTINGS_FILE_KEY_LIMIT = 400;
     const SETTINGS_TEXT_LIMIT = 2048;
 
+    /*
+     * REQUEST SLOTS
+     * -------------
+     * Four modules fetch Lectio pages in the background, and nothing staggers
+     * them against each other: on one poll interval a browser fires a burst at
+     * the school's server from every script at once. Each module already damps
+     * its own rhythm (timeouts, backoff, start jitter); this is the part no
+     * module can do alone, because a module may not know another one exists.
+     *
+     * So the Manager hands out turns, and that is the whole of it. It does not
+     * know what is being fetched, why, or whether anything is being fetched at
+     * all - a slot is a turn, and both identifiers on it are opaque strings it
+     * only ever compares and echoes. If anything here ever needed to know which
+     * module was asking, or what for, it would be the wrong design (ADR-0001).
+     *
+     * Everything below is written so that the *worst* thing a broken Manager
+     * can do is nothing. The module's own clock is the authority: it waits a
+     * short moment for any answer at all and goes ahead if none comes, so an
+     * absent Manager, an old one that has never heard of slots, and one that
+     * has stopped answering are the same case and all cost the same short
+     * pause. From this side the same rule holds twice over: a queue that fills
+     * up grants rather than refuses, and a slot nobody hands back comes back on
+     * a lease rather than wedging the queue for the life of the page.
+     *
+     * One at a time is the point - the burst is what hurts, not the requests -
+     * and the lease is comfortably longer than the longest fetch timeout any
+     * module sets (20s in Change Radar), so reaching it means the work behind
+     * the slot really has hung rather than merely taken a while.
+     */
+    const SLOT_CONCURRENCY = 1;
+    const SLOT_LEASE_MS = 30 * 1000;
+    const SLOT_QUEUE_LIMIT = 24;
+    const SLOT_ID_LIMIT = 64;
+
     const ISSUES_URL = 'https://github.com/RktRobinhood/Lectio-Scripts/issues/new/choose';
 
     const AUDIENCE_VIEW_PREFIX = 'audience:';
@@ -635,6 +682,22 @@
 
     const dockItems = new Map();
 
+    /*
+     * Who holds a turn, and who is waiting for one. Declared up here with the
+     * rest of the module-scope state on purpose: the slot listeners are added
+     * in the boot block below, so a module registering a request during the
+     * Manager's own top-level evaluation reaches both of these - and state
+     * declared down beside the functions that use it would be read in its
+     * temporal dead zone and throw. That is the shape 1.21.0, 1.25.0 and
+     * 1.27.0 each shipped.
+     *
+     * Both are bounded: holders by SLOT_CONCURRENCY, the queue by
+     * SLOT_QUEUE_LIMIT, and every holder's lease timer is cleared on the one
+     * path that removes it. Neither outlives the page.
+     */
+    const slotHolders = new Map();
+    const slotQueue = [];
+
     // Modules that registered on THIS page load. A module only registers where its
     // own @match lets it run, so this is "active here", not "installed".
     const detected = new Map();
@@ -657,6 +720,18 @@
     window.addEventListener('error', handleWindowError);
     window.addEventListener('unhandledrejection', handleWindowRejection);
     window.addEventListener(REPORT_EVENT, handleModuleReport);
+
+    /*
+     * Eager for the same reason as the three above, and for one of its own: a
+     * module's first background request goes out within a second or two of
+     * page load, and userscripts are evaluated in no particular order. A slot
+     * request that arrives before init() would simply go unanswered - the
+     * module would fail open and fetch, which is correct but is the burst this
+     * exists to spread out. Answering from the boot block costs nothing and
+     * removes the ordering question entirely.
+     */
+    window.addEventListener(SLOT_REQUEST_EVENT, handleSlotRequest);
+    window.addEventListener(SLOT_RELEASE_EVENT, handleSlotRelease);
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', init, { once: true });
@@ -1553,6 +1628,132 @@
                 ? { id: moduleId, prefix: entry.prefix }
                 : { id: moduleId, key: entry.key }
         }));
+    }
+
+    // ============================================================
+    // REQUEST SLOTS
+    // ============================================================
+
+    function slotKey(moduleId, requestId) {
+        return `${moduleId}:${requestId}`;
+    }
+
+    function emitSlot(name, moduleId, requestId) {
+        window.dispatchEvent(new CustomEvent(name, { detail: { moduleId, requestId } }));
+    }
+
+    /*
+     * Both identifiers go through safeIdentifier, the same check a report code
+     * gets: a token, never prose. That is not only a log-safety habit here -
+     * it is what keeps a module id out of the compound key's separator, and it
+     * means a request the Manager cannot name is one it never answers, so the
+     * module fails open instead of waiting on a reply addressed to nothing.
+     */
+    function handleSlotRequest(event) {
+        const detail = event?.detail;
+        if (!detail || typeof detail !== 'object') return;
+
+        const moduleId = safeIdentifier(detail.moduleId, SLOT_ID_LIMIT);
+        const requestId = safeIdentifier(detail.requestId, SLOT_ID_LIMIT);
+        if (!moduleId || !requestId) return;
+
+        const key = slotKey(moduleId, requestId);
+        if (slotHolders.has(key) || slotQueue.some((waiting) => waiting.key === key)) return;
+
+        if (slotHolders.size < SLOT_CONCURRENCY) {
+            grantSlot({ key, moduleId, requestId, timer: 0 });
+            return;
+        }
+
+        /*
+         * Fail open from this side too. A queue this long means something is
+         * wrong with the Manager rather than with the module at the back of
+         * it, and making somebody wait for the Manager's own mess is the one
+         * thing this must never do. It goes now, and it goes in the log.
+         */
+        if (slotQueue.length >= SLOT_QUEUE_LIMIT) {
+            recordLogEntry({
+                moduleId,
+                kind: 'notice',
+                code: 'slot-queue-full',
+                found: slotQueue.length
+            });
+            grantSlot({ key, moduleId, requestId, timer: 0 });
+            return;
+        }
+
+        slotQueue.push({ key, moduleId, requestId, timer: 0 });
+        emitSlot(SLOT_WAIT_EVENT, moduleId, requestId);
+    }
+
+    /*
+     * The holder is recorded and its lease armed before the grant goes out,
+     * because the dispatch is synchronous: a module that releases from inside
+     * its own grant handler must find itself already holding the slot.
+     */
+    function grantSlot(entry) {
+        entry.timer = window.setTimeout(() => reclaimSlot(entry.key), SLOT_LEASE_MS);
+        slotHolders.set(entry.key, entry);
+        emitSlot(SLOT_GRANT_EVENT, entry.moduleId, entry.requestId);
+    }
+
+    function handleSlotRelease(event) {
+        const detail = event?.detail;
+        if (!detail || typeof detail !== 'object') return;
+
+        const moduleId = safeIdentifier(detail.moduleId, SLOT_ID_LIMIT);
+        const requestId = safeIdentifier(detail.requestId, SLOT_ID_LIMIT);
+        if (!moduleId || !requestId) return;
+
+        releaseSlot(slotKey(moduleId, requestId));
+    }
+
+    function releaseSlot(key) {
+        const holder = slotHolders.get(key);
+
+        if (holder) {
+            window.clearTimeout(holder.timer);
+            slotHolders.delete(key);
+            pumpSlotQueue();
+            return;
+        }
+
+        /*
+         * A module that gave up waiting and went ahead on its own clock
+         * releases exactly the same way, so its place in the queue goes with
+         * it rather than being granted to work that has already finished.
+         */
+        const index = slotQueue.findIndex((waiting) => waiting.key === key);
+        if (index >= 0) slotQueue.splice(index, 1);
+    }
+
+    /*
+     * A slot that came back on its lease rather than from the module means the
+     * background work behind it has outlived a window longer than any module's
+     * own fetch timeout. That is worth a line in the log - a repeat folds into
+     * a counter there, so a module whose requests keep hanging shows up as one
+     * row with a number on it rather than a page of noise.
+     */
+    function reclaimSlot(key) {
+        const holder = slotHolders.get(key);
+        if (!holder) return;
+
+        window.clearTimeout(holder.timer);
+        slotHolders.delete(key);
+
+        recordLogEntry({
+            moduleId: holder.moduleId,
+            kind: 'notice',
+            code: 'slot-reclaimed'
+        });
+
+        pumpSlotQueue();
+    }
+
+    function pumpSlotQueue() {
+        while (slotQueue.length && slotHolders.size < SLOT_CONCURRENCY) {
+            grantSlot(slotQueue.shift());
+        }
     }
 
     // ============================================================

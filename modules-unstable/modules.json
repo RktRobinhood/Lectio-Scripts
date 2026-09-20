@@ -34,15 +34,15 @@
         "teacher"
       ],
       "status": "unstable",
-      "version": "1.3.0",
-      "changelog": "Chairs Up now clears its own out-of-date room caches when a page loads, instead of keeping one entry per room per week forever. It also tells the Manager what it stores, so you can see the size and clear it.",
+      "version": "1.4.0",
+      "changelog": "With the Lectio Manager installed, Chairs Up now waits its turn before a background room lookup, so the modules stop hitting Lectio all at once. With no Manager, an older one, or one that does not answer, nothing waits.",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Chairs-Up.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
       "i18n": {
         "da": {
           "name": "Stole Op",
           "description": "Markerer en lektion, når den er dagens sidste aktive booking i det lokale.",
-          "changelog": "Stole Op rydder nu selv sine forældede lokale-caches, når en side indlæses, i stedet for at gemme én post pr. lokale pr. uge for evigt. Den fortæller også Manageren, hvad den gemmer, så du kan se og rydde det."
+          "changelog": "Med Lectio Manager installeret venter Stole Op nu på tur, før den slår et lokale op i baggrunden, så modulerne ikke rammer Lectio på én gang. Uden Manager, med en ældre en eller en, der ikke svarer, venter intet."
         }
       }
     },
@@ -61,15 +61,15 @@
         "teacher"
       ],
       "status": "unstable",
-      "version": "0.8.0",
-      "changelog": "The change log is now capped by size as well as by number of entries, and a snapshot from a login this browser has not used in two months is dropped. Change Radar also tells the Manager what it stores.",
+      "version": "0.9.0",
+      "changelog": "With the Lectio Manager installed, Change Radar now waits its turn before checking in the background, so the modules stop hitting Lectio all at once. With no Manager, an older one, or one that does not answer, nothing waits.",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Change-Radar.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
       "i18n": {
         "da": {
           "name": "Lectio Ændringsradar",
           "description": "Eksperimentel Lectio-vagt med en kompakt radar-HUD i temaets farver. Du vælger selv, hvad den holder øje med - aflysninger, flytninger, lokaler, lærere og lektier i skemaet, plus valgfri overvågning af opgaver, fravær og dokumenter - plus kommende opgavefrister, der meldes, når de kommer inden for det valgte tidsrum - med hastestatus, styr på usete ændringer og en roterende lokal ændringslog.",
-          "changelog": "Ændringsloggen er nu begrænset af størrelse og ikke kun af antal poster, og et øjebliksbillede fra et login, browseren ikke har brugt i to måneder, fjernes. Radaren fortæller også Manageren, hvad den gemmer."
+          "changelog": "Med Lectio Manager installeret venter Ændringsradaren nu på tur, før den tjekker i baggrunden, så modulerne ikke rammer Lectio på én gang. Uden Manager, med en ældre en eller en, der ikke svarer, venter intet."
         }
       }
     },
@@ -83,15 +83,15 @@
         "teacher"
       ],
       "status": "unstable",
-      "version": "0.8.0",
-      "changelog": "The badge now clears cached counts left behind by older versions and by schools this browser has left, instead of carrying them forever. It also tells the Manager what it stores, and reports a count it could not save.",
+      "version": "0.9.0",
+      "changelog": "With the Lectio Manager installed, the badge now waits its turn before checking for messages, so the modules stop hitting Lectio all at once. With no Manager, an older one, or one that does not answer, nothing waits.",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Unread-Message-Notifications.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
       "i18n": {
         "da": {
           "name": "Ulæste beskeder",
           "description": "Viser et mærke med ulæste beskeder ved siden af Beskeder. Virker på alle Lectio-skoler og læser skolens id fra sidens adresse.",
-          "changelog": "Mærket rydder nu gemte tal, som ældre versioner og fraflyttede skoler har efterladt, i stedet for at slæbe rundt på dem for evigt. Det fortæller også Manageren, hvad det gemmer, og melder et tal, det ikke kunne gemme."
+          "changelog": "Med Lectio Manager installeret venter mærket nu på tur, før det tjekker efter beskeder, så modulerne ikke rammer Lectio på én gang. Uden Manager, med en ældre en eller en, der ikke svarer, venter intet."
         }
       }
     },
@@ -105,15 +105,15 @@
         "teacher"
       ],
       "status": "unstable",
-      "version": "0.10.0",
-      "changelog": "Subject Colours now trims its learned timetable when a page loads rather than only when it happens to save, and tells the Manager what it stores so you can see the size and clear the learned data without losing your chosen colours.",
+      "version": "0.11.0",
+      "changelog": "With the Lectio Manager installed, Subject Colours now waits its turn before scanning a week, so the modules stop hitting Lectio all at once. With no Manager, an older one, or one that does not answer, nothing waits.",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Subject-Colours.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
       "i18n": {
         "da": {
           "name": "Fagfarver",
           "description": "Lærer ud fra dit eget skema, hvilke hold der rent faktisk er dine, og giver hvert af dem sin egen farve, med et separat dæmpet farvespektrum til enkeltstående aktiviteter som morgensamlinger og møder. En valgfri figurmarkør pr. hold hjælper, når farve alene ikke er nok.",
-          "changelog": "Fagfarver beskærer nu det lærte skema, når en side indlæses, i stedet for kun når den tilfældigvis gemmer, og fortæller Manageren, hvad den gemmer, så du kan se størrelsen og rydde de lærte data uden at miste dine valgte farver."
+          "changelog": "Med Lectio Manager installeret venter Fagfarver nu på tur, før modulet scanner en uge, så modulerne ikke rammer Lectio på én gang. Uden Manager, med en ældre en eller en, der ikke svarer, venter intet."
         }
       }
     }
