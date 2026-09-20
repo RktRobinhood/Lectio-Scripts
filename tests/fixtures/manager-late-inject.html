@@ -17,11 +17,37 @@
          * This fixture is the only one that reproduces how the Manager is
          * actually injected.
          */
+        /*
+         * The cached catalogue carries a real entry, with every optional field
+         * a Manager reads. An empty `modules` array used to be enough, and was
+         * not: validateCatalogue bails on it before validating anything, so
+         * every per-field helper it calls stayed untested at the one moment
+         * that matters. One of those helpers was then declared as a const below
+         * init()'s call site and threw for every real install while this
+         * fixture stayed green.
+         */
         const storage = new Map([
             ['lectioManager.catalogue.v1', JSON.stringify({
                 schemaVersion: 1,
                 generatedAt: '2026-09-20T00:00:00.000Z',
-                modules: []
+                manager: {
+                    version: '1.0.0',
+                    installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/manager/Lectio-Manager.user.js'
+                },
+                modules: [{
+                    id: 'late-module',
+                    name: 'Late Module',
+                    description: 'A cached entry the Manager has to validate while booting late.',
+                    category: 'Interface',
+                    audience: ['student'],
+                    aliases: ['late-alias'],
+                    status: 'stable',
+                    version: '1.0.0',
+                    changelog: 'A cached entry with every optional field a Manager reads.',
+                    installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/late-module.user.js',
+                    supportUrl: 'https://github.com/RktRobinhood/Lectio-Scripts/issues',
+                    i18n: { da: { name: 'Sent modul', description: 'Dansk beskrivelse.', changelog: 'Dansk ændringstekst.' } }
+                }]
             })],
             ['lectioManager.lastRefresh.v1', Date.now()],
             ['lectioManager.updateTipDismissed.v1', true]
@@ -33,6 +59,13 @@
 
         window.bootErrors = [];
         window.addEventListener('error', (event) => window.bootErrors.push(String(event.message)));
+
+        // A throw inside validateCatalogue is caught and warned about, not
+        // raised, so booting late with a broken validator looks like a Manager
+        // that simply has no catalogue. Watch the warnings, not just the errors.
+        window.bootWarnings = [];
+        const nativeWarn = console.warn.bind(console);
+        console.warn = (...args) => { window.bootWarnings.push(args.map(String).join(' ')); nativeWarn(...args); };
 
         function assert(condition, message) {
             if (!condition) throw new Error(message);
@@ -47,6 +80,13 @@
                 try {
                     assert(window.bootErrors.length === 0, `Manager threw while booting: ${window.bootErrors.join(' | ')}`);
                     assert(document.querySelector('#lectio-manager-toggle'), 'Manager never built its button');
+
+                    // The cached catalogue survived being validated during a
+                    // late boot. Discarding it here is silent for the user and
+                    // costs them their whole module list until a refetch.
+                    const discarded = window.bootWarnings.filter((line) => /Discarding invalid cached catalogue/.test(line));
+                    assert(discarded.length === 0,
+                        `The Manager threw away its cached catalogue while booting late: ${discarded.join(' | ')}`);
 
                     const dock = document.querySelector('#lectio-manager-dock-root');
                     assert(dock, 'Manager never built its dock');

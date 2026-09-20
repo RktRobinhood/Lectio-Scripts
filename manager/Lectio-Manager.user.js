@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.25.0
+// @version      1.25.1
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules, including their settings and shared dock controls.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
@@ -294,7 +294,7 @@
     // Kept in step with the @version header by scripts/check-versions.mjs. The
     // header is metadata Tampermonkey reads; this is the only copy the running
     // script can see, and it is what the self-update notice compares.
-    const MANAGER_VERSION = '1.25.0';
+    const MANAGER_VERSION = '1.25.1';
 
     const STABLE_CATALOGUE_URL =
         'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/catalogue/modules.json';
@@ -818,16 +818,24 @@
      * be short: the panel is a fixed-width surface and one entry with a
      * runaway field must not be able to push everything else off it. Collapsing
      * whitespace also removes the other way to make one line very tall.
+     *
+     * The cap lives inside the function on purpose. init() is called from above
+     * this line whenever the Manager is injected into a page that has finished
+     * parsing - which is every real install, at document-idle - so it validates
+     * the cached catalogue while this part of the file is still a temporal dead
+     * zone. A module-scope `const` here reads as harmless and throws for every
+     * user; 1.21.0 shipped that exact shape. A function declaration hoists, and
+     * what is inside it is not evaluated until it is called.
      */
-    const CHANGELOG_MAX_LENGTH = 240;
-
     function boundedChangelog(value) {
+        const maxLength = 240;
+
         if (!isNonEmptyString(value)) return null;
 
         const text = value.replace(/\s+/g, ' ').trim();
 
-        return text.length > CHANGELOG_MAX_LENGTH
-            ? `${text.slice(0, CHANGELOG_MAX_LENGTH - 1).trimEnd()}…`
+        return text.length > maxLength
+            ? `${text.slice(0, maxLength - 1).trimEnd()}…`
             : text;
     }
 
