@@ -25,8 +25,5 @@ The extra patch bump at promotion is not ceremony. A tester's installed copy poi
 
 ## What is here now
 
-### `Lectio-Unstable-Channel-Test.user.js`
-A harmless diagnostic module: it runs on Lectio pages, registers itself with the Manager, puts a warning-state icon in the shared dock, and renders into a Manager-owned flyout when clicked. It modifies no Lectio records, messages, grades, attendance or account data. It exists to prove that an Unstable-only module appears only on the Unstable channel and that the dock registration and panel contract work without module-owned fixed positioning. **It is never promoted.**
-
 ### `Lectio-Change-Radar.user.js`
 An experimental timetable watcher — a compact themed radar HUD with urgency states, unseen-change tracking, configurable polling and a rotating local change log. Unstable-only so far; it has never had a stable release, so promoting it would be its first.
