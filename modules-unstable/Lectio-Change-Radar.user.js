@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Lectio Change Radar
 // @namespace    https://github.com/RktRobinhood/Lectio-Scripts
-// @version      0.4.1
-// @description  Watches your Lectio timetable for cancellations and schedule changes and keeps a compact recent-change HUD.
+// @version      0.5.0
+// @description  Watches Lectio for the changes you choose to track - timetable, assignments, absence, documents - and keeps a compact recent-change HUD.
 // @author       RktRobinhood
 // @match        https://www.lectio.dk/lectio/*
 // @grant        none
@@ -20,7 +20,7 @@
     id: 'change-radar',
     aliases: ['schedule-change-radar', 'lectio-change-radar', 'change-log'],
     name: 'Lectio Change Radar',
-    version: '0.4.1',
+    version: '0.5.0',
     channel: 'unstable'
   });
 
@@ -45,30 +45,111 @@
     recentHours: 24,
     attentionAnimation: true,
     hoverOpen: true,
-    historyLimit: 10
+    historyLimit: 10,
+
+    // What the radar watches. Every tracker is a plain boolean so the Manager
+    // renders it as a generic toggle and the module stays the only thing that
+    // knows what any of them mean.
+    trackCancellations: true,
+    trackTimeChanges: true,
+    trackRoomChanges: true,
+    trackTeacherChanges: true,
+    trackAddedLessons: true,
+    trackRemovedLessons: true,
+    trackHomework: true,
+    trackLessonNotes: false,
+    trackLessonDetails: false,
+
+    trackAssignments: true,
+    trackNewAssignments: true,
+    trackAssignmentDeadlines: true,
+    trackAssignmentStatus: false,
+
+    trackAbsence: false,
+    trackAbsenceRegistrations: true,
+    trackAbsencePercent: false,
+
+    trackDocuments: false,
+    trackNewDocuments: true,
+    trackDocumentUpdates: false
   });
+
+  // Sources beyond the timetable each cost their own request per check, so they
+  // are gated by a master toggle and run on a much slower cadence than the
+  // timetable poll. Nothing here is fetched unless its gate is on.
+  const EXTRA_SOURCES = Object.freeze([
+    Object.freeze({ key: 'assignments', gate: 'trackAssignments', label: 'Assignments' }),
+    Object.freeze({ key: 'absence', gate: 'trackAbsence', label: 'Absence' }),
+    Object.freeze({ key: 'documents', gate: 'trackDocuments', label: 'Documents' })
+  ]);
+
+  const EXTRA_SOURCE_MIN_GAP_MS = 30 * 60 * 1000;
+
+  // Every boolean default is a toggle, so the sanitiser and the coercer derive
+  // their key list rather than carrying a hand-maintained copy that a new
+  // tracker would silently fall out of.
+  const BOOLEAN_SETTING_KEYS = Object.freeze(
+    Object.keys(DEFAULT_SETTINGS).filter((key) => typeof DEFAULT_SETTINGS[key] === 'boolean')
+  );
+
+  // A Lectio layout change can make a parser match far more rows than it should.
+  // Capping per source means structural drift shows up as a handful of odd
+  // entries rather than a log flooded past everything real.
+  const MAX_CHANGES_PER_SOURCE = 12;
+
+  // Shared with the tooltip block reader: these are the field labels Lectio puts
+  // at the start of a tooltip line, and they mark where one field's text stops.
+  const TOOLTIP_FIELD_PATTERN = /^(?:Hold|Lærer|Laerer|Teacher|Teachers|Lokale|Lokaler|Room|Rooms|Elever|Students|Grupper|Groups|Ressourcer|Resources|Lektier|Homework|Note|Noter|Øvrigt indhold|Other content)\s*:/i;
+
+  // The Danish 7-point scale, as a closed set. Matching a grade against a fixed
+  // list rather than "a number in a cell" keeps room numbers and counts out.
+  const GRADE_TOKENS = Object.freeze(['-3', '00', '02', '4', '7', '10', '12']);
 
   const SETTING_SCHEMA = Object.freeze([
     makeSelectSetting('displayMode', 'Radar location', 'Where the radar lives. Automatic uses Lectio Manager\'s shared dock when the Manager is installed, and falls back to a floating radar when it is not.', 'auto', [
       ['auto', 'Automatic'], ['dock', 'Always the Manager dock'], ['floating', 'Always floating on the page']
-    ]),
-    makeSelectSetting('pollMinutes', 'Check frequency', 'How often Change Radar checks Lectio while a Lectio tab is open.', 10, [
-      [5, 'Every 5 minutes'], [10, 'Every 10 minutes'], [15, 'Every 15 minutes'], [30, 'Every 30 minutes']
-    ]),
-    makeSelectSetting('weeksAhead', 'Weeks to watch', 'How far ahead the radar snapshots your timetable.', 1, [
-      [0, 'This week only'], [1, 'This week + next'], [2, 'This week + 2 weeks']
-    ]),
+    ], 'Radar'),
     makeSelectSetting('urgentHours', 'Urgent window', 'An unseen change to an activity inside this window turns the radar red.', 24, [
       [6, 'Next 6 hours'], [12, 'Next 12 hours'], [24, 'Next 24 hours'], [48, 'Next 48 hours']
-    ]),
+    ], 'Radar'),
     makeSelectSetting('recentHours', 'Recent-change window', 'After changes are seen, keep the radar amber for this long before returning to green.', 24, [
       [12, '12 hours'], [24, '24 hours'], [48, '48 hours'], [72, '72 hours']
-    ]),
-    makeToggleSetting('attentionAnimation', 'Urgent animation', 'Pulse the radar signal when an urgent unseen change needs attention.', true),
-    makeToggleSetting('hoverOpen', 'Open on hover', 'Open the change log when the pointer rests on the radar. Click still pins it open.', true),
+    ], 'Radar'),
+    makeToggleSetting('attentionAnimation', 'Urgent animation', 'Pulse the radar signal when an urgent unseen change needs attention.', true, 'Radar'),
+    makeToggleSetting('hoverOpen', 'Open on hover', 'Open the change log when the pointer rests on the radar. Click still pins it open.', true, 'Radar'),
     makeSelectSetting('historyLimit', 'History size', 'Maximum number of recent changes kept in the rotating local log.', 10, [
       [5, '5 changes'], [10, '10 changes'], [20, '20 changes']
-    ])
+    ], 'Radar'),
+
+    makeSelectSetting('pollMinutes', 'Check frequency', 'How often Change Radar checks Lectio while a Lectio tab is open.', 10, [
+      [5, 'Every 5 minutes'], [10, 'Every 10 minutes'], [15, 'Every 15 minutes'], [30, 'Every 30 minutes']
+    ], 'Checking'),
+    makeSelectSetting('weeksAhead', 'Weeks to watch', 'How far ahead the radar snapshots your timetable.', 1, [
+      [0, 'This week only'], [1, 'This week + next'], [2, 'This week + 2 weeks']
+    ], 'Checking'),
+
+    makeToggleSetting('trackCancellations', 'Cancellations', 'Report a lesson being cancelled, and a cancellation later being lifted.', true, 'Timetable'),
+    makeToggleSetting('trackTimeChanges', 'Time and date moves', 'Report a lesson moving to a different day, start time, or end time.', true, 'Timetable'),
+    makeToggleSetting('trackRoomChanges', 'Room changes', 'Report a lesson moving to a different room.', true, 'Timetable'),
+    makeToggleSetting('trackTeacherChanges', 'Teacher changes', 'Report a different teacher being put on a lesson, such as a substitute.', true, 'Timetable'),
+    makeToggleSetting('trackAddedLessons', 'Lessons added', 'Report an activity appearing in a week the radar was already watching.', true, 'Timetable'),
+    makeToggleSetting('trackRemovedLessons', 'Lessons removed', 'Report an activity disappearing from a week the radar is watching. That is not the same as a cancellation, which leaves the lesson visible.', true, 'Timetable'),
+    makeToggleSetting('trackHomework', 'Homework', 'Report homework (Lektier) being set, changed, or cleared on a lesson.', true, 'Timetable'),
+    makeToggleSetting('trackLessonNotes', 'Notes and other content', 'Report changes to a lesson\'s note or its other-content field. These get edited often, so this is off by default.', false, 'Timetable'),
+    makeToggleSetting('trackLessonDetails', 'Other lesson details', 'Report changes to a lesson\'s class, title, resources, or participants, and changes Lectio flags without saying what changed. Off by default because most of these are administrative.', false, 'Timetable'),
+
+    makeToggleSetting('trackAssignments', 'Watch assignments', 'Check your assignment list as well as your timetable. Costs one extra request per check, at most twice an hour.', true, 'Assignments'),
+    makeToggleSetting('trackNewAssignments', 'New assignments', 'Report an assignment appearing on your list.', true, 'Assignments'),
+    makeToggleSetting('trackAssignmentDeadlines', 'Deadline changes', 'Report an assignment deadline moving.', true, 'Assignments'),
+    makeToggleSetting('trackAssignmentStatus', 'Status and grades', 'Report an assignment changing status, or a grade being published for one.', false, 'Assignments'),
+
+    makeToggleSetting('trackAbsence', 'Watch absence', 'Check your absence page as well as your timetable. Costs one extra request per check, at most twice an hour. Off by default.', false, 'Absence'),
+    makeToggleSetting('trackAbsenceRegistrations', 'New registrations', 'Report a new absence registration appearing against you.', true, 'Absence'),
+    makeToggleSetting('trackAbsencePercent', 'Percentage changes', 'Report your absence percentage moving for a class. That shifts on its own as lessons pass, so it is off by default.', false, 'Absence'),
+
+    makeToggleSetting('trackDocuments', 'Watch documents', 'Check your document overview as well as your timetable. Costs one extra request per check, at most twice an hour. Off by default.', false, 'Documents'),
+    makeToggleSetting('trackNewDocuments', 'New documents', 'Report a document appearing in your overview.', true, 'Documents'),
+    makeToggleSetting('trackDocumentUpdates', 'Document updates', 'Report an existing document being replaced or renamed.', false, 'Documents')
   ]);
 
   const UI = Object.freeze({
@@ -92,6 +173,10 @@
     settings: `${storageBase}.settings`
   });
 
+  // detectIdentity() already resolves which kind of account this is; the absence
+  // page is the one source whose URL differs between the two.
+  const userRole = identity.startsWith('teacher-') ? 'teacher' : 'student';
+
   const runtime = {
     state: null,
     settings: null,
@@ -104,6 +189,7 @@
     dockMount: null,
     managerSeen: false,
     graceTimer: null,
+    settingsRefreshTimer: null,
     lastError: ''
   };
 
@@ -145,11 +231,12 @@
     }
   }
 
-  function makeSelectSetting(key, label, description, defaultValue, pairs) {
+  function makeSelectSetting(key, label, description, defaultValue, pairs, section) {
     const options = pairs.map(([value, optionLabel]) => ({ value, label: optionLabel }));
     return {
       id: key,
       key,
+      section,
       type: 'select',
       control: 'select',
       kind: 'select',
@@ -162,10 +249,11 @@
     };
   }
 
-  function makeToggleSetting(key, label, description, defaultValue) {
+  function makeToggleSetting(key, label, description, defaultValue, section) {
     return {
       id: key,
       key,
+      section,
       type: 'toggle',
       control: 'toggle',
       kind: 'toggle',
@@ -307,8 +395,15 @@
     }
 
     if (next.pollMinutes !== before.pollMinutes) restartPollTimer();
-    if (next.weeksAhead !== before.weeksAhead) {
-      window.setTimeout(() => void refresh({ reason: 'settings', force: true }), 0);
+
+    const watchChanged = BOOLEAN_SETTING_KEYS
+      .filter((key) => key.startsWith('track'))
+      .some((key) => next[key] !== before[key]);
+
+    if (next.weeksAhead !== before.weeksAhead || watchChanged) {
+      // Debounced: ticking several trackers in a row is one intent, not one
+      // full re-check per checkbox.
+      scheduleSettingsRefresh();
     }
 
     renderHud();
@@ -317,6 +412,14 @@
       detail: { id: MODULE.id, source, currentValues: { ...runtime.settings } }
     }));
     return true;
+  }
+
+  function scheduleSettingsRefresh() {
+    if (runtime.settingsRefreshTimer) window.clearTimeout(runtime.settingsRefreshTimer);
+    runtime.settingsRefreshTimer = window.setTimeout(() => {
+      runtime.settingsRefreshTimer = null;
+      void refresh({ reason: 'settings', force: true });
+    }, 600);
   }
 
   async function refresh({ reason = 'manual', force = false } = {}) {
@@ -334,8 +437,8 @@
     renderHud();
 
     try {
-      const snapshot = await buildSnapshot();
       const previous = runtime.state?.snapshot || null;
+      const snapshot = await buildSnapshot(previous);
 
       if (!previous) {
         runtime.state = {
@@ -346,7 +449,10 @@
           history: []
         };
       } else {
-        const changes = compareSnapshots(previous, snapshot, now);
+        const changes = [
+          ...compareSnapshots(previous, snapshot, now),
+          ...compareSourceSnapshots(previous, snapshot, now)
+        ];
         const currentHistory = Array.isArray(runtime.state.history) ? runtime.state.history : [];
         const history = mergeHistory(changes, currentHistory);
 
@@ -369,7 +475,7 @@
     }
   }
 
-  async function buildSnapshot() {
+  async function buildSnapshot(previous) {
     const now = new Date();
     const weekInfos = [];
 
@@ -393,12 +499,104 @@
       capturedAt: Date.now(),
       rangeStart: toIsoDate(rangeStart),
       rangeEnd: toIsoDate(rangeEnd),
-      events
+      events,
+      sources: await buildSourceSnapshots(previous)
+    };
+  }
+
+  // Sources beyond the timetable run one at a time, only when switched on, and
+  // only when their own slower cadence has elapsed. A carried-forward capture
+  // diffs against itself and so produces nothing, which is what lets one flaky
+  // page fail without taking the timetable check down with it.
+  async function buildSourceSnapshots(previous) {
+    const carried = previous?.sources || {};
+    const sources = {};
+    const now = Date.now();
+
+    for (const source of EXTRA_SOURCES) {
+      if (!runtime.settings[source.gate]) continue;
+
+      const existing = carried[source.key];
+      if (existing && now - Number(existing.capturedAt || 0) < EXTRA_SOURCE_MIN_GAP_MS) {
+        sources[source.key] = existing;
+        continue;
+      }
+
+      const reader = getSourceReader(source.key);
+
+      try {
+        const records = reader.parse(await fetchLectioDocument(reader.url()));
+
+        // A Lectio layout change can empty a parser that used to see rows. Keep
+        // the last good capture rather than announcing that everything the user
+        // had has just disappeared.
+        if (existing && looksLikeParseFailure(existing.records, records)) {
+          sources[source.key] = existing;
+          continue;
+        }
+
+        sources[source.key] = { capturedAt: now, records };
+      } catch (_) {
+        if (existing) sources[source.key] = existing;
+      }
+    }
+
+    return sources;
+  }
+
+  function looksLikeParseFailure(before, after) {
+    return Object.keys(before || {}).length >= 3 && Object.keys(after || {}).length === 0;
+  }
+
+  function compareSourceSnapshots(previous, current, noticedAt) {
+    const changes = [];
+
+    for (const source of EXTRA_SOURCES) {
+      const before = previous?.sources?.[source.key]?.records;
+      const after = current?.sources?.[source.key]?.records;
+
+      // A missing previous capture means the source was only just switched on.
+      // Its first read is a baseline, not a pile of news.
+      if (!before || !after) continue;
+
+      changes.push(
+        ...getSourceReader(source.key).compare(before, after, noticedAt).slice(0, MAX_CHANGES_PER_SOURCE)
+      );
+    }
+
+    return changes;
+  }
+
+  function getSourceReader(key) {
+    if (key === 'assignments') {
+      return {
+        url: () => `/lectio/${schoolId}/OpgaveListe.aspx`,
+        parse: parseAssignments,
+        compare: compareAssignments
+      };
+    }
+
+    if (key === 'absence') {
+      return {
+        url: () => `/lectio/${schoolId}/subnav/${userRole === 'teacher' ? 'fravaerlaerer' : 'fravaerelev'}.aspx`,
+        parse: parseAbsence,
+        compare: compareAbsence
+      };
+    }
+
+    return {
+      url: () => `/lectio/${schoolId}/DokumentOversigt.aspx`,
+      parse: parseDocuments,
+      compare: compareDocuments
     };
   }
 
   async function fetchScheduleWeek(weekInfo) {
     const url = `/lectio/${schoolId}/SkemaNy.aspx?week=${weekInfo.week}${weekInfo.year}&showtype=0`;
+    return { doc: await fetchLectioDocument(url), url };
+  }
+
+  async function fetchLectioDocument(url) {
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), BASE_CONFIG.fetchTimeoutMs);
 
@@ -412,7 +610,7 @@
       });
 
       if (!response.ok) {
-        throw new Error(`Schedule request failed with HTTP ${response.status}.`);
+        throw new Error(`Lectio request failed with HTTP ${response.status}.`);
       }
 
       if (/login\.aspx/i.test(response.url || '')) {
@@ -424,8 +622,7 @@
         throw new Error('Lectio login expired.');
       }
 
-      const doc = new DOMParser().parseFromString(html, 'text/html');
-      return { doc, url };
+      return new DOMParser().parseFromString(html, 'text/html');
     } finally {
       window.clearTimeout(timeout);
     }
@@ -478,6 +675,13 @@
     const hold = extractField(lines, /^Hold\s*:\s*(.+)$/i);
     const teacher = extractField(lines, /^Lærer\s*:\s*(.+)$/i);
     const room = extractField(lines, /^Lokaler?\s*:\s*(.+)$/i);
+    const resources = extractField(lines, /^(?:Ressourcer|Resources)\s*:\s*(.+)$/i);
+    const participants = extractField(lines, /^(?:Elever|Students|Grupper|Groups)\s*:\s*(.+)$/i);
+    // Homework, note and other content run on past their own line, so they are
+    // read as a block up to the next field label rather than a single line.
+    const homework = extractBlock(lines, /^(?:Lektier|Homework)\s*:\s*(.*)$/i);
+    const note = extractBlock(lines, /^(?:Note|Noter)\s*:\s*(.*)$/i);
+    const otherContent = extractBlock(lines, /^(?:Øvrigt indhold|Other content)\s*:\s*(.*)$/i);
     const titleFromTooltip = beforeDate.join(' · ');
     const visibleText = cleanText(brick.querySelector('.s2skemabrikcontent')?.textContent || brick.textContent || '');
     const title = titleFromTooltip || hold || visibleText || 'Lectio activity';
@@ -502,13 +706,315 @@
       hold,
       teacher,
       room,
+      resources,
+      participants,
+      homework,
+      note,
+      otherContent,
       status,
       tooltip,
       url: absoluteUrl
     };
   }
 
+  // --- Sources beyond the timetable -----------------------------------------
+  //
+  // The timetable parser can lean on a known element (a.s2skemabrik[data-tooltip]).
+  // These three pages are list views whose exact column layout is not pinned down
+  // anywhere in this repo, so they are read by pattern rather than by position:
+  // a row is interesting when it links to something carrying a stable Lectio id,
+  // and its fields are recognised by shape (a d/m-yyyy date, a percentage, a
+  // status word, a 7-point grade) wherever they happen to sit. That survives a
+  // column being added or reordered, and when it does stop matching it yields
+  // nothing rather than nonsense, which looksLikeParseFailure then absorbs.
+
+  const ASSIGNMENT_STATUS_PATTERN = /^(?:Afleveret|Ikke afleveret|Mangler|Afventer|Venter|Afsluttet|Godkendt|Ikke godkendt|Handed in|Not handed in|Missing|Awaiting|Closed|Approved|Not approved)$/i;
+
+  function harvestRows(doc, match) {
+    const rows = {};
+
+    for (const row of doc.querySelectorAll('tr')) {
+      let id = '';
+      let url = '';
+      let title = '';
+
+      for (const anchor of row.querySelectorAll('a[href]')) {
+        const href = anchor.getAttribute('href') || '';
+        const matched = match(href);
+        if (!matched) continue;
+
+        id = matched;
+        title = cleanText(anchor.textContent || '');
+        try { url = new URL(href, location.origin).href; } catch (_) {}
+        break;
+      }
+
+      if (!id || rows[id]) continue;
+
+      const cells = Array.from(row.querySelectorAll('td'))
+        .map((cell) => cleanText(cell.textContent || ''))
+        .filter(Boolean);
+
+      rows[id] = { id, title: title || cells[0] || '', cells, url };
+    }
+
+    return rows;
+  }
+
+  function parseAssignments(doc) {
+    const records = {};
+    const rows = harvestRows(doc, (href) => {
+      const match = href.match(/[?&]exerciseid=(\d+)/i);
+      return match ? `EX${match[1]}` : '';
+    });
+
+    for (const row of Object.values(rows)) {
+      const due = findRowDateTime(row.cells);
+      records[row.id] = {
+        id: row.id,
+        title: row.title || 'Assignment',
+        dueDate: due.dateIso,
+        dueTime: due.time,
+        status: findAssignmentStatus(row.cells),
+        url: row.url
+      };
+    }
+
+    return records;
+  }
+
+  function findRowDateTime(cells) {
+    for (const cell of cells) {
+      const match = cell.match(/\b(\d{1,2})\/(\d{1,2})-(\d{4})\b(?:\s+(\d{1,2}):(\d{2}))?/);
+      if (!match) continue;
+
+      return {
+        dateIso: `${match[3]}-${pad2(Number(match[2]))}-${pad2(Number(match[1]))}`,
+        time: match[4] != null ? `${pad2(Number(match[4]))}:${match[5]}` : ''
+      };
+    }
+
+    return { dateIso: '', time: '' };
+  }
+
+  // A grade is matched against the closed 7-point scale rather than "a number in
+  // a cell", so a room number or a count of anything cannot be read as one.
+  function findAssignmentStatus(cells) {
+    const parts = [];
+
+    for (const cell of cells) {
+      if (ASSIGNMENT_STATUS_PATTERN.test(cell)) parts.push(cell);
+      else if (GRADE_TOKENS.includes(cell)) parts.push(`Grade ${cell}`);
+    }
+
+    return parts.join(' · ');
+  }
+
+  function parseAbsence(doc) {
+    const records = {};
+
+    // Individual registrations link to the day-based absence view. That URL was
+    // read off a real Lectio page, so it is the firmest handle on this page.
+    const rows = harvestRows(doc, (href) => {
+      const match = href.match(/[?&]absenseId=(\d+)/i);
+      return match ? `ABSENCE${match[1]}` : '';
+    });
+
+    for (const row of Object.values(rows)) {
+      records[row.id] = {
+        id: row.id,
+        type: 'registration',
+        title: row.title || row.cells[0] || 'Absence registration',
+        detail: row.cells.slice(0, 4).join(' · '),
+        url: row.url
+      };
+    }
+
+    // Per-class percentages: any row carrying a hold context card and at least
+    // one percentage. Keying on the card means a reordered table is not news.
+    for (const row of doc.querySelectorAll('tr')) {
+      const card = row.querySelector('[data-lectiocontextcard]');
+      const cells = Array.from(row.querySelectorAll('td')).map((cell) => cleanText(cell.textContent || ''));
+      const percents = cells.join(' ').match(/\d+(?:[,.]\d+)?\s?%/g);
+      if (!percents?.length) continue;
+
+      const label = cleanText(card?.textContent || cells[0] || '');
+      if (!label) continue;
+
+      const id = `ABSPCT${safeKey(card?.getAttribute('data-lectiocontextcard') || label)}`;
+      if (records[id]) continue;
+
+      records[id] = {
+        id,
+        type: 'percent',
+        title: label,
+        detail: percents.map((value) => value.replace(/\s+/g, '')).join(' / '),
+        url: ''
+      };
+    }
+
+    return records;
+  }
+
+  function parseDocuments(doc) {
+    const records = {};
+    const rows = harvestRows(doc, (href) => {
+      if (!/dokument|document|showfile/i.test(href)) return '';
+      const match = href.match(/[?&](?:documentid|dokumentid|fileid|id)=(\d+)/i);
+      return match ? `DOC${match[1]}` : '';
+    });
+
+    for (const row of Object.values(rows)) {
+      records[row.id] = {
+        id: row.id,
+        title: row.title || 'Document',
+        detail: row.cells.slice(0, 4).join(' · '),
+        url: row.url
+      };
+    }
+
+    return records;
+  }
+
+  function compareAssignments(before, after, noticedAt) {
+    const settings = runtime.settings || DEFAULT_SETTINGS;
+    const changes = [];
+
+    for (const [id, next] of Object.entries(after)) {
+      const previous = before[id];
+
+      // An assignment leaving the list is usually the list narrowing to what is
+      // still current, so there is deliberately no "removed" tracker here.
+      if (!previous) {
+        if (settings.trackNewAssignments) {
+          changes.push(makeSourceEntry({
+            kind: 'assignment',
+            title: next.title,
+            detail: next.dueDate ? `New assignment, due ${formatDeadline(next)}` : 'New assignment',
+            noticedAt,
+            record: next
+          }));
+        }
+        continue;
+      }
+
+      if (settings.trackAssignmentDeadlines && (previous.dueDate !== next.dueDate || previous.dueTime !== next.dueTime)) {
+        changes.push(makeSourceEntry({
+          kind: 'deadline',
+          title: next.title,
+          detail: `Deadline: ${formatDeadline(previous)} -> ${formatDeadline(next)}`,
+          noticedAt,
+          record: next
+        }));
+      }
+
+      if (settings.trackAssignmentStatus && fieldChanged(previous.status, next.status)) {
+        changes.push(makeSourceEntry({
+          kind: 'status',
+          title: next.title,
+          detail: `Status: ${previous.status || 'none'} -> ${next.status || 'none'}`,
+          noticedAt,
+          record: next
+        }));
+      }
+    }
+
+    return changes;
+  }
+
+  function compareAbsence(before, after, noticedAt) {
+    const settings = runtime.settings || DEFAULT_SETTINGS;
+    const changes = [];
+
+    for (const [id, next] of Object.entries(after)) {
+      const previous = before[id];
+
+      if (next.type === 'registration') {
+        if (!previous && settings.trackAbsenceRegistrations) {
+          changes.push(makeSourceEntry({
+            kind: 'absence',
+            title: next.title,
+            detail: next.detail ? `New absence registration · ${truncate(next.detail, 70)}` : 'New absence registration',
+            noticedAt,
+            record: next
+          }));
+        }
+        continue;
+      }
+
+      if (settings.trackAbsencePercent && previous && fieldChanged(previous.detail, next.detail)) {
+        changes.push(makeSourceEntry({
+          kind: 'absence',
+          title: next.title,
+          detail: `Absence: ${previous.detail || 'none'} -> ${next.detail || 'none'}`,
+          noticedAt,
+          record: next
+        }));
+      }
+    }
+
+    return changes;
+  }
+
+  function compareDocuments(before, after, noticedAt) {
+    const settings = runtime.settings || DEFAULT_SETTINGS;
+    const changes = [];
+
+    for (const [id, next] of Object.entries(after)) {
+      const previous = before[id];
+
+      if (!previous) {
+        if (settings.trackNewDocuments) {
+          changes.push(makeSourceEntry({
+            kind: 'document',
+            title: next.title,
+            detail: next.detail ? `New document · ${truncate(next.detail, 70)}` : 'New document',
+            noticedAt,
+            record: next
+          }));
+        }
+        continue;
+      }
+
+      if (settings.trackDocumentUpdates && fieldChanged(previous.detail, next.detail)) {
+        changes.push(makeSourceEntry({
+          kind: 'document',
+          title: next.title,
+          detail: `Updated · ${truncate(next.detail, 70)}`,
+          noticedAt,
+          record: next
+        }));
+      }
+    }
+
+    return changes;
+  }
+
+  // Source records reuse the timetable history entry, so an assignment deadline
+  // lands in eventDate/eventStart and is picked up by the existing urgency
+  // window for free. A record with no date simply never counts as urgent.
+  function makeSourceEntry({ kind, title, detail, noticedAt, record }) {
+    return makeHistoryEntry({
+      event: {
+        id: record.id,
+        dateIso: record.dueDate || '',
+        start: record.dueTime || '',
+        url: record.url || ''
+      },
+      kind,
+      title,
+      detail,
+      noticedAt
+    });
+  }
+
+  function formatDeadline(record) {
+    if (!record?.dueDate) return 'no deadline';
+    return record.dueTime ? `${formatShortDate(record.dueDate)} ${record.dueTime}` : formatShortDate(record.dueDate);
+  }
+
   function compareSnapshots(previous, current, noticedAt) {
+    const settings = runtime.settings || DEFAULT_SETTINGS;
     const changes = [];
     const oldEvents = previous.events || {};
     const newEvents = current.events || {};
@@ -529,7 +1035,7 @@
       // Only call an item "added" when its date was already inside the old
       // monitored window. This prevents a new week entering the rolling
       // two-week window from creating a wall of false "added" events.
-      if (isDateInside(next.dateIso, previous.rangeStart, previous.rangeEnd) && next.dateIso >= today) {
+      if (settings.trackAddedLessons && isDateInside(next.dateIso, previous.rangeStart, previous.rangeEnd) && next.dateIso >= today) {
         changes.push(makeHistoryEntry({
           event: next,
           kind: 'added',
@@ -546,7 +1052,7 @@
 
       // Same boundary protection in the other direction: only call an item
       // removed when it should still be visible in the new monitored window.
-      if (isDateInside(before.dateIso, current.rangeStart, current.rangeEnd) && before.dateIso >= today) {
+      if (settings.trackRemovedLessons && isDateInside(before.dateIso, current.rangeStart, current.rangeEnd) && before.dateIso >= today) {
         changes.push(makeHistoryEntry({
           event: before,
           kind: 'removed',
@@ -565,47 +1071,77 @@
   }
 
   function compareEvent(before, next, noticedAt) {
+    const settings = runtime.settings || DEFAULT_SETTINGS;
     const details = [];
     let kind = 'changed';
 
-    if (next.status === 'cancelled' && before.status !== 'cancelled') {
-      kind = 'cancelled';
-      details.push('Cancelled');
-    } else if (before.status === 'cancelled' && next.status !== 'cancelled') {
-      kind = 'restored';
-      details.push('Cancellation cleared');
+    if (settings.trackCancellations) {
+      if (next.status === 'cancelled' && before.status !== 'cancelled') {
+        kind = 'cancelled';
+        details.push('Cancelled');
+      } else if (before.status === 'cancelled' && next.status !== 'cancelled') {
+        kind = 'restored';
+        details.push('Cancellation cleared');
+      }
     }
 
-    if (before.dateIso !== next.dateIso || before.start !== next.start || before.end !== next.end || before.allDay !== next.allDay) {
+    if (settings.trackTimeChanges &&
+        (before.dateIso !== next.dateIso || before.start !== next.start || before.end !== next.end || before.allDay !== next.allDay)) {
       if (kind === 'changed') kind = 'time';
       details.push(`Time: ${formatEventWhen(before)} -> ${formatEventWhen(next)}`);
     }
 
-    if (normalizeCompare(before.room) !== normalizeCompare(next.room)) {
+    if (settings.trackRoomChanges && fieldChanged(before.room, next.room)) {
       if (kind === 'changed') kind = 'room';
       details.push(`Room: ${before.room || 'none'} -> ${next.room || 'none'}`);
     }
 
-    if (normalizeCompare(before.teacher) !== normalizeCompare(next.teacher)) {
+    if (settings.trackTeacherChanges && fieldChanged(before.teacher, next.teacher)) {
+      if (kind === 'changed') kind = 'teacher';
       details.push(`Teacher: ${before.teacher || 'none'} -> ${next.teacher || 'none'}`);
     }
 
-    if (normalizeCompare(before.hold) !== normalizeCompare(next.hold)) {
-      details.push(`Class: ${before.hold || 'none'} -> ${next.hold || 'none'}`);
+    if (settings.trackHomework && fieldChanged(before.homework, next.homework)) {
+      if (kind === 'changed') kind = 'homework';
+      details.push(`Homework ${summarizeFieldChange(before.homework, next.homework)}`);
     }
 
-    if (normalizeCompare(before.title) !== normalizeCompare(next.title)) {
-      details.push(`Title: ${before.title || 'untitled'} -> ${next.title || 'untitled'}`);
+    if (settings.trackLessonNotes) {
+      if (fieldChanged(before.note, next.note)) {
+        if (kind === 'changed') kind = 'note';
+        details.push(`Note ${summarizeFieldChange(before.note, next.note)}`);
+      }
+      if (fieldChanged(before.otherContent, next.otherContent)) {
+        if (kind === 'changed') kind = 'note';
+        details.push(`Other content ${summarizeFieldChange(before.otherContent, next.otherContent)}`);
+      }
     }
 
-    // Lectio sometimes marks a brick changed even when the compact tooltip does
-    // not expose which field changed. Preserve that signal rather than missing it.
-    if (!details.length && next.status === 'changed' && before.status !== 'changed') {
-      details.push('Lectio marked this activity as changed');
+    if (settings.trackLessonDetails) {
+      if (fieldChanged(before.hold, next.hold)) {
+        details.push(`Class: ${before.hold || 'none'} -> ${next.hold || 'none'}`);
+      }
+      if (fieldChanged(before.title, next.title)) {
+        details.push(`Title: ${before.title || 'untitled'} -> ${next.title || 'untitled'}`);
+      }
+      if (fieldChanged(before.resources, next.resources)) {
+        details.push(`Resources: ${before.resources || 'none'} -> ${next.resources || 'none'}`);
+      }
+      if (fieldChanged(before.participants, next.participants)) {
+        details.push(`Participants: ${before.participants || 'none'} -> ${next.participants || 'none'}`);
+      }
+
+      // Lectio sometimes marks a brick changed even when the compact tooltip does
+      // not expose which field changed. It belongs here because an unnamed change
+      // is exactly the administrative noise this toggle governs.
+      if (!details.length && next.status === 'changed' && before.status !== 'changed') {
+        details.push('Lectio marked this activity as changed');
+      }
     }
 
-    // Ignore a change marker simply disappearing; that is often Lectio clearing
-    // its own visual state rather than a user-relevant schedule change.
+    // Nothing the user still tracks moved. Also covers a change marker simply
+    // disappearing, which is often Lectio clearing its own visual state rather
+    // than a user-relevant schedule change.
     if (!details.length) return null;
 
     return makeHistoryEntry({
@@ -615,6 +1151,23 @@
       detail: details.join(' · '),
       noticedAt
     });
+  }
+
+  function fieldChanged(before, next) {
+    return normalizeCompare(before) !== normalizeCompare(next);
+  }
+
+  // Homework and notes are free text and can run long, so they are reported as
+  // what happened plus a short excerpt rather than a full before/after pair.
+  function summarizeFieldChange(before, next) {
+    if (!cleanText(before) && cleanText(next)) return `set: ${truncate(next, 70)}`;
+    if (cleanText(before) && !cleanText(next)) return 'cleared';
+    return `changed: ${truncate(next, 70)}`;
+  }
+
+  function truncate(value, limit) {
+    const text = cleanText(value);
+    return text.length > limit ? `${text.slice(0, limit - 3)}...` : text;
   }
 
   function makeHistoryEntry({ event, kind, title, detail, noticedAt }) {
@@ -963,6 +1516,17 @@
         border-bottom: 1px solid var(--lcr-border) !important;
       }
       .lcr-setting-row:last-child { border-bottom: 0 !important; }
+      .lcr-setting-section {
+        margin: 12px 0 0;
+        padding-top: 8px;
+        border-top: 1px solid var(--lcr-border) !important;
+        color: var(--lcr-muted) !important;
+        font: 600 9px/1.4 Roboto, Arial, sans-serif;
+        letter-spacing: .09em;
+        text-transform: uppercase;
+      }
+      .lcr-setting-section:first-child { margin-top: 0; padding-top: 0; border-top: 0 !important; }
+      .lcr-setting-section + .lcr-setting-row { border-top: 0 !important; }
       .lcr-setting-copy strong {
         display: block;
         color: var(--lcr-text) !important;
@@ -1305,8 +1869,19 @@
   function renderSettingsPanel() {
     const host = document.createElement('div');
     host.className = 'lcr-settings';
+    let openSection = null;
 
     for (const schema of SETTING_SCHEMA) {
+      // Twenty-odd trackers in one flat list is unreadable, so the module's own
+      // panel groups on the same section labels the Manager reads.
+      if (schema.section && schema.section !== openSection) {
+        openSection = schema.section;
+        const heading = document.createElement('div');
+        heading.className = 'lcr-setting-section';
+        heading.textContent = schema.section;
+        host.appendChild(heading);
+      }
+
       const row = document.createElement('label');
       row.className = 'lcr-setting-row';
 
@@ -1394,7 +1969,7 @@
     return {
       level: 'green', unseen: 0, urgentUnseen: 0,
       heading: 'All clear',
-      subheading: runtime.inFlight ? 'Checking timetable...' : 'No recent changes need attention',
+      subheading: runtime.inFlight ? 'Checking Lectio...' : 'No recent changes need attention',
       tooltip: 'Change Radar: all clear.',
       ariaLabel: 'Lectio Change Radar. Green. All clear.'
     };
@@ -1538,7 +2113,7 @@
       const n = Number(values?.[key]);
       if (options.includes(n)) out[key] = n;
     }
-    for (const key of ['attentionAnimation', 'hoverOpen']) {
+    for (const key of BOOLEAN_SETTING_KEYS) {
       if (typeof values?.[key] === 'boolean') out[key] = values[key];
       else if (values?.[key] === 'true' || values?.[key] === 1 || values?.[key] === '1') out[key] = true;
       else if (values?.[key] === 'false' || values?.[key] === 0 || values?.[key] === '0') out[key] = false;
@@ -1547,7 +2122,7 @@
   }
 
   function coerceSettingValue(key, value) {
-    if (['attentionAnimation', 'hoverOpen'].includes(key)) return Boolean(value);
+    if (BOOLEAN_SETTING_KEYS.includes(key)) return Boolean(value);
     if (key === 'displayMode') return value;
     return Number(value);
   }
@@ -1621,6 +2196,21 @@
     if (brickMatch) return `ABS${brickMatch[1]}`;
 
     return '';
+  }
+
+  // Reads a tooltip field that may wrap onto following lines, stopping at the
+  // next field label. extractField stays for the one-line fields.
+  function extractBlock(lines, pattern) {
+    const index = lines.findIndex((line) => pattern.test(line));
+    if (index < 0) return '';
+
+    const parts = [cleanText(lines[index].match(pattern)?.[1] || '')];
+    for (let i = index + 1; i < lines.length; i += 1) {
+      if (TOOLTIP_FIELD_PATTERN.test(lines[i])) break;
+      parts.push(cleanText(lines[i]));
+    }
+
+    return cleanText(parts.filter(Boolean).join(' '));
   }
 
   function extractField(lines, pattern) {
@@ -1728,6 +2318,14 @@
       room: 'Room',
       added: 'Added',
       removed: 'Removed',
+      teacher: 'Teacher',
+      homework: 'Homework',
+      note: 'Note',
+      assignment: 'Assignment',
+      deadline: 'Deadline',
+      status: 'Status',
+      absence: 'Absence',
+      document: 'Document',
       changed: 'Changed'
     };
     return labels[kind] || 'Changed';

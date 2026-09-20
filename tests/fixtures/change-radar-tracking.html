@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio Change Radar tracking fixture</title>
+    <script>
+        // A controllable clock, installed before the module loads. The extra
+        // sources deliberately run on a 30-minute cadence, so the only way to
+        // exercise them in a test is to move time forward rather than to add a
+        // test-only seam to the module itself.
+        const realNow = Date.now;
+        let clockOffset = 0;
+        Date.now = () => realNow.call(Date) + clockOffset;
+
+        // Round 0 is the baseline every later round is compared against.
+        let round = 0;
+
+        const lesson = (room, homework) => {
+            const tooltip = [
+                'Matematik A',
+                '20/10-2030 08:00 til 09:30',
+                'Hold: 3a MA',
+                'Lærer: MP',
+                'Lokaler: ' + room,
+                'Lektier: ' + homework
+            ].join('\n');
+
+            return '<!doctype html><html><body><table><tr><td>' +
+                '<a class="s2skemabrik s2brik s2normal" href="/lectio/223/aktivitet/aktivitetforside2.aspx?absid=900001" ' +
+                'data-tooltip="' + tooltip + '"><span class="s2skemabrikcontent">Matematik A</span></a>' +
+                '</td></tr></table></body></html>';
+        };
+
+        const assignmentRow = (id, title, due, status) =>
+            '<tr><td><a href="/lectio/223/ElevAflevering.aspx?exerciseid=' + id + '&amp;elevid=1">' + title + '</a></td>' +
+            '<td>3a DA</td><td>' + due + '</td><td>' + status + '</td></tr>';
+
+        const assignments = () => {
+            const rows = round === 0
+                ? assignmentRow(101, 'Essay 1', '01/10-2030 23:59', 'Ikke afleveret')
+                : assignmentRow(101, 'Essay 1', '05/10-2030 23:59', 'Ikke afleveret') +
+                  assignmentRow(102, 'Essay 2', '12/10-2030 23:59', 'Ikke afleveret');
+
+            return '<!doctype html><html><body><table>' + rows + '</table></body></html>';
+        };
+
+        const schedule = () => {
+            if (round === 0) return lesson('A12', 'Read chapter 1');
+            if (round === 1) return lesson('A12', 'Read chapter 2');
+            return lesson('B07', 'Read chapter 2');
+        };
+
+        window.fetchLog = [];
+        window.fetch = async (url) => {
+            const text = String(url);
+            window.fetchLog.push(text);
+
+            let body = '<!doctype html><html><body></body></html>';
+            if (/SkemaNy\.aspx/i.test(text)) body = schedule();
+            else if (/OpgaveListe\.aspx/i.test(text)) body = assignments();
+
+            return { ok: true, status: 200, url: text, text: async () => body };
+        };
+
+        // No Manager in this fixture, so the radar falls back to its floating
+        // HUD. Only the watched weeks are narrowed, so one schedule request per
+        // check keeps the rounds unambiguous.
+        localStorage.setItem('lectioChangeRadar.v1.223.current-user.settings', JSON.stringify({
+            displayMode: 'floating',
+            pollMinutes: 30,
+            weeksAhead: 0
+        }));
+    </script>
+    <script src="/modules-unstable/Lectio-Change-Radar.user.js"></script>
+</head>
+<body>
+    <main id="masterContent">Lectio fixture</main>
+    <script>
+        const failures = [];
+        const assert = (condition, message) => {
+            if (!condition) failures.push(message);
+        };
+
+        const STATE_KEY = 'lectioChangeRadar.v1.223.current-user.state';
+        const readHistory = () => {
+            try {
+                return JSON.parse(localStorage.getItem(STATE_KEY) || '{}').history || [];
+            } catch (_) {
+                return [];
+            }
+        };
+
+        const readSnapshot = () => {
+            try {
+                return JSON.parse(localStorage.getItem(STATE_KEY) || '{}').snapshot || null;
+            } catch (_) {
+                return null;
+            }
+        };
+
+        const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+        const waitFor = async (predicate, label) => {
+            for (let attempt = 0; attempt < 120; attempt += 1) {
+                if (predicate()) return true;
+                await wait(50);
+            }
+            failures.push('timed out waiting for ' + label);
+            return false;
+        };
+
+        // Changing any tracker re-checks on a 600ms debounce, so setting the
+        // trackers for a round is also what drives that round's check.
+        const setTrackers = (values) => {
+            window.dispatchEvent(new CustomEvent('lectio-manager:set-setting', {
+                detail: { moduleId: 'change-radar', values }
+            }));
+        };
+
+        const kinds = () => readHistory().map((item) => item.kind);
+
+        (async () => {
+            // --- Round 0: baseline.
+            await waitFor(() => readSnapshot(), 'the first snapshot');
+
+            const baseline = readSnapshot();
+            assert(Object.keys(baseline?.events || {}).length === 1, 'baseline should hold one lesson');
+            assert(readHistory().length === 0, 'a first snapshot is a baseline, not a change log');
+            assert(
+                Boolean(baseline?.sources?.assignments),
+                'assignments are tracked by default, so the baseline should carry them'
+            );
+            assert(
+                Object.keys(baseline?.sources?.assignments?.records || {}).length === 1,
+                'the baseline assignment list should hold one assignment'
+            );
+            assert(
+                !baseline?.sources?.absence && !baseline?.sources?.documents,
+                'absence and documents are off by default and must not be fetched'
+            );
+            assert(
+                !window.fetchLog.some((url) => /fravaer|DokumentOversigt/i.test(url)),
+                'no request should be made for a source that is switched off'
+            );
+
+            // --- Round 1: homework moves while room tracking is switched off.
+            round = 1;
+            setTrackers({ trackRoomChanges: false });
+            await waitFor(() => kinds().includes('homework'), 'the homework change');
+
+            assert(
+                !kinds().includes('room'),
+                'room changes must not be reported while that tracker is off'
+            );
+
+            const homeworkEntry = readHistory().find((item) => item.kind === 'homework');
+            assert(
+                /chapter 2/i.test(homeworkEntry?.detail || ''),
+                'a homework entry should quote the new homework, got: ' + homeworkEntry?.detail
+            );
+
+            // --- Round 2: the room moves too, with room tracking back on.
+            round = 2;
+            setTrackers({ trackRoomChanges: true });
+            await waitFor(() => kinds().includes('room'), 'the room change');
+
+            const roomEntry = readHistory().find((item) => item.kind === 'room');
+            assert(
+                /A12/.test(roomEntry?.detail || '') && /B07/.test(roomEntry?.detail || ''),
+                'a room entry should name both rooms, got: ' + roomEntry?.detail
+            );
+
+            // --- Round 3: past the extra-source cadence, the assignment list is
+            // re-read and its own trackers apply.
+            const assignmentRequests = window.fetchLog.filter((url) => /OpgaveListe/i.test(url)).length;
+            assert(
+                assignmentRequests === 1,
+                'the assignment list should not be re-read inside its cadence, saw ' + assignmentRequests
+            );
+
+            // The value has to actually move for this to drive a re-check.
+            // Assignment status does not change between rounds, so switching
+            // its tracker on adds nothing to the log.
+            clockOffset = 31 * 60 * 1000;
+            setTrackers({ trackAssignmentStatus: true });
+            await waitFor(() => kinds().includes('assignment'), 'the new assignment');
+
+            assert(
+                kinds().includes('deadline'),
+                'a moved deadline should be reported'
+            );
+
+            const deadlineEntry = readHistory().find((item) => item.kind === 'deadline');
+            assert(
+                /Oct 1\b/.test(deadlineEntry?.detail || '') && /Oct 5\b/.test(deadlineEntry?.detail || ''),
+                'a deadline entry should name both deadlines, got: ' + deadlineEntry?.detail
+            );
+
+            const newAssignment = readHistory().find((item) => item.kind === 'assignment');
+            assert(
+                newAssignment?.eventDate === '2030-10-12',
+                'an assignment should carry its deadline as the event date so the urgency window can use it, got: ' + newAssignment?.eventDate
+            );
+
+            // --- Switching a source off must stop it being fetched at all.
+            const beforeOff = window.fetchLog.filter((url) => /OpgaveListe/i.test(url)).length;
+            clockOffset += 31 * 60 * 1000;
+            setTrackers({ trackAssignments: false });
+            await wait(1200);
+
+            assert(
+                window.fetchLog.filter((url) => /OpgaveListe/i.test(url)).length === beforeOff,
+                'a source switched off must not be fetched again'
+            );
+            assert(
+                !readSnapshot()?.sources?.assignments,
+                'a source switched off should be dropped from the snapshot'
+            );
+
+            const output = document.createElement('pre');
+            output.id = 'test-result';
+            output.textContent = failures.length ? failures.join(' | ') : 'pass';
+            document.body.dataset.testResult = failures.length ? 'fail' : 'pass';
+            document.body.appendChild(output);
+        })();
+    </script>
+</body>
+</html>
