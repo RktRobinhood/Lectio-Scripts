@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.20.0
+// @version      1.20.1
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules, including their settings and shared dock controls.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
@@ -256,7 +256,7 @@
     // Kept in step with the @version header by scripts/check-versions.mjs. The
     // header is metadata Tampermonkey reads; this is the only copy the running
     // script can see, and it is what the self-update notice compares.
-    const MANAGER_VERSION = '1.20.0';
+    const MANAGER_VERSION = '1.20.1';
 
     const STABLE_CATALOGUE_URL =
         'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/catalogue/modules.json';
@@ -1307,6 +1307,20 @@
             });
     }
 
+    /*
+     * Everything a tile's DOM is built from, in one string. Modules re-register
+     * their item on every internal render, and most of those registrations say
+     * exactly what the last one said - so comparing this is what tells a real
+     * change from the far more common no-op.
+     */
+    function dockItemSignature(item) {
+        return JSON.stringify([
+            item.type, item.icon, item.label, item.tooltip,
+            item.badge === undefined ? null : item.badge,
+            item.state, item.enabled, item.value
+        ]);
+    }
+
     function renderDock() {
         if (!dockElements) return;
 
@@ -1315,11 +1329,35 @@
         if (openDockPanelKey && (!visibleKeys.has(openDockPanelKey) || dockItems.get(openDockPanelKey)?.type !== 'panel')) {
             closeDockPanel(false);
         }
-        hideDockTooltip();
-        dockElements.items.replaceChildren();
 
-        for (const [key, item] of entries) {
-            dockElements.items.appendChild(buildDockItem(key, item));
+        /*
+         * Reuse every tile whose content is unchanged, and touch the row only
+         * when the result differs from what is already there. Rebuilding
+         * unconditionally was invisible until a pointer was resting on a tile:
+         * the button under it was destroyed and replaced mid-hover, so the
+         * hover lift dropped and came back and the arrival nudge started over,
+         * once per registration. A module that re-registers on a timer or a
+         * DOM observer turned that into a permanent flicker.
+         */
+        const existing = new Map(
+            [...dockElements.items.children].map((element) => [element.dataset.dockKey, element])
+        );
+        const buttons = entries.map(([key, item]) => {
+            const current = existing.get(key);
+            if (current && current.dataset.dockSignature === dockItemSignature(item)) {
+                current.classList.toggle('is-active', openDockPanelKey === key);
+                return current;
+            }
+            return buildDockItem(key, item);
+        });
+
+        const children = [...dockElements.items.children];
+        const unchanged = buttons.length === children.length
+            && buttons.every((button, index) => button === children[index]);
+
+        if (!unchanged) {
+            hideDockTooltip();
+            dockElements.items.replaceChildren(...buttons);
         }
 
         const hasItems = entries.length > 0;
@@ -1342,6 +1380,7 @@
         button.type = 'button';
         button.className = 'lectio-manager-dock-item';
         button.dataset.dockKey = key;
+        button.dataset.dockSignature = dockItemSignature(item);
         button.dataset.state = item.state;
         button.dataset.type = item.type;
         button.classList.toggle('is-active', openDockPanelKey === key);
@@ -1377,9 +1416,15 @@
             }
             activateDockItem(key);
         });
-        button.addEventListener('pointerenter', () => showDockTooltip(button, item.tooltip));
+        button.addEventListener('pointerenter', () => {
+            showDockTooltip(button, item.tooltip);
+            nudgeDockItem(button);
+        });
         button.addEventListener('pointerleave', hideDockTooltip);
-        button.addEventListener('focus', () => showDockTooltip(button, item.tooltip));
+        button.addEventListener('focus', () => {
+            showDockTooltip(button, item.tooltip);
+            nudgeDockItem(button);
+        });
         button.addEventListener('blur', hideDockTooltip);
         button.addEventListener('keydown', (event) => {
             // Both axes are accepted whatever the edge, so the shortcut still
@@ -1395,6 +1440,22 @@
         button.addEventListener('pointercancel', cancelPointerDockDrag);
 
         return button;
+    }
+
+    /*
+     * The nudge is an arrival, not a hover state: it plays once when the
+     * pointer or focus reaches a tile and is over before the pointer has
+     * settled. Driving it from a class rather than from :hover is what keeps it
+     * to one play - a CSS hover trigger restarts the animation on every hover
+     * edge, and a pointer crossing a tile's rim can produce several of those in
+     * a second, which reads as a tile that will not stop shaking.
+     */
+    function nudgeDockItem(button) {
+        const icon = button.querySelector('.lectio-manager-dock-icon');
+        if (!icon || icon.classList.contains('is-nudging')) return;
+
+        icon.classList.add('is-nudging');
+        icon.addEventListener('animationend', () => icon.classList.remove('is-nudging'), { once: true });
     }
 
     function formatDockBadge(value) {
@@ -5115,22 +5176,22 @@
             .lectio-manager-dock-item.is-active {
                 /* Hover is the one moment the tile earns some opacity: it is the
                    thing being looked at, and the icon has to stay readable while
-                   it is also the thing being scaled. No ring: a halo that appears
-                   and disappears under a moving pointer flickers, and the scale
-                   already says which tile is under the cursor. */
+                   it is also the thing being scaled. No ring and no drop shadow:
+                   anything that appears *behind* the icon on hover is the first
+                   thing to read as a blink when the pointer crosses a rim, and
+                   the scale already says which tile is under the cursor. The
+                   tile keeps its resting shadow the whole time, so nothing
+                   behind it ever changes. */
                 border-color: rgba(255, 255, 255, .7);
                 background: color-mix(in srgb, var(--lectio-theme-surface, #ffffff) 62%, transparent);
                 outline: none;
-                box-shadow:
-                    0 8px 20px rgba(0, 0, 0, .2),
-                    inset 0 1px 0 rgba(255, 255, 255, .7);
             }
 
             /* Keyboard focus still needs to be visible, and it does not flicker,
                because focus moves deliberately rather than with the pointer. */
             .lectio-manager-dock-item:focus-visible {
                 box-shadow:
-                    0 8px 20px rgba(0, 0, 0, .2),
+                    0 2px 6px rgba(0, 0, 0, .12),
                     inset 0 1px 0 rgba(255, 255, 255, .7),
                     0 0 0 2px color-mix(in srgb, var(--lectio-theme-accent, #0f6f6f) 55%, transparent);
             }
@@ -5229,10 +5290,11 @@
              * arrives, then stillness. A per-icon animation - the radar's sweep
              * turning on hover - meant one tile behaved unlike its neighbours and
              * kept moving the whole time the pointer rested on it, which reads as
-             * a fault rather than as feedback. This plays once and stops.
+             * a fault rather than as feedback. The class is added once on arrival
+             * and removed when the animation ends, so this plays for under half a
+             * second however long the pointer then rests there.
              */
-            .lectio-manager-dock-item:hover .lectio-manager-dock-icon,
-            .lectio-manager-dock-item:focus-visible .lectio-manager-dock-icon {
+            .lectio-manager-dock-icon.is-nudging {
                 animation: lectio-manager-dock-nudge 460ms cubic-bezier(.36, .07, .19, .97) both;
             }
 
@@ -5258,8 +5320,7 @@
                     transform: none;
                 }
 
-                .lectio-manager-dock-item:hover .lectio-manager-dock-sweep,
-                .lectio-manager-dock-item:focus-visible .lectio-manager-dock-sweep {
+                .lectio-manager-dock-icon.is-nudging {
                     animation: none;
                 }
             }

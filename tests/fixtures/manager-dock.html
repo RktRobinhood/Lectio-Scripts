@@ -156,6 +156,46 @@
                 document.elementFromPoint = originalElementFromPoint;
                 assert(keys().join('|') === 'test-module:action|test-module:toggle|test-module:panel', `Pointer reorder failed: ${keys()}`);
 
+                // Modules re-register their item on every internal render, and
+                // almost all of those registrations repeat what the last one
+                // said. Rebuilding the row for them destroyed whichever tile the
+                // pointer was resting on: the hover lift dropped and returned and
+                // the arrival nudge restarted, over and over, which is what a
+                // dock that will not stop blinking actually was.
+                const steadyRegistration = {
+                    moduleId: 'test-module', itemId: 'action', type: 'action', icon: 'refresh',
+                    label: 'Updated action', badge: 8, state: 'active'
+                };
+                register(steadyRegistration);
+                const steady = document.querySelector('[data-dock-key="test-module:action"]');
+                const steadyIcon = steady.querySelector('.lectio-manager-dock-icon');
+                steady.focus();
+                assert(steadyIcon.classList.contains('is-nudging'),
+                    'Arriving on an item did not start its one-shot nudge');
+                for (let repeat = 0; repeat < 10; repeat += 1) register(steadyRegistration);
+                assert(document.querySelector('[data-dock-key="test-module:action"]') === steady,
+                    'An unchanged re-registration replaced the item under the pointer');
+                assert(steady.querySelector('.lectio-manager-dock-icon') === steadyIcon &&
+                    steadyIcon.classList.contains('is-nudging'),
+                    'An unchanged re-registration restarted the arrival nudge');
+
+                // A registration that does say something new still lands.
+                window.dispatchEvent(new CustomEvent('lectio-manager:dock:update', {
+                    detail: { moduleId: 'test-module', itemId: 'action', patch: { badge: 9 } }
+                }));
+                assert(document.querySelector('[data-dock-key="test-module:action"] .lectio-manager-dock-badge')
+                    .textContent === '9', 'A real change was swallowed by the unchanged-item check');
+
+                // Nothing may appear behind a tile on hover: a shadow that comes
+                // and goes under a moving pointer is read as a blink, and the
+                // magnification already says which tile is under the cursor.
+                const hoverRules = [...document.querySelectorAll('style')]
+                    .flatMap((element) => [...(element.sheet?.cssRules || [])])
+                    .filter((rule) => rule.selectorText?.includes('.lectio-manager-dock-item:hover'));
+                assert(hoverRules.length > 0, 'Test setup found no dock hover rule to check');
+                assert(hoverRules.every((rule) => !rule.style.boxShadow),
+                    'A dock hover rule reintroduced a shadow behind the tile');
+
                 register({ moduleId: 'ghost-module', itemId: 'returning', type: 'action', label: 'Returning item', defaultPriority: 999 });
                 const ghost = document.querySelector('[data-dock-key="ghost-module:returning"]');
                 ghost.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', ctrlKey: true, bubbles: true }));
