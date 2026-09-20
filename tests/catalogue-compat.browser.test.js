@@ -51,7 +51,8 @@ const SHIPPED_MANAGERS = [
     { version: '1.22.1', commit: '959ac47' },
     { version: '1.22.2', commit: 'd49b1c0' },
     { version: '1.23.0', commit: '8e6077c' },
-    { version: '1.24.0', commit: 'd6fc699' }
+    { version: '1.24.0', commit: 'd6fc699' },
+    { version: '1.25.1', commit: '934b55f' }
 ];
 
 /*
@@ -61,6 +62,15 @@ const SHIPPED_MANAGERS = [
  * Manager that never boots lists no modules whatever the catalogue says, so
  * running it here would prove nothing and would fail forever. The version
  * number itself stays used and is never reissued.
+ *
+ * 1.25.0 (a2ed431) is absent for the same reason and the same mistake, found
+ * by this test rather than by a user. It read a const declared below its boot
+ * block too, but inside validateCatalogue, where the throw is caught and
+ * warned about: it booted, discarded its cached catalogue on every page load,
+ * and refetched. That is a live Manager here only if the fixture gives it a
+ * network, which it deliberately does not, so the row would fail forever while
+ * saying nothing about the catalogue. Replaced by 1.25.1 the same hour; the
+ * number stays used and is never reissued.
  */
 
 const FIXTURE = `<!doctype html>
