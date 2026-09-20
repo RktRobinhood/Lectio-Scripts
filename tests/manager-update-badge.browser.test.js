@@ -9,24 +9,18 @@
  * also the state in which a throw would take the whole Manager down.
  */
 
-const { execFile } = require('node:child_process');
 const { resolve } = require('node:path');
 const { pathToFileURL } = require('node:url');
-const { promisify } = require('node:util');
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { chromeEnvironment, createProfile, releaseProfile } = require('./chrome-harness');
-
-const execFileAsync = promisify(execFile);
-const chromePath = process.env.CHROME_PATH ||
-    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe';
+const { chromeEnvironment, createProfile, releaseProfile, runChrome } = require('./chrome-harness');
 
 async function runFixture(prefix, fixture) {
     const profileDirectory = await createProfile(prefix);
     const fixtureUrl = pathToFileURL(resolve(__dirname, 'fixtures', fixture)).href;
 
     try {
-        const { stdout } = await execFileAsync(chromePath, [
+        const { stdout } = await runChrome([
             '--headless=new',
             '--disable-gpu',
             '--allow-file-access-from-files',

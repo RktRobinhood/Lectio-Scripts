@@ -1,15 +1,10 @@
-const { execFile } = require('node:child_process');
 const { createServer } = require('node:http');
 const { readFile } = require('node:fs/promises');
 const { extname, join, resolve } = require('node:path');
-const { promisify } = require('node:util');
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { chromeEnvironment, createProfile, releaseProfile } = require('./chrome-harness');
+const { chromeEnvironment, createProfile, releaseProfile, runChrome } = require('./chrome-harness');
 
-const execFileAsync = promisify(execFile);
-const chromePath = process.env.CHROME_PATH ||
-    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe';
 const repositoryRoot = resolve(__dirname, '..');
 
 test('Change Radar jitters its first check, never stacks, backs off, recovers and survives the bfcache', async () => {
@@ -39,7 +34,7 @@ test('Change Radar jitters its first check, never stacks, backs off, recovers an
            module's own twenty-second timeout, and then a five-minute wait for
            the poll timer the bfcache restore had to re-arm: the run needs the
            better part of a virtual ten minutes to reach its assertions. */
-        const { stdout } = await execFileAsync(chromePath, [
+        const { stdout } = await runChrome([
             '--headless=new',
             '--disable-gpu',
             `--user-data-dir=${profileDirectory}`,

@@ -1,15 +1,9 @@
-const { execFile } = require('node:child_process');
 const { createServer } = require('node:http');
 const { readFile } = require('node:fs/promises');
 const { join, resolve } = require('node:path');
-const { promisify } = require('node:util');
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { chromeEnvironment, createProfile, releaseProfile } = require('./chrome-harness');
-
-const execFileAsync = promisify(execFile);
-const chromePath = process.env.CHROME_PATH ||
-    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe';
+const { chromeEnvironment, createProfile, releaseProfile, runChrome } = require('./chrome-harness');
 
 /* The module reads its school off the path and only scans a page that shows
    lesson blocks, so the fixture has to be served from a Lectio-shaped URL
@@ -52,7 +46,7 @@ test('a hung week scan times out, never stacks, backs off, survives the bfcache 
            ten-second timeout, plus two jittered scan starts and an eight-second
            wait for the backed-off scan that must never happen - so the run
            needs the better part of a virtual minute to reach its assertions. */
-        const { stdout } = await execFileAsync(chromePath, [
+        const { stdout } = await runChrome([
             '--headless=new',
             '--disable-gpu',
             `--user-data-dir=${profileDirectory}`,

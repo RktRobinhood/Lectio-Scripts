@@ -7,6 +7,28 @@
 <body>
     <script>
         /*
+         * The one thing in this fixture that is about the test environment
+         * rather than about the Manager (issue #51).
+         *
+         * Export really does hand the browser a file to save, and a download
+         * in flight can keep headless Chrome alive after --dump-dom has
+         * already printed the page: measured here, 20 of 68 launches never
+         * exited with the download firing and 0 of 48 with it declined. That
+         * is the suite's worst failure mode - the DOM says `pass` and the
+         * process sits there until something kills it.
+         *
+         * So the click still happens and the whole export path still runs;
+         * only the browser's half of it - writing a file to a Downloads
+         * folder no assertion ever looks at - is declined. Nothing below
+         * changes, and none of it reads the saved file.
+         */
+        window.addEventListener('click', (event) => {
+            const link = event.target?.closest?.('a[download]');
+            if (link) event.preventDefault();
+        }, true);
+    </script>
+    <script>
+        /*
          * Export and import (issue #30).
          *
          * The seam under test is the same one the settings panel already

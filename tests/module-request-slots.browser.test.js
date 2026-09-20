@@ -14,18 +14,14 @@
  * a Manager that has genuinely never heard of a slot.
  */
 
-const { execFile, execFileSync } = require('node:child_process');
+const { execFileSync } = require('node:child_process');
 const { createServer } = require('node:http');
 const { readFile } = require('node:fs/promises');
 const { extname, resolve } = require('node:path');
-const { promisify } = require('node:util');
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { chromeEnvironment, createProfile, releaseProfile } = require('./chrome-harness');
+const { chromeEnvironment, createProfile, releaseProfile, runChrome } = require('./chrome-harness');
 
-const execFileAsync = promisify(execFile);
-const chromePath = process.env.CHROME_PATH ||
-    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe';
 const repositoryRoot = resolve(__dirname, '..');
 
 // The last Manager published before request slots existed. Same commit the
@@ -87,7 +83,7 @@ test('every module fetches whatever the Manager does, and takes turns when there
                        acknowledged module waits out its own eight-second
                        ceiling on top of that. Chrome runs it on a virtual
                        clock, so a virtual minute costs about a second. */
-                    const { stdout } = await execFileAsync(chromePath, [
+                    const { stdout } = await runChrome([
                         '--headless=new',
                         '--disable-gpu',
                         `--user-data-dir=${profileDirectory}`,

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>A Chrome that will not exit</title>
+</head>
+<body>
+    <script>
+        /*
+         * The hang, on purpose (issue #51).
+         *
+         * Every other fixture here is about a module. This one is about the
+         * harness: it is the page the Chrome watchdog is pointed at to prove
+         * the watchdog works. Loading never finishes, so --dump-dom never
+         * prints and Chrome never exits - which is the shape of the real
+         * failure this suite kept hitting, reached deliberately instead of
+         * once every few runs.
+         *
+         * The loop is bounded at ten minutes rather than truly infinite. The
+         * watchdog kills this process long before that; the bound is only so
+         * that a kill which somehow does not land leaves a process that gives
+         * up by itself instead of spinning on a core until someone notices.
+         */
+        const giveUpAt = Date.now() + 600000;
+        while (Date.now() < giveUpAt) { /* hold the load event open */ }
+    </script>
+</body>
+</html>

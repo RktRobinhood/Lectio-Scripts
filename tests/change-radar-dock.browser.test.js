@@ -1,15 +1,10 @@
-const { execFile } = require('node:child_process');
 const { createServer } = require('node:http');
 const { readFile } = require('node:fs/promises');
 const { extname, join, resolve } = require('node:path');
-const { promisify } = require('node:util');
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { chromeEnvironment, createProfile, releaseProfile } = require('./chrome-harness');
+const { chromeEnvironment, createProfile, releaseProfile, runChrome } = require('./chrome-harness');
 
-const execFileAsync = promisify(execFile);
-const chromePath = process.env.CHROME_PATH ||
-    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe';
 const repositoryRoot = resolve(__dirname, '..');
 
 test('Change Radar can move between its floating HUD and the shared Manager dock', async () => {
@@ -35,7 +30,7 @@ test('Change Radar can move between its floating HUD and the shared Manager dock
     const { port } = server.address();
 
     try {
-        const { stdout } = await execFileAsync(chromePath, [
+        const { stdout } = await runChrome([
             '--headless=new',
             '--disable-gpu',
             `--user-data-dir=${profileDirectory}`,

@@ -1,15 +1,9 @@
-const { execFile } = require('node:child_process');
 const { createServer } = require('node:http');
 const { readFile } = require('node:fs/promises');
 const { join, resolve } = require('node:path');
-const { promisify } = require('node:util');
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { chromeEnvironment, createProfile, releaseProfile } = require('./chrome-harness');
-
-const execFileAsync = promisify(execFile);
-const chromePath = process.env.CHROME_PATH ||
-    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe';
+const { chromeEnvironment, createProfile, releaseProfile, runChrome } = require('./chrome-harness');
 
 /* Chairs Up only runs where the path names a school and an activity page,
    so this fixture has to be served from a Lectio-shaped URL rather than
@@ -52,7 +46,7 @@ test('the activity notice stays clear of the page and of Lectio overlays', async
     const origin = `http://127.0.0.1:${server.address().port}`;
 
     const runLayout = async (layout, size) => {
-        const { stdout } = await execFileAsync(chromePath, [
+        const { stdout } = await runChrome([
             '--headless=new',
             '--disable-gpu',
             `--window-size=${size}`,

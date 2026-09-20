@@ -1,14 +1,8 @@
-const { execFile } = require('node:child_process');
 const { join, resolve } = require('node:path');
 const { pathToFileURL } = require('node:url');
-const { promisify } = require('node:util');
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { chromeEnvironment, createProfile, releaseProfile } = require('./chrome-harness');
-
-const execFileAsync = promisify(execFile);
-const chromePath = process.env.CHROME_PATH ||
-    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe';
+const { chromeEnvironment, createProfile, releaseProfile, runChrome } = require('./chrome-harness');
 
 test('subject colours are learned from a repeating timetable and keep their own colour space', async () => {
     const profileDirectory = await createProfile('lectio-subject-colours-');
@@ -28,7 +22,7 @@ test('subject colours are learned from a repeating timetable and keep their own 
     // past the load event, which a virtual-time budget does by fast-forwarding
     // its clock instead of making the suite wait in real time.
     const runFixture = async (phase, { virtualTimeMs = 0 } = {}) => {
-        const { stdout } = await execFileAsync(chromePath, [
+        const { stdout } = await runChrome([
             '--headless=new',
             '--disable-gpu',
             '--allow-file-access-from-files',

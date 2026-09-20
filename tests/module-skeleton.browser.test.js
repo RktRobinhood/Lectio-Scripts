@@ -5,18 +5,12 @@
  * with no Manager listening at all, then with a stub Manager playing the
  * Discovery, settings, preview and dock-panel parts, then through teardown.
  */
-const { execFile } = require('node:child_process');
 const { join, resolve } = require('node:path');
 const { pathToFileURL } = require('node:url');
-const { promisify } = require('node:util');
 const { readFileSync } = require('node:fs');
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { chromeEnvironment, createProfile, releaseProfile } = require('./chrome-harness');
-
-const execFileAsync = promisify(execFile);
-const chromePath = process.env.CHROME_PATH ||
-    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe';
+const { chromeEnvironment, createProfile, releaseProfile, runChrome } = require('./chrome-harness');
 
 const skeletonPath = resolve(__dirname, '..', 'templates', 'Lectio-Module-Skeleton.user.js');
 
@@ -25,7 +19,7 @@ test('the module skeleton loads clean with and without the Manager, and tears do
     const fixtureUrl = pathToFileURL(resolve(__dirname, 'fixtures', 'module-skeleton.html')).href;
 
     try {
-        const { stdout } = await execFileAsync(chromePath, [
+        const { stdout } = await runChrome([
             '--headless=new',
             '--disable-gpu',
             '--allow-file-access-from-files',

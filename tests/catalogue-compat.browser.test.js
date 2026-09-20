@@ -16,19 +16,14 @@
  * field is what would break them, and that is what this test is here to catch.
  */
 
-const { execFile, execFileSync } = require('node:child_process');
+const { execFileSync } = require('node:child_process');
 const { mkdtemp, rm, writeFile, copyFile } = require('node:fs/promises');
 const { tmpdir } = require('node:os');
 const { join, resolve } = require('node:path');
 const { pathToFileURL } = require('node:url');
-const { promisify } = require('node:util');
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { chromeEnvironment, createProfile, releaseProfile } = require('./chrome-harness');
-
-const execFileAsync = promisify(execFile);
-const chromePath = process.env.CHROME_PATH ||
-    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe';
+const { chromeEnvironment, createProfile, releaseProfile, runChrome } = require('./chrome-harness');
 
 const repoRoot = resolve(__dirname, '..');
 
@@ -158,7 +153,7 @@ async function runAgainst({ version, commit }, expectedCount) {
             FIXTURE.replace('EXPECTED_COUNT', String(expectedCount)).replaceAll('EXPECTED_COUNT', String(expectedCount))
         );
 
-        const { stdout } = await execFileAsync(chromePath, [
+        const { stdout } = await runChrome([
             '--headless=new',
             '--disable-gpu',
             '--allow-file-access-from-files',

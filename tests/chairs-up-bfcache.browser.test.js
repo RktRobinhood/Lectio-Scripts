@@ -1,15 +1,9 @@
-const { execFile } = require('node:child_process');
 const { createServer } = require('node:http');
 const { readFile } = require('node:fs/promises');
 const { resolve } = require('node:path');
-const { promisify } = require('node:util');
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { chromeEnvironment, createProfile, releaseProfile } = require('./chrome-harness');
-
-const execFileAsync = promisify(execFile);
-const chromePath = process.env.CHROME_PATH ||
-    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe';
+const { chromeEnvironment, createProfile, releaseProfile, runChrome } = require('./chrome-harness');
 
 /* Chairs Up only does background work where the path names a school and a
    timetable, so the fixture has to be served from a Lectio-shaped URL rather
@@ -46,7 +40,7 @@ async function runPhase(phase, profilePrefix) {
     const { port } = server.address();
 
     try {
-        const { stdout } = await execFileAsync(chromePath, [
+        const { stdout } = await runChrome([
             '--headless=new',
             '--disable-gpu',
             `--user-data-dir=${profileDirectory}`,

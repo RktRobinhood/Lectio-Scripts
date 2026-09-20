@@ -8,17 +8,11 @@
  * failure of the design rather than something to assert about.
  */
 
-const { execFile } = require('node:child_process');
 const { resolve } = require('node:path');
 const { pathToFileURL } = require('node:url');
-const { promisify } = require('node:util');
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { chromeEnvironment, createProfile, releaseProfile } = require('./chrome-harness');
-
-const execFileAsync = promisify(execFile);
-const chromePath = process.env.CHROME_PATH ||
-    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe';
+const { chromeEnvironment, createProfile, releaseProfile, runChrome } = require('./chrome-harness');
 
 test('the Manager serialises turns, reclaims one nobody hands back, and logs it', async () => {
     const profileDirectory = await createProfile('lectio-manager-slots-');
@@ -28,7 +22,7 @@ test('the Manager serialises turns, reclaims one nobody hands back, and logs it'
         /* The lease is thirty seconds, and the run has to sit past it twice -
            once to prove it does not fire early. Chrome runs the wait on a
            virtual clock, so a virtual minute and a half costs a real second. */
-        const { stdout } = await execFileAsync(chromePath, [
+        const { stdout } = await runChrome([
             '--headless=new',
             '--disable-gpu',
             '--allow-file-access-from-files',
