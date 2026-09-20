@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio Change Radar pagehide-abort fixture</title>
+    <script>
+        /* Issue #42. The module already aborted an in-flight request on its
+           own twenty-second timeout; nothing aborted one when the page went
+           away. This fixture watches a single hung request and asks, three
+           times, who ended it and how long it took:
+
+             - a bfcache freeze must end it, and quickly;
+             - a terminal pagehide must end it, and quickly;
+             - the twenty-second timeout must still be the one that ends a
+               request nobody interrupted.
+
+           Served from /lectio/223/ by the test's own server because the
+           module reads its school off the path. Lectio is stubbed at
+           window.fetch rather than served, because what has to be reproduced
+           is a request that never answers. */
+        window.pageStartedAt = Date.now();
+        window.fetchLog = [];
+
+        /* Read at call time, so a request already hanging goes on hanging. */
+        window.nextResponse = 'hang';
+
+        /* Pinned so the start jitter is a known number rather than a range.
+           The module multiplies this by its own four-second window, so the
+           first check lands near three seconds. */
+        Math.random = () => 0.75;
+
+        window.SCHEDULE_HTML = '<!doctype html><html><body><table>'
+            + '<tr class="s2dayHeader"><th>Uge</th></tr>'
+            + '<tr><td data-date="2030-10-21">'
+            + '<a class="s2skemabrik s2brik s2normal" href="/lectio/223/aktivitet/aktivitetforside2.aspx?absid=900001" '
+            + 'data-tooltip="Matematik A&#10;21/10-2030 08:00 til 09:30&#10;Hold: 3a MA&#10;Lokaler: A12">'
+            + '<span class="s2skemabrikcontent">Matematik A</span></a>'
+            + '</td></tr></table></body></html>';
+
+        window.fetch = (url, init) => {
+            const record = {
+                url: String(url),
+                hasSignal: Boolean(init && init.signal),
+                mode: window.nextResponse,
+                startedAt: Date.now(),
+                answered: false,
+                aborted: false,
+                abortedAfterMs: -1
+            };
+
+            window.fetchLog.push(record);
+
+            if (record.mode === 'ok') {
+                record.answered = true;
+                return Promise.resolve({
+                    ok: true,
+                    status: 200,
+                    url: record.url,
+                    text: () => Promise.resolve(window.SCHEDULE_HTML)
+                });
+            }
+
+            return new Promise((_, reject) => {
+                const signal = init && init.signal;
+                if (!signal) return;
+
+                signal.addEventListener('abort', () => {
+                    record.aborted = true;
+                    record.abortedAfterMs = Date.now() - record.startedAt;
+                    reject(new DOMException('The user aborted a request.', 'AbortError'));
+                });
+            });
+        };
+
+        /* No Manager in this fixture, so the radar falls back to its floating
+           HUD. One watched week and every extra source off means exactly one
+           request per check, so a request is a check. */
+        localStorage.clear();
+        localStorage.setItem('lectioChangeRadar.v1.223.current-user.settings', JSON.stringify({
+            displayMode: 'floating',
+            pollMinutes: 5,
+            weeksAhead: 0,
+            trackAssignments: false,
+            trackAbsence: false,
+            trackDocuments: false
+        }));
+    </script>
+    <script src="/modules-unstable/Lectio-Change-Radar.user.js"></script>
+</head>
+<body>
+    <main id="masterContent">Lectio fixture</main>
+    <script>
+        const failures = [];
+        const assert = (condition, message) => {
+            if (!condition) failures.push(message);
+        };
+
+        const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+        const waitFor = async (predicate, label, attempts = 400, step = 50) => {
+            for (let attempt = 0; attempt < attempts; attempt += 1) {
+                if (predicate()) return true;
+                await wait(step);
+            }
+            failures.push('timed out waiting for ' + label);
+            return false;
+        };
+
+        const log = window.fetchLog;
+
+        const transition = (type, isPersisted) => {
+            try {
+                return new PageTransitionEvent(type, { persisted: isPersisted });
+            } catch (_) {
+                const event = new Event(type);
+                Object.defineProperty(event, 'persisted', { value: isPersisted });
+                return event;
+            }
+        };
+
+        /* Flipping a tracker is the module's forced-recheck path - the
+           stand-in for the person pressing Refresh. It is debounced by 600ms
+           and it clears the backoff, so it is a reliable way to ask for one
+           more request without waiting out a poll interval. */
+        let noteTracker = false;
+        const nudge = () => {
+            noteTracker = !noteTracker;
+            window.dispatchEvent(new CustomEvent('lectio-manager:set-setting', {
+                detail: { moduleId: 'change-radar', values: { trackLessonNotes: noteTracker } }
+            }));
+        };
+
+        /* Comfortably longer than the 600ms settings debounce and the time a
+           request needs to reach window.fetch, and comfortably shorter than
+           the twenty-second timeout: an abort seen inside this window was not
+           the timeout's doing. */
+        const PROMPT_MS = 3000;
+
+        (async () => {
+            /* --- A bfcache freeze aborts the request in flight ------------- */
+
+            await waitFor(() => log.length >= 1, 'the first check to start', 200);
+
+            if (log.length >= 1) {
+                assert(log[0].hasSignal, 'the week request carried no abort signal');
+                assert(!log[0].aborted, 'the first request ended before the page was frozen');
+
+                const frozenAt = Date.now();
+                window.dispatchEvent(transition('pagehide', true));
+
+                await waitFor(
+                    () => log[0].aborted,
+                    'the frozen page to abort the request it had in flight',
+                    PROMPT_MS / 50
+                );
+
+                assert(
+                    log[0].aborted,
+                    'a page frozen for the back/forward cache went on holding a Lectio request open'
+                );
+                assert(
+                    log[0].aborted && Date.now() - frozenAt < PROMPT_MS,
+                    'the frozen page\'s request was not aborted promptly - it took ' +
+                        (Date.now() - frozenAt) + 'ms, which is the timeout, not the freeze'
+                );
+                assert(
+                    log[0].abortedAfterMs >= 0 && log[0].abortedAfterMs < 15000,
+                    'the request outlived the freeze and was ended by the twenty-second timeout ' +
+                        'instead, after ' + log[0].abortedAfterMs + 'ms'
+                );
+            }
+
+            /* --- ...and the restored page goes back to work ---------------- */
+
+            window.dispatchEvent(transition('pageshow', true));
+
+            const restoredAt = log.length;
+            nudge();
+
+            await waitFor(
+                () => log.length > restoredAt,
+                'a check to run again after the page came back from the bfcache',
+                200
+            );
+
+            /* --- The twenty-second timeout is unchanged -------------------- */
+
+            /* Nothing interrupts this one. It must last the full timeout and
+               then be ended by it. */
+            const timedOut = log[log.length - 1];
+
+            await wait(5000);
+            assert(
+                !timedOut.aborted,
+                'the request was aborted after ' + timedOut.abortedAfterMs +
+                    'ms, far short of the twenty-second timeout'
+            );
+
+            await waitFor(() => timedOut.aborted, 'the hung check to be timed out', 600);
+
+            assert(
+                timedOut.abortedAfterMs >= 15000 && timedOut.abortedAfterMs <= 27000,
+                'the hung request should still be timed out near twenty seconds, was ' +
+                    timedOut.abortedAfterMs + 'ms'
+            );
+
+            /* --- A terminal pagehide aborts the request in flight ---------- */
+
+            const terminalAt = log.length;
+            nudge();
+
+            await waitFor(() => log.length > terminalAt, 'one last check to start', 200);
+
+            const terminal = log[log.length - 1];
+            assert(!terminal.aborted, 'the last request ended before the page went away');
+
+            const leftAt = Date.now();
+            window.dispatchEvent(transition('pagehide', false));
+
+            await waitFor(
+                () => terminal.aborted,
+                'the unloading page to abort the request it had in flight',
+                PROMPT_MS / 50
+            );
+
+            assert(
+                terminal.aborted,
+                'a page that is genuinely going away went on holding a Lectio request open'
+            );
+            assert(
+                terminal.aborted && Date.now() - leftAt < PROMPT_MS,
+                'the unloading page\'s request was not aborted promptly - it took ' +
+                    (Date.now() - leftAt) + 'ms, which is the timeout, not the pagehide'
+            );
+
+            const debug = document.createElement('pre');
+            debug.id = 'test-debug';
+            debug.textContent = log
+                .map((entry, index) => index + ':' + entry.mode +
+                    '@' + Math.round(entry.startedAt - window.pageStartedAt) +
+                    (entry.aborted ? ' aborted+' + entry.abortedAfterMs : ' open'))
+                .join(' ');
+            document.body.appendChild(debug);
+
+            const output = document.createElement('pre');
+            output.id = 'test-result';
+            output.textContent = failures.length ? failures.join(' | ') : 'pass';
+            document.body.dataset.testResult = failures.length ? 'fail' : 'pass';
+            document.body.appendChild(output);
+        })();
+    </script>
+</body>
+</html>

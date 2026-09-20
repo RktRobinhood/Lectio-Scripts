@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Change Radar
 // @namespace    https://github.com/RktRobinhood/Lectio-Scripts
-// @version      0.7.0
+// @version      0.7.1
 // @description  Watches Lectio for the changes you choose to track - timetable, assignments, absence, documents - and keeps a compact recent-change HUD.
 // @author       RktRobinhood
 // @match        https://www.lectio.dk/lectio/*
@@ -20,7 +20,7 @@
     id: 'change-radar',
     aliases: ['schedule-change-radar', 'lectio-change-radar', 'change-log'],
     name: 'Lectio Change Radar',
-    version: '0.7.0',
+    version: '0.7.1',
     channel: 'unstable'
   });
 
@@ -222,14 +222,20 @@
     // above the start block below - module-scope state declared further down,
     // beside the functions that use it, would be read in its temporal dead
     // zone on the cold-start path and throw. All of it lasts one page view:
-    // pagehide clears the two timers and sets suspended, and a bfcache restore
-    // puts them back. The backoff is in memory rather than stored because the
-    // hammering it damps happens inside a single page view, and a new page
-    // view has earned a fresh try.
+    // pagehide clears the two timers, empties the controller Set and sets
+    // suspended, and a bfcache restore puts them back. The backoff is in
+    // memory rather than stored because the hammering it damps happens inside
+    // a single page view, and a new page view has earned a fresh try.
+    //
+    // liveFetchControllers is bounded by construction: a request adds its own
+    // controller on the way in and removes it in fetchLectioDocument's
+    // finally, so every exit path - answered, failed, timed out or aborted -
+    // takes it back out, and the Set is empty again between checks.
     suspended: false,
     startTimer: null,
     pollFailures: 0,
-    backoffUntil: 0
+    backoffUntil: 0,
+    liveFetchControllers: new Set()
   };
 
   // The Manager announces itself by asking every module to register. Automatic
@@ -403,7 +409,10 @@
 
   // Suspending is not tearing down: everything here is reversible, because a
   // page frozen for the back/forward cache may come back without this script
-  // ever running again.
+  // ever running again. Nothing may be left in flight while it is frozen
+  // though - a frozen page must not go on holding a Lectio request open - so
+  // the live controllers are aborted here rather than only on the terminal
+  // branch of pagehide. A restored page simply starts a fresh check.
   function suspendPolling() {
     runtime.suspended = true;
 
@@ -416,6 +425,16 @@
       window.clearTimeout(runtime.startTimer);
       runtime.startTimer = null;
     }
+
+    for (const controller of runtime.liveFetchControllers) {
+      try {
+        controller.abort();
+      } catch (_) {
+        // A controller that has already settled cannot be aborted.
+      }
+    }
+
+    runtime.liveFetchControllers.clear();
   }
 
   function resumePolling(event) {
@@ -719,6 +738,12 @@
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), BASE_CONFIG.fetchTimeoutMs);
 
+    // The timeout is one reason a request can end; the page going away is the
+    // other. Tracking the controller is what lets pagehide reach a request
+    // that is already in the air - and the delete in the finally below is on
+    // every exit path, so nothing accumulates.
+    runtime.liveFetchControllers.add(controller);
+
     try {
       const response = await fetch(url, {
         method: 'GET',
@@ -744,6 +769,7 @@
       return new DOMParser().parseFromString(html, 'text/html');
     } finally {
       window.clearTimeout(timeout);
+      runtime.liveFetchControllers.delete(controller);
     }
   }
 
