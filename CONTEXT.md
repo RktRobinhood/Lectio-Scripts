@@ -18,7 +18,8 @@ _Avoid_: registry (implies a dynamic/server-backed service, which this isn't), i
 
 **Channel**:
 Which set of module versions a user's Manager reads: Stable (`catalogue/modules.json`) or Unstable (`modules-unstable/modules.json`, overlaid on top of it). Chosen by the user in the Manager's own settings and nowhere else. Not a Git branch — both live on `main`.
-_Avoid_: branch, track, ring.
+**Unstable is the repo's word for it; no user ever sees it.** Inside the repo it is Unstable — the folder `modules-unstable/`, the stored value and catalogue `status` `unstable`, and the term AGENTS.md and [ADR-0014](./docs/adr/0014-unstable-first-releases.md) use throughout. Every string the Manager shows says **Experimental** (Danish **Eksperimentel**); Stable is **Stable** / **Stabil**. So anything a user reads — the issue forms, README instructions, release notes, anything quoting the Manager — says Experimental, and repo- and agent-facing text says Unstable. (The Manager also badges individual modules *Experimental*; that is a maturity marker on one module, not the Channel.)
+_Avoid_: branch, track, ring; Unstable in anything a user reads.
 
 **Promotion**:
 Moving a module from the Unstable Channel to the Stable one: the owner asks for it by name, and the module's file and catalogue entry move from `modules-unstable/` to `modules/` and `catalogue/modules.json` with one more patch bump. The only way anything reaches Stable users, per ADR-0014.
