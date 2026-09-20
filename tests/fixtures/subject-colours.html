@@ -39,9 +39,27 @@
 
         const phase = new URLSearchParams(location.search).get('phase') || 'first';
 
+        // Every phase after the first builds on what the ones before it
+        // learned, and that storage is handed over explicitly rather than
+        // left behind in the browser profile (issue #35). Chrome does not
+        // write localStorage through on setItem: its storage service batches
+        // the commit to disk, and a --dump-dom run ends the moment the DOM
+        // has been printed, so whether a phase's writes have landed by the
+        // time the next phase's Chrome opens the same profile is a race. It
+        // is lost about half the time on a page that exits immediately, and
+        // often enough on this one to redden a suite run: the opening phase
+        // is the only one that renders a different week, so losing its write
+        // leaves the second phase with one week of evidence instead of two
+        // and no class to colour. The state travels in the dump instead and
+        // comes back in here, which still has the module parse its own
+        // persisted JSON out of localStorage on a fresh page load - only
+        // without the disk in the middle of it.
+        const carried = (location.hash.match(/^#state=(.+)$/) || [])[1];
+
         // The opening phase is the clean slate every later phase builds on.
-        if (phase === 'first') {
-            localStorage.clear();
+        localStorage.clear();
+        for (const [key, value] of Object.entries(carried ? JSON.parse(decodeURIComponent(carried)) : {})) {
+            localStorage.setItem(key, value);
         }
 
         // Background scanning is switched off: this fixture is about what the
@@ -230,6 +248,22 @@
             const result = document.createElement('pre');
             result.id = 'test-result';
             const wait = (ms) => new Promise((done) => window.setTimeout(done, ms));
+
+            // Everything this phase's storage ended up holding, put where the
+            // DOM dump will carry it back to the test — the other half of the
+            // handover described beside the restore in the head.
+            const carryState = () => {
+                const state = {};
+                for (let index = 0; index < localStorage.length; index += 1) {
+                    const key = localStorage.key(index);
+                    state[key] = localStorage.getItem(key);
+                }
+
+                const carrier = document.createElement('pre');
+                carrier.id = 'test-state';
+                carrier.textContent = encodeURIComponent(JSON.stringify(state));
+                document.body.appendChild(carrier);
+            };
 
             const phase = new URLSearchParams(location.search).get('phase') || 'first';
             const kindOf = (id) => document.getElementById(id).getAttribute('data-lectio-subject');
@@ -583,6 +617,11 @@
                 result.dataset.testResult = 'fail';
                 result.textContent = `FAIL: ${error.message}`;
                 document.body.appendChild(result);
+            } finally {
+                // Also on the first phase's early return, and on a failure:
+                // the test decides what to do with the dump, and a phase that
+                // reported nothing is a hole in the chain, not a silent pass.
+                carryState();
             }
         });
     </script>

@@ -13,6 +13,17 @@ const chromePath = process.env.CHROME_PATH ||
 test('subject colours are learned from a repeating timetable and keep their own colour space', async () => {
     const profileDirectory = await createProfile('lectio-subject-colours-');
     const fixtureUrl = pathToFileURL(resolve(__dirname, 'fixtures', 'subject-colours.html')).href;
+    // Each phase runs its own Chrome and builds on what the ones before it
+    // learned, but the profile on disk is not what carries that. Chrome's
+    // storage service commits localStorage on a batching timer, and a
+    // --dump-dom process exits as soon as the DOM is printed, so a phase's
+    // writes may simply not be there when the next phase opens the profile
+    // (issue #35). Losing the opening phase's write is what produced "a
+    // twice-weekly hold was not recognised as a class" out of a good tree.
+    // So the storage comes back out of each dump and goes into the next
+    // phase through the fixture's own #state= hash instead.
+    let carried = '';
+
     // A phase that has to outlast a timer needs Chrome to keep the page alive
     // past the load event, which a virtual-time budget does by fast-forwarding
     // its clock instead of making the suite wait in real time.
@@ -24,8 +35,17 @@ test('subject colours are learned from a repeating timetable and keep their own 
             `--user-data-dir=${profileDirectory}`,
             ...(virtualTimeMs ? [`--virtual-time-budget=${virtualTimeMs}`] : []),
             '--dump-dom',
-            phase ? `${fixtureUrl}?phase=${phase}` : fixtureUrl
+            `${phase ? `${fixtureUrl}?phase=${phase}` : fixtureUrl}${carried ? `#state=${carried}` : ''}`
         ], { env: chromeEnvironment(profileDirectory) });
+
+        // A phase that reported no storage has broken the chain, and every
+        // later phase would then be testing a blank slate it was never meant
+        // to see. That is a failure in its own right, not something to carry
+        // an empty string past.
+        const handover = stdout.match(/<pre id="test-state">([^<]*)<\/pre>/);
+        assert.ok(handover, `the ${phase || 'first'} phase did not hand its storage on:\n${stdout}`);
+        carried = handover[1];
+
         return stdout;
     };
 
