@@ -91,6 +91,9 @@
 
         window.addEventListener('load', async () => {
             try {
+                // The panel is built on the first gear click, so open it first.
+                document.querySelector('#lectio-manager-toggle').click();
+
                 const installedTab = document.querySelector('[data-primary-view="installed"]');
                 const availableTab = document.querySelector('[data-primary-view="all"]');
 

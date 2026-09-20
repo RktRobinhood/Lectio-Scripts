@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.22.1
+// @version      1.22.2
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules, including their settings and shared dock controls.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
@@ -260,7 +260,7 @@
     // Kept in step with the @version header by scripts/check-versions.mjs. The
     // header is metadata Tampermonkey reads; this is the only copy the running
     // script can see, and it is what the self-update notice compares.
-    const MANAGER_VERSION = '1.22.1';
+    const MANAGER_VERSION = '1.22.2';
 
     const STABLE_CATALOGUE_URL =
         'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/catalogue/modules.json';
@@ -340,6 +340,16 @@
     let refreshing = false;
     let refreshQueued = false;
     let elements = null;
+    /*
+     * The panel is built on the first gear click of a page's life, not on every
+     * page load - most pages never see it opened. `launcher` is the gear and its
+     * root, which are built eagerly; `elements` stays null until the panel
+     * exists, which is exactly what every panel-touching function below already
+     * tests for. Nothing here may throw before that point: the Manager runs on
+     * every Lectio page, so a throw takes all of it down.
+     */
+    let launcher = null;
+    let lastErrorMessage = null;
     let updatedLabelTimer = null;
     let currentView = 'installed';
     let sortMode = 'category';
@@ -397,12 +407,11 @@
         dockPreferences = loadDockPreferences();
         loadInstalledRegistry();
 
+        // The panel, its stylesheet, and the first renderModuleList() wait for
+        // ensurePanelBuilt(); everything below is state or on-screen furniture.
         buildUI();
         buildDock();
         applyStaticText();
-        renderModuleList();
-        updateRefreshedLabel({ justUpdated: false });
-        updateChannelUI();
 
         window.addEventListener(REGISTER_EVENT, handleModuleRegister);
         window.addEventListener(DOCK_REGISTER_EVENT, handleDockRegister);
@@ -810,9 +819,12 @@
      * render function.
      */
     function applyStaticText() {
-        if (!elements) return;
+        // Before the panel exists this still has the gear and the dock to label,
+        // so it works off whichever root is there. Every lookup below is
+        // null-checked already, so the panel's own strings simply skip.
+        const root = elements?.root || launcher?.root;
+        if (!root) return;
 
-        const { root } = elements;
         const set = (selector, text) => {
             const node = root.querySelector(selector);
             if (node) node.textContent = text;
@@ -1355,6 +1367,7 @@
         `;
 
         document.body.appendChild(root);
+        injectDockStyles();
 
         const items = root.querySelector('.lectio-manager-dock-items');
         const tooltip = root.querySelector('.lectio-manager-dock-tooltip');
@@ -2025,12 +2038,123 @@
     // UI: BUILD
     // ============================================================
 
+    // Eager, on every page load: the gear, the styles it needs, and the
+    // document-level dismissal listeners the dock depends on. Nothing here
+    // touches the panel, which does not exist yet.
     function buildUI() {
         const root = document.createElement('div');
         root.id = 'lectio-manager-root';
 
-        root.innerHTML = `
-            <button id="lectio-manager-toggle" type="button" title="Lectio Tools" aria-label="Lectio Tools">${gearSvg()}</button>
+        root.innerHTML =
+            `<button id="lectio-manager-toggle" type="button" title="Lectio Tools" aria-label="Lectio Tools">${gearSvg()}</button>`;
+
+        document.body.appendChild(root);
+        injectStyles();
+
+        const toggle = root.querySelector('#lectio-manager-toggle');
+
+        toggle.addEventListener('click', () => {
+            ensurePanelBuilt();
+
+            if (elements.panel.hasAttribute('hidden')) {
+                elements.panel.removeAttribute('hidden');
+                requestDiscovery();
+            } else {
+                closePanel();
+            }
+        });
+
+        document.addEventListener('click', (event) => {
+            // Dock dismissal has to work on a page where the panel was never
+            // opened, so it is checked before the panel guard below.
+            if (openDockPanelKey && !dockElements.root.contains(event.target)) {
+                closeDockPanel(false);
+            }
+
+            if (!elements) {
+                return;
+            }
+
+            if (!elements.navMenu.hidden &&
+                !elements.navTrigger.contains(event.target) &&
+                !elements.navMenu.contains(event.target)) {
+                closeNavMenu();
+            }
+
+            if (!elements.channelPanel.hidden &&
+                !elements.channelBtn.contains(event.target) &&
+                !elements.channelPanel.contains(event.target)) {
+                elements.channelPanel.hidden = true;
+                elements.channelBtn.setAttribute('aria-expanded', 'false');
+            }
+
+            if (!elements.panel.hasAttribute('hidden') && !elements.root.contains(event.target)) {
+                closePanel();
+            }
+
+            for (const previewSelect of document.querySelectorAll('.lectio-manager-preview-select.is-open')) {
+                if (!previewSelect.contains(event.target)) {
+                    closePreviewSelect(previewSelect);
+                }
+            }
+        });
+
+        document.addEventListener('keydown', (event) => {
+            if (event.key !== 'Escape') {
+                return;
+            }
+
+            if (openDockPanelKey) {
+                closeDockPanel();
+                return;
+            }
+
+            if (!elements) {
+                return;
+            }
+
+            if (!elements.navMenu.hidden) {
+                closeNavMenu();
+                return;
+            }
+
+            if (!elements.settingsView.hidden) {
+                showMainView();
+                return;
+            }
+
+            closePanel();
+        });
+
+        launcher = { root, toggle };
+    }
+
+    /*
+     * The panel is the expensive half of the Manager - a few hundred nodes and
+     * the bulk of the stylesheet - and most page loads never open it. It is
+     * built once, on the first gear click of this page's life, and everything
+     * the eager half deferred is caught up here from current state rather than
+     * queued: modules that registered before this point are already in the
+     * installed registry, so the first render simply reads it.
+     */
+    function ensurePanelBuilt() {
+        if (elements) {
+            return;
+        }
+
+        buildPanel();
+        applyStaticText();
+        renderModuleList();
+        updateRefreshedLabel({ justUpdated: false });
+        updateChannelUI();
+        setRefreshingUI(refreshing);
+        showError(lastErrorMessage);
+    }
+
+    function buildPanel() {
+        const { root } = launcher;
+
+        root.insertAdjacentHTML('beforeend', `
             <div id="lectio-manager-panel" hidden>
                 <div class="lectio-manager-header">
                     <span class="lectio-manager-title">Lectio Tools</span>
@@ -2167,12 +2291,10 @@
                     <a class="lectio-manager-footer-link" href="${ISSUES_URL}" target="_blank" rel="noopener noreferrer">Report a bug or idea</a>
                 </div>
             </div>
-        `;
+        `);
 
-        document.body.appendChild(root);
-        injectStyles();
+        injectPanelStyles();
 
-        const toggle = root.querySelector('#lectio-manager-toggle');
         const panel = root.querySelector('#lectio-manager-panel');
         const channelBtn = root.querySelector('.lectio-manager-channel-btn');
         const channelPanel = root.querySelector('.lectio-manager-channel-panel');
@@ -2303,15 +2425,6 @@
             GM_setValue(STORAGE_UPDATE_TIP_DISMISSED, true);
         });
 
-        toggle.addEventListener('click', () => {
-            if (panel.hasAttribute('hidden')) {
-                panel.removeAttribute('hidden');
-                requestDiscovery();
-            } else {
-                closePanel();
-            }
-        });
-
         closeBtn.addEventListener('click', () => closePanel());
 
         refreshBtn.addEventListener('click', () => refreshCatalogue());
@@ -2352,62 +2465,6 @@
         });
 
         root.querySelector('.lectio-manager-settings-back').addEventListener('click', showMainView);
-
-        document.addEventListener('click', (event) => {
-            if (!elements) {
-                return;
-            }
-
-            if (!elements.navMenu.hidden &&
-                !elements.navTrigger.contains(event.target) &&
-                !elements.navMenu.contains(event.target)) {
-                closeNavMenu();
-            }
-
-            if (!elements.channelPanel.hidden &&
-                !elements.channelBtn.contains(event.target) &&
-                !elements.channelPanel.contains(event.target)) {
-                elements.channelPanel.hidden = true;
-                elements.channelBtn.setAttribute('aria-expanded', 'false');
-            }
-
-            if (!elements.panel.hasAttribute('hidden') && !elements.root.contains(event.target)) {
-                closePanel();
-            }
-
-            if (openDockPanelKey && !dockElements.root.contains(event.target)) {
-                closeDockPanel(false);
-            }
-
-            for (const previewSelect of document.querySelectorAll('.lectio-manager-preview-select.is-open')) {
-                if (!previewSelect.contains(event.target)) {
-                    closePreviewSelect(previewSelect);
-                }
-            }
-        });
-
-        document.addEventListener('keydown', (event) => {
-            if (event.key !== 'Escape' || !elements) {
-                return;
-            }
-
-            if (openDockPanelKey) {
-                closeDockPanel();
-                return;
-            }
-
-            if (!elements.navMenu.hidden) {
-                closeNavMenu();
-                return;
-            }
-
-            if (!elements.settingsView.hidden) {
-                showMainView();
-                return;
-            }
-
-            closePanel();
-        });
 
         elements = {
             root,
@@ -4003,6 +4060,11 @@
     }
 
     function showError(message) {
+        // Remembered whether or not there is anywhere to show it yet: a refresh
+        // that failed before the panel was built still has something to say the
+        // first time it is opened.
+        lastErrorMessage = message || null;
+
         if (!elements) {
             return;
         }
@@ -4132,6 +4194,24 @@
                     );
             }
 
+            @media (max-width: 420px) {
+                #lectio-manager-root {
+                    right: 10px;
+                    bottom: 10px;
+                }
+            }
+        `;
+
+        document.head.appendChild(style);
+    }
+
+    // The panel's own styles, injected with the panel itself on first open.
+    // They are the bulk of the Manager's CSS and nothing on a page where the
+    // gear is never clicked can match any of them.
+    function injectPanelStyles() {
+        const style = document.createElement('style');
+
+        style.textContent = `
             #lectio-manager-panel {
                 position: absolute;
                 right: 0;
@@ -5279,6 +5359,22 @@
                 cursor: pointer;
             }
 
+            @media (max-width: 420px) {
+                #lectio-manager-panel {
+                    width: calc(100vw - 20px);
+                }
+            }
+        `;
+
+        document.head.appendChild(style);
+    }
+
+    // The dock is on-screen furniture the moment a module registers an item, so
+    // its styles stay eager alongside it.
+    function injectDockStyles() {
+        const style = document.createElement('style');
+
+        style.textContent = `
             #lectio-manager-dock-root {
                 --lectio-dock-item-size: 42px;
                 --lectio-dock-gap: 6px;
@@ -5811,15 +5907,6 @@
             }
 
             @media (max-width: 420px) {
-                #lectio-manager-root {
-                    right: 10px;
-                    bottom: 10px;
-                }
-
-                #lectio-manager-panel {
-                    width: calc(100vw - 20px);
-                }
-
                 #lectio-manager-dock-root[data-edge='left'] {
                     left: 8px;
                 }

@@ -47,6 +47,9 @@
 
         window.addEventListener('load', () => {
             try {
+                // The panel is built on the first gear click, so open it first.
+                document.querySelector('#lectio-manager-toggle').click();
+
                 const html = document.documentElement;
                 const select = document.querySelector('.lectio-manager-language-select');
                 const title = document.querySelector('.lectio-manager-title');

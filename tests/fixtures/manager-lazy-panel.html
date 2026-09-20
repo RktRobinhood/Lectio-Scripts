@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio Manager lazy-panel fixture</title>
+</head>
+<body>
+    <script>
+        // The Manager runs on every Lectio page and most of them never see its
+        // panel opened, so nothing belonging to the panel may exist until the
+        // gear is clicked - and everything that happens before that click, from
+        // a module registering to a failed catalogue refresh, has to survive its
+        // absence without throwing.
+        const catalogue = {
+            schemaVersion: 1,
+            generatedAt: '2026-09-20T00:00:00.000Z',
+            manager: {
+                version: '99.0.0',
+                installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/manager/Lectio-Manager.user.js'
+            },
+            modules: [
+                {
+                    id: 'early-bird',
+                    name: 'Early Bird',
+                    description: 'Registers before the panel has ever been built.',
+                    category: 'Interface',
+                    audience: ['student'],
+                    status: 'stable',
+                    version: '1.0.0',
+                    installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/EarlyBird.user.js'
+                }
+            ]
+        };
+
+        // lastRefresh stays at 0, so the Manager treats the cache as stale and
+        // starts a refresh as it boots. The stub fails it, which drives
+        // showError, updateRefreshedLabel, setRefreshingUI and updateChannelUI
+        // while there is still no panel for any of them to write to.
+        const storage = new Map([
+            ['lectioManager.catalogue.v1', JSON.stringify(catalogue)],
+            ['lectioManager.updateTipDismissed.v1', true]
+        ]);
+
+        window.GM_getValue = (key, fallback) => storage.has(key) ? storage.get(key) : fallback;
+        window.GM_setValue = (key, value) => storage.set(key, value);
+        window.GM_xmlhttpRequest = (options) => { setTimeout(() => options.onerror(), 0); };
+
+        window.pageErrors = [];
+        window.addEventListener('error', (event) => window.pageErrors.push(String(event.message)));
+
+        window.addEventListener('lectio-manager:discover', () => {
+            window.dispatchEvent(new CustomEvent('lectio-module:register', {
+                detail: {
+                    id: 'early-bird',
+                    name: 'Early Bird',
+                    version: '1.0.0',
+                    settingsSchema: [{ key: 'enabled', type: 'toggle', label: 'Enabled' }],
+                    currentValues: { enabled: true }
+                }
+            }));
+
+            window.dispatchEvent(new CustomEvent('lectio-manager:dock:register', {
+                detail: { moduleId: 'early-bird', itemId: 'main', type: 'action', icon: 'bell', label: 'Early Bird' }
+            }));
+        });
+    </script>
+    <script src="../../manager/Lectio-Manager.user.js"></script>
+    <script>
+        function assert(condition, message) {
+            if (!condition) throw new Error(message);
+        }
+
+        function styleSheetsMentioning(needle) {
+            return [...document.querySelectorAll('style')]
+                .filter((element) => element.textContent.includes(needle));
+        }
+
+        window.addEventListener('load', async () => {
+            try {
+                // Give the failed refresh a turn to land before anything is checked.
+                await new Promise((done) => setTimeout(done, 50));
+
+                // 1. Nothing belonging to the panel exists on a page load where
+                //    the gear is never clicked.
+                assert(!document.querySelector('#lectio-manager-panel'), 'The panel DOM was built without a gear click');
+                assert(!document.querySelector('.lectio-manager-list'), 'The module list was rendered without a gear click');
+                assert(!document.querySelector('.lectio-manager-header'), 'Panel chrome was built without a gear click');
+                assert(styleSheetsMentioning('#lectio-manager-panel').length === 0,
+                    'The panel stylesheet was injected without a gear click');
+                assert(styleSheetsMentioning('.lectio-manager-card').length === 0,
+                    'Module-card styles were injected without a gear click');
+
+                // 2. What must stay eager is still there.
+                assert(document.querySelector('#lectio-manager-toggle'), 'The gear launcher was deferred too');
+                assert(document.querySelector('#lectio-manager-dock-root'), 'The dock was deferred too');
+                assert(styleSheetsMentioning('#lectio-manager-dock-root').length > 0, 'The dock lost its styles');
+                assert(document.querySelector('[data-dock-key="early-bird:main"]'),
+                    'A dock item registered before first open did not reach the dock');
+                assert(document.documentElement.dataset.lectioLanguage === 'en',
+                    `The language was not published before the panel existed: ${document.documentElement.dataset.lectioLanguage}`);
+                assert(JSON.parse(storage.get('lectioManager.installed.v1'))['early-bird'],
+                    'A module registering before first open was not remembered');
+
+                // 3. None of the panel-touching paths threw on the way here.
+                window.dispatchEvent(new Event('resize'));
+                window.dispatchEvent(new CustomEvent('lectio-module:register', {
+                    detail: { id: 'early-bird', name: 'Early Bird', version: '1.0.0' }
+                }));
+                assert(window.pageErrors.length === 0,
+                    `The Manager threw before its panel existed: ${window.pageErrors.join(' | ')}`);
+
+                // 4. The first click builds it, and the module that registered
+                //    first is in the list.
+                document.querySelector('#lectio-manager-toggle').click();
+
+                const panel = document.querySelector('#lectio-manager-panel');
+                assert(panel && !panel.hasAttribute('hidden'), 'The first gear click did not open the panel');
+                assert(styleSheetsMentioning('#lectio-manager-panel').length > 0, 'The panel opened without its stylesheet');
+                assert(getComputedStyle(panel).position === 'absolute', 'The panel stylesheet did not apply to the panel');
+
+                // Splitting one stylesheet into several is a chance to get
+                // cascade order wrong, and the narrow-screen override is the
+                // rule that would notice: same specificity as the panel's own
+                // width, so it only wins by coming after it. Headless Chrome
+                // will not open a window narrow enough to render the difference,
+                // so the order itself is what is checked.
+                const widthRules = [];
+                for (const element of document.querySelectorAll('style')) {
+                    for (const rule of element.sheet?.cssRules || []) {
+                        if (rule.selectorText === '#lectio-manager-panel' && rule.style.width) {
+                            widthRules.push('base');
+                        }
+                        if (rule.media && [...rule.cssRules].some((inner) =>
+                            inner.selectorText === '#lectio-manager-panel' && inner.style.width)) {
+                            widthRules.push('narrow');
+                        }
+                    }
+                }
+                assert(widthRules.join('|') === 'base|narrow',
+                    `The panel's narrow-screen width no longer wins the cascade: ${widthRules.join('|')}`);
+
+                const names = [...document.querySelectorAll('.lectio-manager-card-name')]
+                    .map((element) => element.textContent.trim());
+                assert(names.join('|') === 'Early Bird',
+                    `A module registered before first open is missing from the list: ${names}`);
+                assert(document.querySelector('[data-primary-view="installed"]').textContent.trim() === 'Installed 1',
+                    'The installed count did not catch up on first open');
+
+                // 5. State the eager half collected is caught up, not lost.
+                const errorBox = document.querySelector('.lectio-manager-error');
+                assert(!errorBox.hidden && errorBox.textContent.includes('Could not'),
+                    `A refresh failure from before first open was dropped: ${errorBox.textContent}`);
+                assert(!document.querySelector('.lectio-manager-self-update').hidden,
+                    'The self-update notice did not appear on first open');
+
+                // 6. Opening again reuses the panel rather than building a second one.
+                document.querySelector('#lectio-manager-toggle').click();
+                document.querySelector('#lectio-manager-toggle').click();
+                assert(document.querySelectorAll('#lectio-manager-panel').length === 1,
+                    'Re-opening built the panel a second time');
+                assert(styleSheetsMentioning('#lectio-manager-panel').length === 1,
+                    'Re-opening injected the panel stylesheet a second time');
+                assert(window.pageErrors.length === 0,
+                    `Opening the panel threw: ${window.pageErrors.join(' | ')}`);
+
+                document.documentElement.dataset.testResult = 'pass';
+            } catch (error) {
+                document.documentElement.dataset.testResult = `fail: ${error.message}`;
+            }
+        });
+    </script>
+</body>
+</html>

@@ -63,6 +63,15 @@ test('manager starts in English, remembers Danish, and publishes the choice', as
     }
 });
 
+// The Manager runs on every Lectio page and most of them never see its panel
+// opened, so the panel DOM, the panel stylesheet and the first module-list
+// render wait for the first gear click. Everything that happens before that
+// click has to survive the panel's absence without throwing, and nothing it
+// collected may be lost when the panel finally arrives.
+test('manager builds its panel on first open, not on every page load', async () => {
+    await runFixture('manager-lazy-panel.html', 'lectio-manager-lazy-', '', ['--virtual-time-budget=6000']);
+});
+
 // Nothing else can tell the Manager it is stale, so it reads its own catalogue
 // entry. The notice must appear only for a genuinely newer version behind an
 // install link on this repository's raw host.
