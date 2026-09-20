@@ -31,12 +31,34 @@
 
         window.GM_getValue = (key, fallback) => storage.has(key) ? storage.get(key) : fallback;
         window.GM_setValue = (key, value) => storage.set(key, value);
-        window.GM_xmlhttpRequest = () => {};
+        // Record what the Manager asks GitHub for, so the channel switch below
+        // can be checked for actually re-reading its channel rather than
+        // answering out of the cache. Responds with the same catalogue so the
+        // refresh completes instead of leaving the UI spinning.
+        window.requestedUrls = [];
+        window.GM_xmlhttpRequest = (options) => {
+            window.requestedUrls.push(options.url);
+            setTimeout(() => options.onload({
+                status: 200,
+                responseText: JSON.stringify(catalogue)
+            }), 0);
+        };
     </script>
     <script src="../../manager/Lectio-Manager.user.js"></script>
     <script>
         function assert(condition, message) {
             if (!condition) throw new Error(message);
+        }
+
+        // The Manager refreshes in the background as it boots, so a refresh the
+        // user triggers may be queued behind it rather than fired on the spot.
+        async function waitFor(condition, message, timeoutMs = 4000) {
+            const deadline = Date.now() + timeoutMs;
+            while (Date.now() < deadline) {
+                if (condition()) return;
+                await new Promise(resolve => setTimeout(resolve, 25));
+            }
+            throw new Error(message);
         }
 
         window.addEventListener('load', async () => {
@@ -65,10 +87,22 @@
                 const note = document.querySelector('.lectio-manager-channel-note');
                 assert(!note.hidden, 'The unstable caveat was hidden while the unstable channel was selected');
 
+                /*
+                 * The stable catalogue is cached above with a fresh timestamp,
+                 * so a switch that respected the twenty-four hour interval would
+                 * ask for nothing and keep showing the cached targets. That is
+                 * what made a just-promoted module read as a downgrade, so the
+                 * switch has to re-read the channel it switched to.
+                 */
+                window.requestedUrls.length = 0;
                 channel.value = 'stable';
                 channel.dispatchEvent(new Event('change', { bubbles: true }));
                 assert(storage.get('lectioManager.releaseChannel.v1') === 'stable', 'Channel dropdown did not persist its choice');
                 assert(note.hidden, 'The unstable caveat stayed visible on the stable channel');
+                await waitFor(
+                    () => window.requestedUrls.some(url => url.includes('/catalogue/modules.json')),
+                    'Switching to Stable did not re-read the stable catalogue'
+                );
 
                 // "Release channel" explains itself on demand rather than taking
                 // permanent space in the panel.

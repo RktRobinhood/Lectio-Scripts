@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio Manager channel version fixture</title>
+</head>
+<body>
+    <script>
+        /*
+         * The state a promotion leaves behind for anyone still on the
+         * Experimental channel: Stable has the promoted build, and the overlay
+         * still carries the older one it was promoted from. The Manager must
+         * offer the higher number - offering the overlay's copy would walk the
+         * user back onto the build that is about to stop being updated.
+         */
+        const catalogue = {
+            schemaVersion: 1,
+            generatedAt: '2026-09-20T00:00:00.000Z',
+            manager: { version: '1.22.1' },
+            modules: [
+                {
+                    id: 'message-notifications',
+                    name: 'Unread Message Notifications',
+                    description: 'Promoted build.',
+                    category: 'Messages',
+                    status: 'stable',
+                    version: '0.6.1',
+                    installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Unread-Message-Notifications.user.js'
+                },
+                {
+                    id: 'chairs-up',
+                    name: 'Chairs Up',
+                    description: 'Stable only.',
+                    category: 'Timetable',
+                    status: 'stable',
+                    version: '1.1.1',
+                    installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Chairs-Up.user.js'
+                }
+            ]
+        };
+
+        const overlay = {
+            schemaVersion: 1,
+            channel: 'unstable',
+            generatedAt: '2026-09-20T00:00:00.000Z',
+            modules: [
+                {
+                    // Behind Stable now: this is what promotion superseded.
+                    id: 'message-notifications',
+                    name: 'Unread Message Notifications',
+                    description: 'Pre-promotion build.',
+                    category: 'Messages',
+                    status: 'unstable',
+                    version: '0.6.0',
+                    installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Unread-Message-Notifications.user.js'
+                },
+                {
+                    // Ahead of Stable: the overlay still wins here.
+                    id: 'chairs-up',
+                    name: 'Chairs Up',
+                    description: 'Newer experimental build.',
+                    category: 'Timetable',
+                    status: 'unstable',
+                    version: '1.2.0',
+                    installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Chairs-Up.user.js'
+                },
+                {
+                    // Experimental only: no stable counterpart at all.
+                    id: 'change-radar',
+                    name: 'Lectio Change Radar',
+                    description: 'Experimental only.',
+                    category: 'Schedule',
+                    status: 'unstable',
+                    version: '0.6.0',
+                    installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Change-Radar.user.js'
+                }
+            ]
+        };
+
+        const storage = new Map([
+            ['lectioManager.catalogue.v1', JSON.stringify(catalogue)],
+            ['lectioManager.lastRefresh.v1', Date.now()],
+            ['lectioManager.catalogue.unstable.v1', JSON.stringify(overlay)],
+            ['lectioManager.lastRefresh.unstable.v1', Date.now()],
+            ['lectioManager.releaseChannel.v1', 'unstable'],
+            ['lectioManager.updateTipDismissed.v1', true]
+        ]);
+
+        window.GM_getValue = (key, fallback) => storage.has(key) ? storage.get(key) : fallback;
+        window.GM_setValue = (key, value) => storage.set(key, value);
+        window.GM_xmlhttpRequest = (options) => {
+            const body = options.url.includes('modules-unstable') ? overlay : catalogue;
+            setTimeout(() => options.onload({ status: 200, responseText: JSON.stringify(body) }), 0);
+        };
+    </script>
+    <script src="../../manager/Lectio-Manager.user.js"></script>
+    <script>
+        function assert(condition, message) {
+            if (!condition) throw new Error(message);
+        }
+
+        async function waitFor(condition, message, timeoutMs = 4000) {
+            const deadline = Date.now() + timeoutMs;
+            while (Date.now() < deadline) {
+                if (condition()) return;
+                await new Promise(resolve => setTimeout(resolve, 25));
+            }
+            throw new Error(message);
+        }
+
+        function cardText(id) {
+            const card = document.querySelector(`.lectio-manager-card[data-module-id="${id}"]`);
+            return card ? card.textContent : '';
+        }
+
+        /*
+         * An uninstalled card shows no version number, so which entry won is
+         * read off what its Install control actually points at - which is the
+         * thing that matters anyway.
+         */
+        function installTarget(id) {
+            const card = document.querySelector(`.lectio-manager-card[data-module-id="${id}"]`);
+            const link = card && card.querySelector('a[href]');
+            return link ? link.getAttribute('href') : '';
+        }
+
+        window.addEventListener('load', async () => {
+            try {
+                document.querySelector('#lectio-manager-toggle').click();
+
+                // Everything here lives on the Available side; nothing is installed.
+                // The second tab is the Available one; it is keyed by the view it
+                // switches to rather than by its label.
+                document.querySelector('.lectio-manager-tab[data-primary-view="all"]').click();
+
+                await waitFor(() => cardText('message-notifications'), 'The promoted module never rendered a card');
+
+                // Experimental channel, overlay behind Stable: Stable wins.
+                assert(
+                    installTarget('message-notifications').includes('/main/modules/'),
+                    `Experimental offered the superseded build: ${installTarget('message-notifications')}`
+                );
+                assert(
+                    cardText('message-notifications').includes('Promoted build.'),
+                    `Experimental described the pre-promotion entry: ${cardText('message-notifications')}`
+                );
+
+                // Overlay ahead of Stable: the overlay still wins.
+                assert(
+                    installTarget('chairs-up').includes('/main/modules-unstable/'),
+                    `Experimental did not offer the newer experimental build: ${installTarget('chairs-up')}`
+                );
+                assert(
+                    cardText('chairs-up').includes('Newer experimental build.'),
+                    `Experimental did not describe the newer build: ${cardText('chairs-up')}`
+                );
+
+                // Overlay-only modules are unaffected by any of this.
+                assert(cardText('change-radar'), 'An experimental-only module went missing');
+
+                // The channel reads as Experimental, not Unstable.
+                document.querySelector('.lectio-manager-channel-btn').click();
+                const select = document.querySelector('.lectio-manager-channel-select');
+                const experimentalOption = select.querySelector('option[value="unstable"]');
+                assert(
+                    experimentalOption.textContent === 'Experimental',
+                    `The channel still reads as ${experimentalOption.textContent}`
+                );
+
+                // Stable looks at Stable alone.
+                select.value = 'stable';
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+
+                assert(
+                    installTarget('chairs-up').includes('/main/modules/'),
+                    `Stable pointed at an experimental build: ${installTarget('chairs-up')}`
+                );
+                assert(
+                    cardText('chairs-up').includes('Stable only.'),
+                    `Stable showed the experimental entry: ${cardText('chairs-up')}`
+                );
+                assert(!cardText('change-radar'), 'Stable offered an experimental-only module');
+
+                document.documentElement.dataset.testResult = 'pass';
+            } catch (error) {
+                document.documentElement.dataset.testResult = `fail: ${error.message}`;
+            }
+        });
+    </script>
+</body>
+</html>

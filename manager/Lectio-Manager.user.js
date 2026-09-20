@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.22.0
+// @version      1.22.1
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules, including their settings and shared dock controls.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
@@ -63,10 +63,10 @@
             languageHelp: 'This sets the language of the Manager itself, and tells any module that supports it which language you prefer. Lectio is Danish, so a module on its own stays Danish until you choose otherwise.',
             releaseChannel: 'Release channel',
             releaseChannelInfo: 'What is a release channel?',
-            releaseChannelHelp: 'A release channel decides which list of modules the Manager reads. <strong>Stable</strong> offers finished modules only. <strong>Unstable</strong> also offers experimental ones that are still being built, so they can change or break without warning.',
-            unstableNote: 'Unstable adds experimental modules from modules-unstable. Switching channel only changes what the Manager offers. It never installs, disables, or removes a userscript automatically.',
+            releaseChannelHelp: 'A release channel decides which list of modules the Manager reads. <strong>Stable</strong> offers finished modules only. <strong>Experimental</strong> also offers modules that are still being built, so they can change or break without warning.',
+            unstableNote: 'Experimental also offers modules that are still being built and tested. Switching channel only changes what the Manager offers. It never installs, disables, or removes a userscript automatically.',
             stable: 'Stable',
-            unstable: 'Unstable',
+            unstable: 'Experimental',
             dock: 'Dock',
             screenEdge: 'Screen edge',
             positionOnEdge: 'Position on edge',
@@ -143,10 +143,10 @@
             languageHelp: 'Dette vælger sproget i selve Manageren og fortæller de moduler, der understøtter det, hvilket sprog du foretrækker. Lectio er dansk, så et modul, der kører alene, bliver på dansk, indtil du vælger andet.',
             releaseChannel: 'Udgivelseskanal',
             releaseChannelInfo: 'Hvad er en udgivelseskanal?',
-            releaseChannelHelp: 'En udgivelseskanal afgør, hvilken liste over moduler Manageren læser. <strong>Stabil</strong> tilbyder kun færdige moduler. <strong>Ustabil</strong> tilbyder også eksperimentelle moduler, der stadig er under udvikling, og som derfor kan ændre sig eller gå i stykker uden varsel.',
-            unstableNote: 'Ustabil tilføjer eksperimentelle moduler fra modules-unstable. At skifte kanal ændrer kun, hvad Manageren tilbyder dig. Den installerer, deaktiverer eller fjerner aldrig et userscript af sig selv.',
+            releaseChannelHelp: 'En udgivelseskanal afgør, hvilken liste over moduler Manageren læser. <strong>Stabil</strong> tilbyder kun færdige moduler. <strong>Eksperimentel</strong> tilbyder også moduler, der stadig er under udvikling, og som derfor kan ændre sig eller gå i stykker uden varsel.',
+            unstableNote: 'Eksperimentel tilbyder også moduler, der stadig er under udvikling og test. At skifte kanal ændrer kun, hvad Manageren tilbyder dig. Den installerer, deaktiverer eller fjerner aldrig et userscript af sig selv.',
             stable: 'Stabil',
-            unstable: 'Ustabil',
+            unstable: 'Eksperimentel',
             dock: 'Dok',
             screenEdge: 'Skærmkant',
             positionOnEdge: 'Placering på kanten',
@@ -260,7 +260,7 @@
     // Kept in step with the @version header by scripts/check-versions.mjs. The
     // header is metadata Tampermonkey reads; this is the only copy the running
     // script can see, and it is what the self-update notice compares.
-    const MANAGER_VERSION = '1.22.0';
+    const MANAGER_VERSION = '1.22.1';
 
     const STABLE_CATALOGUE_URL =
         'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/catalogue/modules.json';
@@ -338,6 +338,7 @@
     let unstableLastRefresh = 0;
     let releaseChannel = 'stable';
     let refreshing = false;
+    let refreshQueued = false;
     let elements = null;
     let updatedLabelTimer = null;
     let currentView = 'installed';
@@ -461,6 +462,18 @@
 
     async function refreshCatalogue({ force = true } = {}) {
         if (refreshing) {
+            /*
+             * A refresh the user asked for must not be swallowed by one that
+             * happens to be in flight. The Manager kicks off a background
+             * refresh as it boots, so pressing Refresh or switching channel in
+             * the first moments after the panel opens used to land here and do
+             * nothing at all - leaving the panel showing exactly the stale
+             * catalogue the user was trying to get rid of. Remember it instead
+             * and run it when the current one lands. Only forced refreshes
+             * queue: the interval-respecting ones would find the cache fresh
+             * and do nothing anyway.
+             */
+            refreshQueued = refreshQueued || force;
             return;
         }
 
@@ -503,7 +516,7 @@
                         saveCatalogueCache(validated, unstableLastRefresh, { unstable: true });
                         refreshedAnything = true;
                     } catch (error) {
-                        errors.push(`Unstable overlay: ${error.message}`);
+                        errors.push(`Experimental modules: ${error.message}`);
                     }
                 }
             }
@@ -528,6 +541,11 @@
         } finally {
             refreshing = false;
             setRefreshingUI(false);
+
+            if (refreshQueued) {
+                refreshQueued = false;
+                refreshCatalogue();
+            }
         }
     }
 
@@ -914,20 +932,49 @@
             const stableMatch = findStableMatch(stableCatalogue.modules, experimental);
 
             if (stableMatch) {
-                byId.set(stableMatch.id, {
-                    ...stableMatch,
-                    ...experimental,
-                    id: stableMatch.id,
-                    aliases: uniqueStrings([
-                        ...(stableMatch.aliases || []),
-                        ...(experimental.aliases || []),
-                        experimental.id
-                    ]),
-                    status: 'unstable',
-                    selectedChannel: 'unstable',
-                    stableModule: stableMatch,
-                    unstableModule: experimental
-                });
+                /*
+                 * The overlay only wins while it is genuinely ahead. Promotion
+                 * copies a module into Stable at a higher patch and deletes it
+                 * from the overlay - but an entry that is still there, or a
+                 * cached copy of one, would otherwise pull an Experimental user
+                 * back onto the older build and present it as the version to
+                 * install. Whichever number is higher is the one to offer, and
+                 * equal numbers go to Stable, because that is the copy that
+                 * will keep receiving updates.
+                 *
+                 * A version that cannot be parsed keeps the old behaviour of
+                 * letting the overlay win: nothing better can be said about it,
+                 * and this channel is where unfinished things are expected.
+                 */
+                const comparison = compareVersions(
+                    String(experimental.version || ''),
+                    String(stableMatch.version || '')
+                );
+
+                const aliases = uniqueStrings([
+                    ...(stableMatch.aliases || []),
+                    ...(experimental.aliases || []),
+                    experimental.id
+                ]);
+
+                byId.set(stableMatch.id, comparison === null || comparison > 0
+                    ? {
+                        ...stableMatch,
+                        ...experimental,
+                        id: stableMatch.id,
+                        aliases,
+                        status: 'unstable',
+                        selectedChannel: 'unstable',
+                        stableModule: stableMatch,
+                        unstableModule: experimental
+                    }
+                    : {
+                        ...stableMatch,
+                        aliases,
+                        selectedChannel: 'stable',
+                        stableModule: stableMatch,
+                        unstableModule: experimental
+                    });
             } else {
                 byId.set(experimental.id, {
                     ...experimental,
@@ -2011,11 +2058,11 @@
                         </span>
                         <select id="lectio-manager-channel-select" class="lectio-manager-channel-select">
                             <option value="stable">Stable</option>
-                            <option value="unstable">Unstable</option>
+                            <option value="unstable">Experimental</option>
                         </select>
                     </div>
-                    <small id="lectio-manager-channel-help" class="lectio-manager-channel-help" hidden>A release channel decides which list of modules the Manager reads. <strong>Stable</strong> offers finished modules only. <strong>Unstable</strong> also offers experimental ones that are still being built, so they can change or break without warning.</small>
-                    <small class="lectio-manager-channel-note" hidden>Unstable adds experimental modules from modules-unstable. Switching channel only changes what the Manager offers. It never installs, disables, or removes a userscript automatically.</small>
+                    <small id="lectio-manager-channel-help" class="lectio-manager-channel-help" hidden>A release channel decides which list of modules the Manager reads. <strong>Stable</strong> offers finished modules only. <strong>Experimental</strong> also offers modules that are still being built, so they can change or break without warning.</small>
+                    <small class="lectio-manager-channel-note" hidden>Experimental also offers modules that are still being built and tested. Switching channel only changes what the Manager offers. It never installs, disables, or removes a userscript automatically.</small>
                     <details class="lectio-manager-prefs-section">
                         <summary>Dock</summary>
                         <label class="lectio-manager-prefs-field">
@@ -2416,12 +2463,22 @@
         updateChannelUI();
         renderModuleList();
 
-        if (releaseChannel === 'unstable') {
-            const age = Date.now() - unstableLastRefresh;
-            if (!unstableCatalogue || age > UNSTABLE_REFRESH_INTERVAL_MS) {
-                refreshCatalogue({ force: false });
-            }
-        }
+        /*
+         * Switching channel is deliberate and rare, and what the user wants to
+         * see afterwards is what the channel they just picked actually offers -
+         * so ask it, rather than letting a cached copy answer. The stable
+         * catalogue is held for twenty-four hours, so without forcing this a
+         * tester switching back to Stable after a promotion is shown yesterday's
+         * target, and a module that was just promoted reads as a downgrade of
+         * the unstable build they are on. The refresh intervals exist to keep
+         * ordinary page loads off GitHub, not to throttle a control the user
+         * has just operated.
+         *
+         * refreshCatalogue forces the stable catalogue and, on the unstable
+         * channel, the overlay too - which is exactly the pair that matters for
+         * whichever channel was chosen here.
+         */
+        refreshCatalogue();
     }
 
     function updateChannelUI() {
@@ -2887,7 +2944,7 @@
                 updateLink.textContent = hasDowngrade ? t('downgrade') : t('update');
 
                 updateLink.title = hasDowngrade
-                    ? `Open Tampermonkey with the selected ${releaseChannel === 'stable' ? 'Stable' : 'Unstable'} version`
+                    ? `Open Tampermonkey with the selected ${releaseChannel === 'stable' ? 'Stable' : 'Experimental'} version`
                     : "Open Tampermonkey's update/install page";
 
                 actions.appendChild(updateLink);

@@ -47,8 +47,11 @@ test('manager boots when it is injected into an already-loaded page', async () =
     await runFixture('manager-late-inject.html', 'lectio-manager-late-', '', ['--virtual-time-budget=6000']);
 });
 
+// Switching channel re-reads that channel's catalogue, and that refresh can be
+// queued behind the one the Manager starts as it boots - so this fixture waits
+// for the request and reports after the load event.
 test('manager migrates v1 dock placement and renders the channel as one dropdown', async () => {
-    await runFixture('manager-prefs.html', 'lectio-manager-prefs-');
+    await runFixture('manager-prefs.html', 'lectio-manager-prefs-', '', ['--virtual-time-budget=6000']);
 });
 
 // Lectio is Danish and serves lang="da", but the Manager is mainly for IB
