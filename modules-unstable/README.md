@@ -28,5 +28,8 @@ The extra patch bump at promotion is not ceremony. A tester's installed copy poi
 ### `Lectio-English-Mode.user.js`
 Stable `1.9.3` with the translation cache written on a flush instead of on every learned string (issue #26). Measured over a page that learns 200 new strings with 2,000 already cached: 200 storage writes and 47 MB serialised before, 2 writes and 0.48 MB after, with a third write on `pagehide`. Cache contents and eviction policy are unchanged.
 
+### `Lectio-Chairs-Up.user.js`
+Stable `1.1.1` with a safety net around its background fetches (issue #36): an eight-second `AbortController` timeout on every request, an abort of anything in flight on `pagehide`, a jittered first request, a backoff that doubles from two seconds to a one-minute ceiling after three consecutive failures and clears on the first success, and one request at a time instead of a `Promise.all()` burst, so a request never starts while another is in flight. The ~30-day room-id cache and its expiry are untouched.
+
 ### `Lectio-Change-Radar.user.js`
 An experimental timetable watcher — a compact themed radar HUD with urgency states, unseen-change tracking, configurable polling and a rotating local change log. Unstable-only so far; it has never had a stable release, so promoting it would be its first.

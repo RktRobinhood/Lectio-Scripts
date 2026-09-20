@@ -24,6 +24,25 @@
       }
     },
     {
+      "id": "chairs-up",
+      "name": "Chairs Up",
+      "description": "Marks a lesson when it is the last active booking of the day in that room.",
+      "category": "Timetable",
+      "audience": [
+        "teacher"
+      ],
+      "status": "unstable",
+      "version": "1.1.2",
+      "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Chairs-Up.user.js",
+      "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
+      "i18n": {
+        "da": {
+          "name": "Stole Op",
+          "description": "Markerer en lektion, når den er dagens sidste aktive booking i det lokale."
+        }
+      }
+    },
+    {
       "id": "change-radar",
       "aliases": [
         "schedule-change-radar",
