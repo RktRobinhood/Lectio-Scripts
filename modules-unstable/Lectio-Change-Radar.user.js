@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Change Radar
 // @namespace    https://github.com/RktRobinhood/Lectio-Scripts
-// @version      0.6.2
+// @version      0.7.0
 // @description  Watches Lectio for the changes you choose to track - timetable, assignments, absence, documents - and keeps a compact recent-change HUD.
 // @author       RktRobinhood
 // @match        https://www.lectio.dk/lectio/*
@@ -20,7 +20,7 @@
     id: 'change-radar',
     aliases: ['schedule-change-radar', 'lectio-change-radar', 'change-log'],
     name: 'Lectio Change Radar',
-    version: '0.6.2',
+    version: '0.7.0',
     channel: 'unstable'
   });
 
@@ -747,9 +747,34 @@
     }
   }
 
+  /*
+   * Telling the Manager that a selector matched nothing
+   * (docs/manager-problem-log.md). One-way and additive: with no Manager
+   * installed this lands on a window nobody is listening to, which is a no-op.
+   *
+   * `code` is a token written here, never text read off a page - there is
+   * deliberately no field for a message, because this log is written to be
+   * pasted into a public issue.
+   */
+  function reportToManager(kind, code, found) {
+    window.dispatchEvent(new CustomEvent('lectio-module:report', {
+      detail: { moduleId: MODULE.id, kind, code, found }
+    }));
+  }
+
   function parseSchedule(doc) {
     const result = [];
     const bricks = doc.querySelectorAll('a.s2skemabrik.s2brik[data-tooltip]');
+
+    /*
+     * A week this reads as empty is reported as no changes at all, which is
+     * exactly what a quiet week looks like - so an empty week is left alone
+     * and only the unambiguous case is raised: the fetched page rendered
+     * blocks, and none of them matched what is parsed here.
+     */
+    if (!bricks.length && doc.querySelector('.s2skemabrik')) {
+      reportToManager('drift', 'schedule-bricks', 0);
+    }
 
     for (const brick of bricks) {
       const parsed = parseBrick(brick);

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Subject Colours
 // @namespace    https://www.lectio.dk/
-// @version      0.8.4
+// @version      0.9.0
 // @description  Learns which classes are actually yours from your own timetable and gives each one its own colour, with a separate muted spectrum for one-off activities like assemblies and meetings.
 // @match        https://www.lectio.dk/lectio/*
 // @grant        none
@@ -15,7 +15,7 @@
 
     const MODULE_ID = 'subject-colours';
     const MODULE_NAME = 'Lectio - Subject Colours';
-    const MODULE_VERSION = '0.8.4';
+    const MODULE_VERSION = '0.9.0';
     const LOG = '[Lectio Subject Colours]';
     const STYLE_ID = 'lectio-subject-colours-styles';
 
@@ -2272,6 +2272,22 @@
         renderLegend();
     }
 
+    /*
+     * Telling the Manager that a selector matched nothing
+     * (docs/manager-problem-log.md). One-way and additive: with no Manager
+     * installed this lands on a window nobody is listening to, which is the
+     * same no-op the dock registration relies on.
+     *
+     * `code` is a token written here, never a string read off the page - the
+     * Manager drops anything with a space in it, and there is deliberately no
+     * field for a message, because this log gets pasted into a public issue.
+     */
+    function reportToManager(kind, code, found) {
+        window.dispatchEvent(new CustomEvent('lectio-module:report', {
+            detail: { moduleId: MODULE_ID, kind, code, found }
+        }));
+    }
+
     function handleSetting(event) {
         const detail = event.detail;
         if (!detail || detail.id !== MODULE_ID) return;
@@ -2396,6 +2412,21 @@
         addStyles();
 
         const hasBlocks = blockElements(document).length > 0;
+
+        /*
+         * A timetable page that renders lesson blocks the module cannot read
+         * is drift, and today it is invisible: the week simply comes out in
+         * Lectio's own colours. An empty week is not drift, so this asks a
+         * narrower question than "found none" - a week really is rendered
+         * (isTimetable, the module's own definition), blocks really are on
+         * it, and the tooltip everything here keys on is gone.
+         */
+        if (!hasBlocks &&
+            isTimetable(document) &&
+            document.querySelectorAll('.s2skemabrik').length > 0) {
+            reportToManager('drift', 'lesson-block-tooltips', 0);
+        }
+
         harvestDocument(document, { counting: isOwnTimetable() });
         flushStore();
 

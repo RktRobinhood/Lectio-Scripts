@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Unread Message Notifications
 // @namespace    https://www.lectio.dk/
-// @version      0.6.2
+// @version      0.7.0
 // @description  Shows one unread-message badge using Lectio's own unread count, at any Lectio school. Includes direct and group-addressed messages.
 // @match        https://www.lectio.dk/lectio/*
 // @grant        none
@@ -52,7 +52,7 @@
     (function registerWithLectioManager() {
         const MODULE_ID = 'message-notifications';
         const MODULE_NAME = 'Lectio - Unread Message Notifications';
-        const MODULE_VERSION = '0.6.2';
+        const MODULE_VERSION = '0.7.0';
 
         function announce() {
             window.dispatchEvent(new CustomEvent('lectio-module:register', {
@@ -319,6 +319,17 @@
         loadCache();
 
     let inFlight = false;
+
+    /*
+     * Reported once per page load: the badge re-syncs on every mutation, and
+     * a link that was not recognised will not be recognised on the next one.
+     *
+     * Declared up here with the rest of the page-view state for the reason
+     * written below it - init() runs synchronously a few lines down and
+     * reaches findMessageNavLink(), so a flag declared beside that function
+     * would be read in its temporal dead zone and throw on cold start.
+     */
+    let reportedNavDrift = false;
 
     let observerQueued = false;
 
@@ -1242,18 +1253,73 @@
             );
     }
 
+    /*
+     * Telling the Manager that a selector matched nothing
+     * (docs/manager-problem-log.md). One-way and additive: with no Manager
+     * installed this lands on a window nobody is listening to, which is a
+     * no-op.
+     *
+     * `code` is a token written here, never text read off the page - there is
+     * deliberately no field for a message, because this log is written to be
+     * pasted into a public issue.
+     */
+    function reportToManager(
+        kind,
+        code,
+        found
+    ) {
+        window.dispatchEvent(
+            new CustomEvent(
+                'lectio-module:report',
+                {
+                    detail: {
+                        moduleId:
+                            'message-notifications',
+                        kind,
+                        code,
+                        found
+                    }
+                }
+            )
+        );
+    }
+
     function findMessageNavLink() {
-        const candidates = [
+        const links = [
             ...document.querySelectorAll(
                 MESSAGE_LINK_SELECTOR
             )
-        ].filter(
-            isMessageNavCandidate
-        );
+        ];
+
+        const candidates =
+            links.filter(
+                isMessageNavCandidate
+            );
 
         if (
             !candidates.length
         ) {
+            /*
+             * This module's own rule is that a parse failure is never read as
+             * zero unread, so a link it cannot recognise shows as nothing at
+             * all - indistinguishable from an empty inbox, and the reason
+             * nobody has ever reported it from a school other than the one it
+             * was written against. If the page links to Beskeder and none of
+             * those links matched, say so once.
+             */
+            if (
+                links.length &&
+                !reportedNavDrift
+            ) {
+                reportedNavDrift = true;
+
+                reportToManager(
+                    'drift',
+                    'messages-nav-link',
+                    0
+                );
+            }
+
             return null;
         }
 

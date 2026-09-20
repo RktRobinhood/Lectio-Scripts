@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Chairs Up
 // @namespace    https://www.lectio.dk/
-// @version      1.1.2
+// @version      1.2.0
 // @description  Shows when a lesson is the final active booking of the day in its room. Universal Lectio version.
 // @match        https://www.lectio.dk/lectio/*
 // @grant        none
@@ -35,7 +35,7 @@
   (function registerWithLectioManager() {
     const MODULE_ID = 'chairs-up';
     const MODULE_NAME = 'Lectio - Chairs Up';
-    const MODULE_VERSION = '1.1.2';
+    const MODULE_VERSION = '1.2.0';
 
     function announce() {
       window.dispatchEvent(new CustomEvent('lectio-module:register', {
@@ -517,12 +517,47 @@
   // TIMETABLE PAGE
   // =========================================================
 
+  /*
+   * Telling the Manager that a selector matched nothing
+   * (docs/manager-problem-log.md). One-way and additive: with no Manager
+   * installed this lands on a window nobody is listening to, which is a no-op.
+   *
+   * `code` is a token written here, never text read off the page - there is
+   * deliberately no field for a message, because this log is written to be
+   * pasted into a public issue.
+   */
+  function reportToManager(kind, code, found) {
+    window.dispatchEvent(new CustomEvent('lectio-module:report', {
+      detail: { moduleId: 'chairs-up', kind, code, found }
+    }));
+  }
+
+
   async function runTimetablePage() {
     const lessons =
       getTimetableLessons();
 
 
     if (!lessons.length) {
+      /*
+       * Nothing to mark is the normal case on a day off, and marking nothing
+       * is also what happens if Lectio renames the classes this reads. The
+       * two look identical on screen, so they are separated here: blocks are
+       * on the page and none of them matched.
+       */
+      if (
+        !document.querySelector(
+          'a.s2skemabrik.s2brik[data-tooltip]'
+        ) &&
+        document.querySelector('.s2skemabrik')
+      ) {
+        reportToManager(
+          'drift',
+          'lesson-bricks',
+          0
+        );
+      }
+
       console.info(
         '[Lectio Chairs Up] No live activities with room information found.'
       );

@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio module drift-reporting fixture</title>
+    <script>
+        /* A timetable page that has moved under the modules' feet: the week
+           table and the lesson blocks are still there, but the attribute and
+           the classes every one of them keys on are gone, and the Beskeder
+           link no longer says Beskeder. Today every one of these modules
+           answers that by doing nothing at all, which looks exactly like a
+           quiet day.
+
+           There is no Manager here on purpose. The report event has to be a
+           no-op with nobody listening - that is the whole of "still works
+           installed on its own" - so what this fixture listens for is the
+           event itself, in the Manager's place. */
+        window.reports = [];
+        window.registrations = [];
+        window.pageErrors = [];
+
+        window.addEventListener('lectio-module:report', (event) => {
+            window.reports.push(event.detail);
+        });
+
+        window.addEventListener('lectio-module:register', (event) => {
+            window.registrations.push(event.detail.id);
+        });
+
+        window.addEventListener('error', (event) => {
+            window.pageErrors.push(String(event.message));
+        });
+
+        const storage = new Map();
+        window.GM_getValue = (key, fallback) => storage.has(key) ? storage.get(key) : fallback;
+        window.GM_setValue = (key, value) => storage.set(key, value);
+        window.GM_xmlhttpRequest = (options) => {
+            setTimeout(() => options.onerror && options.onerror(), 0);
+        };
+
+        /* Nothing here reaches Lectio, and nothing may hang: a module waiting
+           on a request it will never get would take the assertions with it.
+
+           A week fetched by Change Radar comes back drifted the same way the
+           rendered page is - blocks on it, none of them parseable - because
+           that is the case it reports as a week with no changes today. */
+        window.DRIFTED_WEEK = '<!DOCTYPE html><html><body><table>'
+            + '<tr class="s2dayHeader"><th>Uge 38</th></tr>'
+            + '<tr><td data-date="2026-09-14">'
+            + '<a class="s2skemabrik s2normal"><span>1a Fag1 HL</span></a>'
+            + '</td></tr></table></body></html>';
+
+        window.fetch = (url) => Promise.resolve(new Response(
+            /SkemaNy\.aspx/i.test(String(url))
+                ? window.DRIFTED_WEEK
+                : '<!DOCTYPE html><html><body></body></html>',
+            { status: 200, headers: { 'content-type': 'text/html' } }
+        ));
+    </script>
+</head>
+<body>
+    <div id="nav">
+        <!-- Links to Beskeder, but no longer says so: the exact drift nobody
+             has ever been able to report, because the badge just never
+             appears. -->
+        <a href="/lectio/223/beskeder2.aspx">Indbakke</a>
+    </div>
+
+    <table id="s_m_Content_Content_SkemaNy_skematabel">
+        <tr class="s2dayHeader"><th>Uge 38</th></tr>
+        <tr>
+            <td data-date="2026-09-14">
+                <!-- A rendered lesson block with neither the tooltip Subject
+                     Colours reads nor the classes Chairs Up matches on. -->
+                <a class="s2skemabrik s2normal"><span>1a Fag1 HL</span></a>
+                <a class="s2skemabrik s2normal"><span>1a Fag2 SL</span></a>
+            </td>
+        </tr>
+    </table>
+
+    <pre id="test-result" data-test-result="pending">PENDING</pre>
+
+    <script src="/modules-unstable/Lectio-Subject-Colours.user.js"></script>
+    <script src="/modules-unstable/Lectio-Chairs-Up.user.js"></script>
+    <script src="/modules-unstable/Lectio-Unread-Message-Notifications.user.js"></script>
+    <script src="/modules-unstable/Lectio-Change-Radar.user.js"></script>
+    <script>
+        function assert(condition, message) {
+            if (!condition) throw new Error(message);
+        }
+
+        window.addEventListener('load', async () => {
+            const result = document.getElementById('test-result');
+
+            try {
+                // Chairs Up routes off the URL, Unread syncs its badge off a
+                // mutation, and Change Radar jitters its first check by up to
+                // four seconds, so give all of them a turn. Chrome runs this
+                // on a virtual clock, so the wait costs nothing.
+                await new Promise((done) => setTimeout(done, 10000));
+
+                const byModule = new Map(window.reports.map((entry) => [entry.moduleId, entry]));
+
+                for (const [moduleId, code] of [
+                    ['subject-colours', 'lesson-block-tooltips'],
+                    ['chairs-up', 'lesson-bricks'],
+                    ['message-notifications', 'messages-nav-link'],
+                    ['change-radar', 'schedule-bricks']
+                ]) {
+                    const report = byModule.get(moduleId);
+                    assert(report, `${moduleId} stayed silent about a selector that matched nothing`);
+                    assert(report.kind === 'drift', `${moduleId} reported drift as ${report.kind}`);
+                    assert(report.code === code, `${moduleId} reported the wrong token: ${report.code}`);
+                    assert(report.found === 0, `${moduleId} reported a count of ${report.found}`);
+                }
+
+                // Nothing a module sends may be free text, or the Manager's log
+                // stops being safe to paste into a public issue.
+                for (const report of window.reports) {
+                    assert(!('message' in report),
+                        `${report.moduleId} put a message in a report: ${JSON.stringify(report)}`);
+                    assert(/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(report.code),
+                        `${report.moduleId} sent a code that is not a token: ${report.code}`);
+                }
+
+                // With nobody listening the dispatch is a no-op, and the
+                // modules carry on exactly as they would alone.
+                for (const moduleId of [
+                    'subject-colours', 'chairs-up', 'message-notifications', 'change-radar'
+                ]) {
+                    assert(window.registrations.includes(moduleId),
+                        `${moduleId} stopped registering: ${window.registrations.join(', ')}`);
+                }
+
+                assert(window.pageErrors.length === 0,
+                    `A module threw while reporting with no Manager installed: ${window.pageErrors.join(' | ')}`);
+
+                result.dataset.testResult = 'pass';
+                result.textContent = 'PASS';
+            } catch (error) {
+                result.dataset.testResult = 'fail';
+                result.textContent = `FAIL: ${error.message}`;
+            }
+        });
+    </script>
+</body>
+</html>

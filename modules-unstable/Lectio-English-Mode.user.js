@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio English Mode
 // @namespace    lectio-english-mode
-// @version      1.9.4
+// @version      1.10.0
 // @description  Context-aware English layer for Lectio with instant core UI translation, persistent cache and Google fallback.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-start
@@ -60,7 +60,7 @@
     (function registerWithLectioManager() {
         const MODULE_ID = 'english-mode';
         const MODULE_NAME = 'Lectio English Mode';
-        const MODULE_VERSION = '1.9.4';
+        const MODULE_VERSION = '1.10.0';
 
         function announce() {
             const storedMode = GM_getValue(STORAGE_MODE, MODE_DA);
@@ -2097,6 +2097,40 @@
         'https://translate.google.com/translate_a/single'
     ];
 
+    /*
+     * Telling the Manager something failed (docs/manager-problem-log.md).
+     * One-way and additive: with no Manager installed this lands on a window
+     * nobody is listening to, which is a no-op.
+     *
+     * This module has no fragile Lectio selector to report drift against - it
+     * reads headings, links and buttons, which are HTML rather than Lectio -
+     * so what it has to say is this: the fallback it leans on for anything it
+     * does not know itself stopped answering. The symptom today is a page
+     * that is half translated and no explanation anywhere.
+     *
+     * `code` is a token written here, never text read off a page or out of a
+     * response - there is deliberately no field for a message, because this
+     * log is written to be pasted into a public issue, and the text this
+     * module handles is the text of someone's Lectio.
+     */
+    let reportedTranslateFailure = false;
+
+    function reportToManager(kind, code, found) {
+        window.dispatchEvent(
+            new CustomEvent(
+                'lectio-module:report',
+                {
+                    detail: {
+                        moduleId: 'english-mode',
+                        kind,
+                        code,
+                        found
+                    }
+                }
+            )
+        );
+    }
+
     function gmRequest(details) {
         return new Promise(
             (
@@ -2220,6 +2254,18 @@
             } catch (error) {
                 lastError = error;
             }
+        }
+
+        // Once per page load: every untranslated string on the page is about
+        // to fail the same way, and one row says as much as a thousand.
+        if (!reportedTranslateFailure) {
+            reportedTranslateFailure = true;
+
+            reportToManager(
+                'error',
+                'translation-endpoints',
+                0
+            );
         }
 
         throw (
