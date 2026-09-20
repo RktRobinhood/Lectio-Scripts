@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-09-20T17:00:00Z",
+  "generatedAt": "2026-09-20T18:00:00Z",
   "manager": {
-    "version": "1.19.1",
+    "version": "1.20.0",
     "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/manager/Lectio-Manager.user.js",
     "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues"
   },
@@ -19,7 +19,13 @@
       "status": "stable",
       "version": "1.9.3",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-English-Mode.user.js",
-      "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues"
+      "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
+      "i18n": {
+        "da": {
+          "name": "English Mode",
+          "description": "Tilføjer en DA / EN-knap og oversætter Lectios brugerflade til kontekstbevidst engelsk."
+        }
+      }
     },
     {
       "id": "chairs-up",
@@ -32,7 +38,13 @@
       "status": "stable",
       "version": "1.1.1",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Chairs-Up.user.js",
-      "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues"
+      "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
+      "i18n": {
+        "da": {
+          "name": "Stole Op",
+          "description": "Markerer en lektion, når den er dagens sidste aktive booking i det lokale."
+        }
+      }
     },
     {
       "id": "schedule-summary",
@@ -46,7 +58,13 @@
       "status": "experimental",
       "version": "0.2.3",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Schedule-Summary.user.js",
-      "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues"
+      "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
+      "i18n": {
+        "da": {
+          "name": "Skemaoversigt",
+          "description": "Folder skemaets ugeinformation sammen til en kompakt stribe med forhåndsvisning ved musen og klik for at udfolde."
+        }
+      }
     },
     {
       "id": "message-notifications",
@@ -60,7 +78,13 @@
       "status": "stable",
       "version": "0.5.0",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Unread-Message-Notifications.user.js",
-      "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues"
+      "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
+      "i18n": {
+        "da": {
+          "name": "Ulæste beskeder",
+          "description": "Viser et mærke med ulæste beskeder ved siden af Beskeder. Virker indtil videre kun på Lectio-skole 223."
+        }
+      }
     },
     {
       "id": "lectio-theming",
@@ -74,7 +98,13 @@
       "status": "experimental",
       "version": "0.18.0",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Theming.user.js",
-      "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues"
+      "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
+      "i18n": {
+        "da": {
+          "name": "Lectio-temaer",
+          "description": "Giver Lectio en blød, gennemsigtig glasflade med 46 indbyggede farvetemaer, hvert med sit eget baggrundsbillede, eller udleder et tema fra en hjemmeside eller et billede. Understøtter dit eget baggrundsbillede og håndplukkede farver."
+        }
+      }
     },
     {
       "id": "subject-colours",
@@ -86,9 +116,15 @@
         "teacher"
       ],
       "status": "experimental",
-      "version": "0.8.2",
+      "version": "0.8.3",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Subject-Colours.user.js",
-      "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues"
+      "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
+      "i18n": {
+        "da": {
+          "name": "Fagfarver",
+          "description": "Lærer ud fra dit eget skema, hvilke hold der rent faktisk er dine, og giver hvert af dem sin egen farve, med et separat dæmpet farvespektrum til enkeltstående aktiviteter som morgensamlinger og møder. En valgfri figurmarkør pr. hold hjælper, når farve alene ikke er nok."
+        }
+      }
     }
   ]
 }

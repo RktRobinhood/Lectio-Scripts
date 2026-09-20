@@ -52,12 +52,6 @@ const OVERRIDES = {
     // palette reads as an empty blob. Nothing else about the drawing changes.
     palette: (shapes) => shapes.replaceAll('r=".5"', 'r="1.15"'),
 
-    // The sweep arm goes in its own group so hover can rotate just that, leaving
-    // the rings and the dish arcs where they are.
-    radar: (shapes) => shapes.replace(
-        '<path d="m13.41 10.59 5.66-5.66"/>',
-        '<g class="lectio-manager-dock-sweep"><path d="m13.41 10.59 5.66-5.66"/></g>'
-    )
 };
 
 function shapesFor(name) {

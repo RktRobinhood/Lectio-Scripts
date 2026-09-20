@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.19.1
+// @version      1.20.0
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules, including their settings and shared dock controls.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
@@ -94,6 +94,7 @@
             install: 'Install',
             installTest: 'Install test',
             installed: 'Installed',
+            backToInstalled: '← Installed',
             available: 'Available',
             modules: 'Modules',
             allModules: 'All available modules',
@@ -101,6 +102,7 @@
             student: 'Student',
             teacher: 'Teacher',
             category: 'Category',
+            sortByName: 'A–Z',
             experimental: 'Experimental',
             notActiveHere: 'Not active on this page',
             notDetected: 'Not detected',
@@ -170,6 +172,7 @@
             install: 'Installer',
             installTest: 'Installer test',
             installed: 'Installeret',
+            backToInstalled: '← Installeret',
             available: 'Tilgængelige',
             modules: 'Moduler',
             allModules: 'Alle tilgængelige moduler',
@@ -177,6 +180,7 @@
             student: 'Elev',
             teacher: 'Lærer',
             category: 'Kategori',
+            sortByName: 'A–Å',
             experimental: 'Eksperimentel',
             notActiveHere: 'Ikke aktiv på denne side',
             notDetected: 'Ikke fundet',
@@ -202,6 +206,43 @@
         }
     };
 
+    /*
+     * The Catalogue is written once, in English, and read by everyone. Two kinds
+     * of value in it reach the screen and so need translating.
+     *
+     * Category and audience are a small, closed vocabulary the repository
+     * controls, so they are translated here rather than repeated in the JSON for
+     * every module that uses them. An unknown value falls through unchanged,
+     * which is what should happen to a category invented after this table.
+     *
+     * A module's name and description are prose belonging to that module, so
+     * they live with it: a Catalogue entry may carry an optional `i18n` block
+     * (see localizedField). Neither is required - an untranslated module shows
+     * its English description, which is the honest thing to do.
+     */
+    const CATALOGUE_VOCABULARY = {
+        da: {
+            Interface: 'Brugerflade',
+            Timetable: 'Skema',
+            Messages: 'Beskeder',
+            Schedule: 'Skema',
+            Testing: 'Test',
+            General: 'Generelt',
+            student: 'elev',
+            teacher: 'lærer'
+        }
+    };
+
+    function translateVocabulary(value) {
+        return CATALOGUE_VOCABULARY[language]?.[value] ?? value;
+    }
+
+    // A Catalogue entry may carry { i18n: { da: { description: '…' } } }.
+    function localizedField(entry, field) {
+        const translated = entry?.i18n?.[language]?.[field];
+        return isNonEmptyString(translated) ? translated : entry?.[field];
+    }
+
     let language = DEFAULT_LANGUAGE;
 
     // Falls back to English for any key a translation has not caught up with,
@@ -215,7 +256,7 @@
     // Kept in step with the @version header by scripts/check-versions.mjs. The
     // header is metadata Tampermonkey reads; this is the only copy the running
     // script can see, and it is what the self-update notice compares.
-    const MANAGER_VERSION = '1.19.1';
+    const MANAGER_VERSION = '1.20.0';
 
     const STABLE_CATALOGUE_URL =
         'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/catalogue/modules.json';
@@ -557,6 +598,7 @@
                 audience: Array.isArray(entry.audience) ? entry.audience.filter(isNonEmptyString) : [],
                 aliases: Array.isArray(entry.aliases) ? entry.aliases.filter(isNonEmptyString) : [],
                 status: isNonEmptyString(entry.status) ? entry.status : 'stable',
+                i18n: validateTranslations(entry.i18n),
                 version,
                 installUrl,
                 supportUrl: isNonEmptyString(entry.supportUrl)
@@ -587,6 +629,35 @@
      * and the Manager reads its own entry. Optional: an older catalogue without
      * it simply means no notice.
      */
+    /*
+     * Optional per-module translations from the Catalogue, kept to the two
+     * fields that are prose - a name and a description - and to languages this
+     * build knows. Everything else in an entry is either machinery or part of
+     * the closed vocabulary translated in CATALOGUE_VOCABULARY, so there is
+     * nothing to be gained by letting the Catalogue override it, and something
+     * to be lost: these strings are rendered as text, never as markup, and the
+     * narrower the surface the easier that is to keep true.
+     */
+    function validateTranslations(value) {
+        if (!value || typeof value !== 'object') return null;
+
+        const translations = {};
+
+        for (const code of LANGUAGES) {
+            const entry = value[code];
+            if (!entry || typeof entry !== 'object') continue;
+
+            const fields = {};
+            for (const field of ['name', 'description']) {
+                if (isNonEmptyString(entry[field])) fields[field] = entry[field];
+            }
+
+            if (Object.keys(fields).length) translations[code] = fields;
+        }
+
+        return Object.keys(translations).length ? translations : null;
+    }
+
     function validateManagerEntry(entry) {
         if (!entry || typeof entry !== 'object') return null;
 
@@ -769,6 +840,9 @@
         label('.lectio-manager-tip-dismiss', t('dismissTip'));
         set('.lectio-manager-self-update-link', t('update'));
         set('.lectio-manager-footer-link', t('reportIssue'));
+        set('[data-sort="category"]', t('category'));
+        set('[data-sort="name"]', t('sortByName'));
+        set('.lectio-manager-settings-back', t('backToInstalled'));
 
         const tabs = root.querySelector('.lectio-manager-tabs');
         if (tabs) tabs.setAttribute('aria-label', t('modules'));
@@ -885,19 +959,19 @@
 
     function getViewLabel(view) {
         if (view === 'installed') {
-            return 'Installed';
+            return t('installed');
         }
 
         if (view.startsWith(AUDIENCE_VIEW_PREFIX)) {
             const audience = view.slice(AUDIENCE_VIEW_PREFIX.length);
-            return audience.charAt(0).toUpperCase() + audience.slice(1);
+            return audience === 'student' ? t('student') : t('teacher');
         }
 
         if (view.startsWith(CATEGORY_VIEW_PREFIX)) {
-            return view.slice(CATEGORY_VIEW_PREFIX.length);
+            return translateVocabulary(view.slice(CATEGORY_VIEW_PREFIX.length));
         }
 
-        return 'Available';
+        return t('available');
     }
 
     // ============================================================
@@ -1648,7 +1722,7 @@
             bell: '<path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/>', // lucide/bell
             wrench: '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.106-3.105c.32-.322.863-.22.983.218a6 6 0 0 1-8.259 7.057l-7.91 7.91a1 1 0 0 1-2.999-3l7.91-7.91a6 6 0 0 1 7.057-8.259c.438.12.54.662.219.984z"/>', // lucide/wrench
             palette: '<path d="M12 22a1 1 0 0 1 0-20 10 9 0 0 1 10 9 5 5 0 0 1-5 5h-2.25a1.75 1.75 0 0 0-1.4 2.8l.3.4a1.75 1.75 0 0 1-1.4 2.8z"/><circle cx="13.5" cy="6.5" r="1.15" fill="currentColor"/><circle cx="17.5" cy="10.5" r="1.15" fill="currentColor"/><circle cx="6.5" cy="12.5" r="1.15" fill="currentColor"/><circle cx="8.5" cy="7.5" r="1.15" fill="currentColor"/>', // lucide/palette
-            radar: '<path d="M19.07 4.93A10 10 0 0 0 6.99 3.34"/><path d="M4 6h.01"/><path d="M2.29 9.62A10 10 0 1 0 21.31 8.35"/><path d="M16.24 7.76A6 6 0 1 0 8.23 16.67"/><path d="M12 18h.01"/><path d="M17.99 11.66A6 6 0 0 1 15.77 16.67"/><circle cx="12" cy="12" r="2"/><g class="lectio-manager-dock-sweep"><path d="m13.41 10.59 5.66-5.66"/></g>', // lucide/radar
+            radar: '<path d="M19.07 4.93A10 10 0 0 0 6.99 3.34"/><path d="M4 6h.01"/><path d="M2.29 9.62A10 10 0 1 0 21.31 8.35"/><path d="M16.24 7.76A6 6 0 1 0 8.23 16.67"/><path d="M12 18h.01"/><path d="M17.99 11.66A6 6 0 0 1 15.77 16.67"/><circle cx="12" cy="12" r="2"/><path d="m13.41 10.59 5.66-5.66"/>', // lucide/radar
             default: '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="1"/>', // lucide/circle-dot
         // --- END GENERATED ICONS ---
         };
@@ -1769,15 +1843,15 @@
                     <div class="lectio-manager-list-toolbar">
                         <div class="lectio-manager-view-heading"></div>
                         <div class="lectio-manager-sort" aria-label="Sort modules">
-                            <button type="button" data-sort="category">Category</button>
-                            <button type="button" data-sort="name">A&ndash;Z</button>
+                            <button type="button" data-sort="category"></button>
+                            <button type="button" data-sort="name"></button>
                         </div>
                     </div>
                     <div class="lectio-manager-list"></div>
                 </div>
                 <div class="lectio-manager-settings-view" hidden>
                     <div class="lectio-manager-settings-view-header">
-                        <button type="button" class="lectio-manager-settings-back">&larr; Installed</button>
+                        <button type="button" class="lectio-manager-settings-back"></button>
                         <div class="lectio-manager-settings-title-row">
                             <div>
                                 <span class="lectio-manager-settings-category"></span>
@@ -2185,7 +2259,7 @@
 
                 const categoryHeading = document.createElement('div');
                 categoryHeading.className = 'lectio-manager-category-heading';
-                categoryHeading.textContent = module.category;
+                categoryHeading.textContent = translateVocabulary(module.category);
                 list.appendChild(categoryHeading);
             }
 
@@ -2408,7 +2482,7 @@
             categoryGroup.appendChild(buildNavGroupLabel(t('category')));
 
             for (const category of categories) {
-                categoryGroup.appendChild(buildNavMenuItem(`${CATEGORY_VIEW_PREFIX}${category}`, category));
+                categoryGroup.appendChild(buildNavMenuItem(`${CATEGORY_VIEW_PREFIX}${category}`, translateVocabulary(category)));
             }
 
             navMenu.appendChild(categoryGroup);
@@ -2456,7 +2530,7 @@
 
         const category = document.createElement('span');
         category.className = 'lectio-manager-card-category';
-        category.textContent = module.category;
+        category.textContent = translateVocabulary(module.category);
         meta.appendChild(category);
 
         if (isExperimentalModule(module, record)) {
@@ -2469,17 +2543,17 @@
         if (!compact && module.audience.length) {
             const audience = document.createElement('span');
             audience.className = 'lectio-manager-card-audience';
-            audience.textContent = module.audience.join(' · ');
+            audience.textContent = module.audience.map(translateVocabulary).join(' · ');
             meta.appendChild(audience);
         }
 
         const nameRow = document.createElement('div');
         nameRow.className = 'lectio-manager-card-name';
-        nameRow.textContent = module.name;
+        nameRow.textContent = localizedField(module, 'name');
 
         const desc = document.createElement('div');
         desc.className = 'lectio-manager-card-desc';
-        desc.textContent = module.description;
+        desc.textContent = localizedField(module, 'description');
 
         main.append(meta, nameRow);
 
@@ -5041,14 +5115,24 @@
             .lectio-manager-dock-item.is-active {
                 /* Hover is the one moment the tile earns some opacity: it is the
                    thing being looked at, and the icon has to stay readable while
-                   it is also the thing being scaled. */
+                   it is also the thing being scaled. No ring: a halo that appears
+                   and disappears under a moving pointer flickers, and the scale
+                   already says which tile is under the cursor. */
                 border-color: rgba(255, 255, 255, .7);
                 background: color-mix(in srgb, var(--lectio-theme-surface, #ffffff) 62%, transparent);
                 outline: none;
                 box-shadow:
                     0 8px 20px rgba(0, 0, 0, .2),
+                    inset 0 1px 0 rgba(255, 255, 255, .7);
+            }
+
+            /* Keyboard focus still needs to be visible, and it does not flicker,
+               because focus moves deliberately rather than with the pointer. */
+            .lectio-manager-dock-item:focus-visible {
+                box-shadow:
+                    0 8px 20px rgba(0, 0, 0, .2),
                     inset 0 1px 0 rgba(255, 255, 255, .7),
-                    0 0 0 2px color-mix(in srgb, var(--lectio-theme-accent, #0f6f6f) 26%, transparent);
+                    0 0 0 2px color-mix(in srgb, var(--lectio-theme-accent, #0f6f6f) 55%, transparent);
             }
 
             /*
@@ -5140,21 +5224,24 @@
                 shape-rendering: geometricPrecision;
             }
 
-            .lectio-manager-dock-sweep {
-                transform-box: view-box;
-                transform-origin: 12px 12px;
+            /*
+             * One movement for every icon: a single settle when the pointer
+             * arrives, then stillness. A per-icon animation - the radar's sweep
+             * turning on hover - meant one tile behaved unlike its neighbours and
+             * kept moving the whole time the pointer rested on it, which reads as
+             * a fault rather than as feedback. This plays once and stops.
+             */
+            .lectio-manager-dock-item:hover .lectio-manager-dock-icon,
+            .lectio-manager-dock-item:focus-visible .lectio-manager-dock-icon {
+                animation: lectio-manager-dock-nudge 460ms cubic-bezier(.36, .07, .19, .97) both;
             }
 
-            /* The radar only sweeps while it is being looked at. A dock that
-               animates permanently is a dock you learn to ignore. */
-            .lectio-manager-dock-item:hover .lectio-manager-dock-sweep,
-            .lectio-manager-dock-item:focus-visible .lectio-manager-dock-sweep {
-                animation: lectio-manager-dock-sweep 2.2s linear infinite;
-            }
-
-            @keyframes lectio-manager-dock-sweep {
-                from { transform: rotate(0deg); }
-                to { transform: rotate(360deg); }
+            @keyframes lectio-manager-dock-nudge {
+                0%   { transform: rotate(0deg); }
+                22%  { transform: rotate(-8deg); }
+                48%  { transform: rotate(6deg); }
+                72%  { transform: rotate(-3deg); }
+                100% { transform: rotate(0deg); }
             }
 
             @media (prefers-reduced-motion: reduce) {

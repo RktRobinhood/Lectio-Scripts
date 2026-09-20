@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Subject Colours
 // @namespace    https://www.lectio.dk/
-// @version      0.8.2
+// @version      0.8.3
 // @description  Learns which classes are actually yours from your own timetable and gives each one its own colour, with a separate muted spectrum for one-off activities like assemblies and meetings.
 // @match        https://www.lectio.dk/lectio/*
 // @grant        none
@@ -15,7 +15,7 @@
 
     const MODULE_ID = 'subject-colours';
     const MODULE_NAME = 'Lectio - Subject Colours';
-    const MODULE_VERSION = '0.8.2';
+    const MODULE_VERSION = '0.8.3';
     const LOG = '[Lectio Subject Colours]';
     const STYLE_ID = 'lectio-subject-colours-styles';
 
@@ -2214,6 +2214,13 @@
     }
 
     window.addEventListener('lectio-manager:discover', handleDiscovery, { signal: lifecycle.signal });
+
+    // The dock label and tooltip are captured when the item registers, so a
+    // language chosen after that would sit in the dock in the old language until
+    // the next page load. Re-rendering re-registers them.
+    window.addEventListener('lectio-manager:language', () => {
+        renderLegend();
+    }, { signal: lifecycle.signal });
     window.addEventListener('lectio-manager:set-setting', handleSetting, { signal: lifecycle.signal });
     window.addEventListener('lectio-manager:preview-setting', handlePreview, { signal: lifecycle.signal });
     window.addEventListener('lectio-manager:clear-setting-preview', handleClearPreview, { signal: lifecycle.signal });

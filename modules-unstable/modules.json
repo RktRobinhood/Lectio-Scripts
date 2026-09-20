@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "channel": "unstable",
-  "generatedAt": "2026-09-20T14:00:00Z",
+  "generatedAt": "2026-09-20T18:00:00Z",
   "modules": [
     {
       "id": "unstable-channel-test",
@@ -15,7 +15,13 @@
       "status": "unstable",
       "version": "0.2.0",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Unstable-Channel-Test.user.js",
-      "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues"
+      "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
+      "i18n": {
+        "da": {
+          "name": "Test af ustabil kanal",
+          "description": "Harmløst diagnosemodul, der bruges til at kontrollere, at Lectio Managers ustabile kanal virker."
+        }
+      }
     },
     {
       "id": "change-radar",
@@ -34,7 +40,13 @@
       "status": "unstable",
       "version": "0.4.1",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Change-Radar.user.js",
-      "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues"
+      "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
+      "i18n": {
+        "da": {
+          "name": "Lectio Ændringsradar",
+          "description": "Eksperimentel skemaændringsvagt med en kompakt radar-HUD i temaets farver, hastestatus, styr på usete ændringer, indstillelig tjekfrekvens og en roterende lokal ændringslog."
+        }
+      }
     }
   ]
 }
