@@ -1,36 +1,32 @@
 # modules-unstable
 
-Experimental overlay used by Lectio Manager 2.x.
+**Where every module change lands first.** Not a Git branch — a folder and a catalogue, both on `main`, read only by people who have switched their own Lectio Manager to the **Unstable** release channel. Stable users never see any of it. The rule and its reasoning are [ADR-0014](../docs/adr/0014-unstable-first-releases.md); the short version lives in [AGENTS.md](../AGENTS.md).
 
-This folder does not replace `modules/` and does not require a separate Git branch. Stable users continue to use the normal stable catalogue and stable module files unless they explicitly change their own Lectio Manager setting to **Unstable**.
+`modules-unstable/modules.json` is an overlay, not a replacement: an entry here with the same `id` as one in `catalogue/modules.json` replaces it for Unstable users, and an `id` that appears only here is an Unstable-only module. The Manager caches this overlay for five minutes against twenty-four hours for the stable catalogue, so a change here is visible almost immediately.
 
-## Files in this test pack
+## Working here
+
+A module being worked on exists twice — the frozen copy stable users have in `modules/`, and the live one here, at least one version ahead. While it is under test the copy in `modules/` is not edited for any reason.
+
+Starting work on a module that is not here yet:
+
+1. Copy it in from `modules/`.
+2. Bump its version — `@version` and the version it registers, together. No `-beta` suffixes: plain `MAJOR.MINOR.PATCH`, as [ADR-0003](../docs/adr/0003-static-catalogue-independent-versioning.md) requires of every script in this repository.
+3. Point `@updateURL` and `@downloadURL` at this folder's raw path. Tampermonkey follows those, not the catalogue, once a script is installed.
+4. Add its entry to `modules-unstable/modules.json` with the same `id` as the stable entry, `status: "unstable"`, and an `installUrl` under `modules-unstable/`.
+
+`node scripts/check-versions.mjs` enforces all of it: each file is checked against the catalogue for the folder it lives in, a copy here must be strictly ahead of what stable ships, the two URLs must point at the folder the file is actually in, and an entry whose file has gone is reported rather than ignored.
+
+## Promotion
+
+Only the repo owner decides when something is promoted, and they say so in those words. The six steps — copy up, rewrite the URLs, bump the patch once more, update `catalogue/modules.json`, delete the file and entry from here, re-run the checks — are in [ADR-0014](../docs/adr/0014-unstable-first-releases.md#promoting).
+
+The extra patch bump at promotion is not ceremony. A tester's installed copy points at a `modules-unstable/` URL that promotion deletes; shipping stable on the same number would leave them there silently, updating from a 404 forever. One more bump makes the Manager offer them the stable file instead.
+
+## What is here now
 
 ### `Lectio-Unstable-Channel-Test.user.js`
-A harmless diagnostic module. It:
+A harmless diagnostic module: it runs on Lectio pages, registers itself with the Manager, puts a warning-state icon in the shared dock, and renders into a Manager-owned flyout when clicked. It modifies no Lectio records, messages, grades, attendance or account data. It exists to prove that an Unstable-only module appears only on the Unstable channel and that the dock registration and panel contract work without module-owned fixed positioning. **It is never promoted.**
 
-- runs on Lectio pages;
-- registers itself with Lectio Manager as version `0.2.0`;
-- registers a warning-state diagnostic icon in the shared Manager dock;
-- renders its information inside a Manager-owned dock flyout when clicked;
-- does not modify Lectio records, messages, grades, attendance, or account data.
-
-Its purpose is to prove both that an unstable-only module becomes visible only in Experimental mode and that the dock registration/panel contract works without module-owned fixed positioning.
-
-### `Lectio-Unread-Message-Notifications.user.js`
-A version-channel test copy of the existing Unread Message Notifications userscript.
-
-The feature logic is intentionally kept the same as the stable snapshot used to create this test file. The test copy changes only release plumbing:
-
-- version is deliberately set to `99.0.0-beta.1`;
-- `@updateURL` and `@downloadURL` point to `modules-unstable/`;
-- it registers its installed version with Lectio Manager;
-- it includes several catalogue ID aliases so it can match the existing stable module even if the stable catalogue uses a slightly different ID.
-
-The high version number is deliberate. In Unstable mode the Manager should offer an **Upgrade** from the stable version to `99.0.0-beta.1`. After that is installed, switching the Manager back to Stable should make the Manager compare the installed `99.0.0-beta.1` against the stable catalogue version and offer a **Downgrade**.
-
-## Promotion rule
-
-Do not promote the `99.0.0-beta.1` test version to stable. It exists only to exercise the channel/version plumbing.
-
-For real development, create or copy a module into this folder, use a normal beta progression such as `1.4.1-beta.1`, test it here, and then copy the tested code into `modules/` with a normal stable version such as `1.4.1`.
+### `Lectio-Change-Radar.user.js`
+An experimental timetable watcher — a compact themed radar HUD with urgency states, unseen-change tracking, configurable polling and a rotating local change log. Unstable-only so far; it has never had a stable release, so promoting it would be its first.

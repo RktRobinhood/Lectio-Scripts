@@ -60,10 +60,18 @@ function readCatalogue(path) {
     return entries;
 }
 
-const catalogued = new Map([
-    ...readCatalogue('catalogue/modules.json'),
-    ...readCatalogue('modules-unstable/modules.json')
-]);
+/*
+ * The two catalogues are kept apart, not merged. Under ADR-0014 a module being
+ * worked on exists twice - a frozen copy in modules/ at the version stable users
+ * have, and the live one in modules-unstable/ one or more bumps ahead - and both
+ * files declare the same id. Merging them into one map meant the unstable entry
+ * won for both files, so the frozen stable copy was reported as lagging its own
+ * catalogue the moment work started on it. Each file is checked against the
+ * catalogue for the folder it lives in.
+ */
+const stableCatalogue = readCatalogue('catalogue/modules.json');
+const unstableCatalogue = readCatalogue('modules-unstable/modules.json');
+const catalogueFor = (path) => (path.startsWith('modules-unstable/') ? unstableCatalogue : stableCatalogue);
 
 // The Manager's own entry, which drives its self-update notice. A stale one here
 // fails silently: the notice simply never appears, and the Manager goes on
@@ -76,7 +84,22 @@ const userscripts = [
     'manager/Lectio-Manager.user.js'
 ].filter((path) => path.endsWith('.user.js')).map((path) => path.replaceAll('\\', '/'));
 
-const seen = new Set();
+// Which ids a userscript actually declares, per channel. An entry whose file is
+// gone - a promotion that removed the file but left the overlay entry behind -
+// advertises an installUrl that 404s, and the id still existing in the other
+// channel must not cover for it.
+const seen = { 'catalogue/modules.json': new Set(), 'modules-unstable/modules.json': new Set() };
+
+// "1.9.10" is ahead of "1.9.9", which a string comparison gets backwards.
+function isAhead(version, other) {
+    const parts = (value) => String(value).split('.').map((part) => Number(part) || 0);
+    const [a, b] = [parts(version), parts(other)];
+
+    for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
+        if ((a[index] || 0) !== (b[index] || 0)) return (a[index] || 0) > (b[index] || 0);
+    }
+    return false;
+}
 
 for (const path of userscripts) {
     const source = readFileSync(path, 'utf8');
@@ -118,16 +141,48 @@ for (const path of userscripts) {
         if (!id) {
             problems.push(`${path}: could not find its module id`);
         } else {
-            seen.add(id);
-            const entry = catalogued.get(id);
+            seen[path.startsWith('modules-unstable/') ? 'modules-unstable/modules.json' : 'catalogue/modules.json'].add(id);
+            const catalogue = catalogueFor(path);
+            const entry = catalogue.get(id);
 
             if (!entry) {
-                problems.push(`${path}: '${id}' has no entry in either catalogue, so the Manager cannot offer it`);
+                problems.push(
+                    `${path}: '${id}' has no entry in ${path.startsWith('modules-unstable/') ? 'modules-unstable/modules.json' : 'catalogue/modules.json'}, ` +
+                    `so the Manager cannot offer it on that channel`
+                );
             } else if (entry.version !== header) {
                 problems.push(
                     `${path}: @version is ${header} but ${entry.path} says ${entry.version} - ` +
                     `the Manager reads the catalogue, so this is the number users are offered`
                 );
+            }
+
+            // A module under test is ahead of the copy stable users have, or the
+            // Manager offers the tester a downgrade and the work reaches nobody.
+            if (path.startsWith('modules-unstable/')) {
+                const stable = stableCatalogue.get(id);
+
+                if (stable && !isAhead(header, stable.version)) {
+                    problems.push(
+                        `${path}: is ${header} but stable ships ${stable.version} - ` +
+                        `an unstable copy has to be ahead of stable, or nobody is offered it`
+                    );
+                }
+            }
+
+            /*
+             * Tampermonkey follows these, not the catalogue, once a script is
+             * installed. A copy carrying the other folder's URLs updates itself
+             * across channels behind the user's back - and after a promotion
+             * deletes the unstable file, points at a 404 forever.
+             */
+            const folder = path.slice(0, path.indexOf('/'));
+            for (const key of ['updateURL', 'downloadURL']) {
+                const url = source.match(new RegExp(`@${key}\\s+(\\S+)`))?.[1];
+
+                if (url && !url.includes(`/${folder}/`)) {
+                    problems.push(`${path}: @${key} points outside ${folder}/ (${url})`);
+                }
             }
         }
     }
@@ -146,9 +201,9 @@ for (const path of userscripts) {
     }
 }
 
-for (const [id, entry] of catalogued) {
-    if (!seen.has(id)) {
-        problems.push(`${entry.path}: lists '${id}', but no userscript declares that id`);
+for (const [id, entry] of [...stableCatalogue, ...unstableCatalogue]) {
+    if (!seen[entry.path].has(id)) {
+        problems.push(`${entry.path}: lists '${id}', but no userscript in that folder declares it`);
     }
 }
 

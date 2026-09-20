@@ -22,6 +22,16 @@ Solo-maintained by the repo owner with AI agents as the primary collaborators. *
 
 Every completed repository change must be committed and pushed to GitHub **on `main`**; work is not finished while relevant changes exist only in a local worktree or an unmerged branch. Before ending a session, confirm with `git fetch` that the actual changed files are visible on `origin/main`, not just in a local branch's `git log` — a stale local clone that was never fetched can look identical to a branch that never made it to `main`, so check the remote, not just local history.
 
+**Every module change ships to Unstable first. Stable is promoted by hand, on the owner's word.** This is the release path for every userscript that is not the Manager, and it is not optional — see [ADR-0014](./docs/adr/0014-unstable-first-releases.md).
+
+- **Unstable is a folder, not a Git branch.** `modules-unstable/` and `modules-unstable/modules.json`, both on `main`. Nothing about branching changes; "push to `main` when it's done" still holds for unstable work.
+- **Working on a module means working in `modules-unstable/`.** If the module is not there yet, copy it in, bump its version, point its `@updateURL`/`@downloadURL` at `modules-unstable/`, and add its entry to `modules-unstable/modules.json` with the same `id` as the stable entry — the overlay replaces a stable entry with a matching `id`, so testers get the copy and everyone else keeps the shipped one.
+- **While a module is under test its copy in `modules/` is frozen.** Do not edit it, not even for a one-word fix. There is no merging at promotion time; promotion is a copy.
+- **One number line, no suffixes.** Stable at `1.9.3` → first unstable change is `1.9.4`, further rounds `1.9.5`, `1.9.6`, and promotion bumps once more to `1.9.7` for Stable. Stable skipping numbers is correct. The promotion bump is what pulls testers off the unstable file before it is deleted; skipping it strands them on a dead `@updateURL`. Pre-release suffixes (`-beta.1`) are still banned by [ADR-0003](./docs/adr/0003-static-catalogue-independent-versioning.md).
+- **Promote only when the owner says to promote**, in those words. The six steps are in [ADR-0014](./docs/adr/0014-unstable-first-releases.md#promoting); do them in one commit.
+- **The Manager is exempt** and goes straight to Stable, because it is what delivers the channels — a Manager that cannot boot cannot be switched away from. Its protection is the test suite.
+- **One exception, narrow:** a fix for something already broken for stable users (a module throwing on load, dead against a Lectio change, losing data) may go straight to Stable. Name the break in the commit message. "Would be nice sooner" is not an exception, and a feature riding along with a fix is not one either.
+
 **A version bump is never one edit — run `node scripts/check-versions.mjs` before you call a change finished.** Touching a module's behaviour without moving *every* number that describes it produces one silent symptom: the Manager keeps offering the old version, so nobody is ever told an update exists. The change looks delivered and is invisible. This has now cost several rounds of "why am I not seeing the update", which is why it is a script and not a habit. Three places must agree, and a fourth rule has no file of its own:
 
 | What | Where | Why it matters |
@@ -55,10 +65,10 @@ Tampermonkey itself (not a custom browser extension) is the deliberately chosen 
 
 ## Adding a new module
 
-A new module is just:
+A new module starts in Unstable like every other module change ([ADR-0014](./docs/adr/0014-unstable-first-releases.md)), so read `modules-unstable/` for `modules/` and `modules-unstable/modules.json` for `catalogue/modules.json` below until the owner promotes it. A new module is just:
 
-1. A new `modules/<Name>.user.js` file with a standard header (`@name`, `@version`, `@match https://www.lectio.dk/lectio/*` or a narrower path, `@updateURL`/`@downloadURL` pointing at its own raw GitHub path) that, on load and on receiving the `lectio-manager:discover` event, dispatches `lectio-module:register` with `{ id, name, version, settingsSchema, currentValues }` (an empty `settingsSchema: []` is fine if the module has no configurable options yet).
-2. A matching entry in `catalogue/modules.json` (`id`, `name`, `description`, `category`, `audience`, `status`, `version`, `installUrl` under `raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/`, `supportUrl`).
+1. A new `modules-unstable/<Name>.user.js` file with a standard header (`@name`, `@version`, `@match https://www.lectio.dk/lectio/*` or a narrower path, `@updateURL`/`@downloadURL` pointing at its own raw GitHub path — the one in the folder it actually lives in) that, on load and on receiving the `lectio-manager:discover` event, dispatches `lectio-module:register` with `{ id, name, version, settingsSchema, currentValues }` (an empty `settingsSchema: []` is fine if the module has no configurable options yet).
+2. A matching entry in `modules-unstable/modules.json` (`id`, `name`, `description`, `category`, `audience`, `status`, `version`, `installUrl` under `raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/`, `supportUrl`), moving to `catalogue/modules.json` on promotion.
 3. Any color the module's own UI hard-codes (backgrounds, text, borders, accents) written as `var(--lectio-theme-name, <the module's own hard-coded value>)` per [ADR-0006](./docs/adr/0006-css-custom-property-theming-seam.md) — required, not optional, for new modules.
 
 Nothing else is required, and the Manager's own code never needs to change for a new module. A module may additionally register an optional persistent control through the documented dock event contract; its feature logic remains in the module and must not throw when the Manager is absent.

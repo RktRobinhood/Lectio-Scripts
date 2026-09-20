@@ -5,7 +5,7 @@ A repository that stores, versions, and distributes independent Tampermonkey use
 ## Language
 
 **Module**:
-An independent Tampermonkey userscript, in `modules/`, that adds exactly one Lectio feature. Its feature logic is fully self-contained — no shared runtime code with any other module — and runs safely whether installed alone or alongside others. Optional Manager-dock presentation is available only when the Manager is installed.
+An independent Tampermonkey userscript, in `modules/` once it is on the stable Channel and in `modules-unstable/` while it is being worked on, that adds exactly one Lectio feature. Its feature logic is fully self-contained — no shared runtime code with any other module — and runs safely whether installed alone or alongside others. Optional Manager-dock presentation is available only when the Manager is installed.
 _Avoid_: script (too generic), extension, plugin.
 
 **Manager**:
@@ -15,6 +15,14 @@ _Avoid_: dashboard (reserved for Tampermonkey's own dashboard), app.
 **Catalogue**:
 The static `catalogue/modules.json` file listing every module that exists and where to install it from. Fetched by the Manager over HTTPS and read as text data only.
 _Avoid_: registry (implies a dynamic/server-backed service, which this isn't), index.
+
+**Channel**:
+Which set of module versions a user's Manager reads: Stable (`catalogue/modules.json`) or Unstable (`modules-unstable/modules.json`, overlaid on top of it). Chosen by the user in the Manager's own settings and nowhere else. Not a Git branch — both live on `main`.
+_Avoid_: branch, track, ring.
+
+**Promotion**:
+Moving a module from the Unstable Channel to the Stable one: the owner asks for it by name, and the module's file and catalogue entry move from `modules-unstable/` to `modules/` and `catalogue/modules.json` with one more patch bump. The only way anything reaches Stable users, per ADR-0014.
+_Avoid_: release, merge, ship (all ambiguous about which Channel is meant).
 
 **Discovery**:
 The handshake by which the Manager learns which modules are currently running: the Manager broadcasts a request, and each installed module answers for itself, on its own page load.
