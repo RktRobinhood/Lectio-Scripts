@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <title>Lectio module settings fixture</title>
     <script>
-        localStorage.setItem('lectioUnreadMessages.cache.v3', JSON.stringify({
+        localStorage.setItem('lectioUnreadMessages.cache.v4.223', JSON.stringify({
             checkedAt: Date.now(),
             unreadCount: 3,
             messages: []
@@ -33,7 +33,33 @@
         </section>
     </main>
     <script src="../../modules/Lectio-Theming.user.js"></script>
-    <script src="../../modules/Lectio-Unread-Message-Notifications.user.js"></script>
+    <script>
+        /*
+         * From 0.6.0 this module reads its school id off location.pathname and
+         * stops on any page that has none - which a file:// fixture never has.
+         * Loading it through a plain <script src> would therefore exercise the
+         * bail-out path rather than the badge. Run its source with a stand-in
+         * location so it sees an ordinary Lectio page. Synchronous on purpose:
+         * a <script src> tag is what this replaces, and the driver below runs
+         * on load and expects the module to have registered by then.
+         */
+        (function loadUnreadMessageNotifications() {
+            const request = new XMLHttpRequest();
+            request.open("GET", "../../modules/Lectio-Unread-Message-Notifications.user.js", false);
+            request.send();
+
+            // Deliberately not forside.aspx: that path sends the module down its
+            // read-the-count-off-the-live-DOM branch, and this fixture is a
+            // settings page, not a front page.
+            const lectioLocation = {
+                origin: "https://www.lectio.dk",
+                pathname: "/lectio/223/SkemaNy.aspx",
+                href: "https://www.lectio.dk/lectio/223/SkemaNy.aspx"
+            };
+
+            new Function("location", request.responseText)(lectioLocation);
+        })();
+    </script>
     <script>
                 function assert(condition, message) {
                     if (!condition) throw new Error(message);

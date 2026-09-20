@@ -69,20 +69,20 @@
     {
       "id": "message-notifications",
       "name": "Unread Message Notifications",
-      "description": "Shows an unread-message badge beside Beskeder / Messages. Currently limited to Lectio school 223.",
+      "description": "Shows an unread-message badge beside Beskeder / Messages. Works at any Lectio school, reading the school id from the page URL.",
       "category": "Messages",
       "audience": [
         "student",
         "teacher"
       ],
       "status": "stable",
-      "version": "0.5.0",
+      "version": "0.6.1",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Unread-Message-Notifications.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
       "i18n": {
         "da": {
           "name": "Ulæste beskeder",
-          "description": "Viser et mærke med ulæste beskeder ved siden af Beskeder. Virker indtil videre kun på Lectio-skole 223."
+          "description": "Viser et mærke med ulæste beskeder ved siden af Beskeder. Virker på alle Lectio-skoler og læser skolens id fra sidens adresse."
         }
       }
     },

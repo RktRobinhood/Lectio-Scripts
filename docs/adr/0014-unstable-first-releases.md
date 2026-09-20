@@ -31,7 +31,7 @@ Promotion is one commit that does all of this:
 2. Rewrite `@updateURL` and `@downloadURL` in the copy to the `modules/` raw path. Forgetting this is what points a Stable install at a file that is about to be deleted.
 3. Bump the patch in the copy: `@version` and the registered version together.
 4. Update the module's entry in `catalogue/modules.json` — `version`, and anything else the work changed, `description` included — or add the entry if the module is new to Stable.
-5. Delete `modules-unstable/<Name>.user.js` and its entry from `modules-unstable/modules.json`.
+5. Delete `modules-unstable/<Name>.user.js`, its entry from `modules-unstable/modules.json`, and its section from `modules-unstable/README.md` — that README says what is on the channel now, and a promoted module is not.
 6. Run `node scripts/check-versions.mjs` and the browser suite, then push.
 
 ### The one exception

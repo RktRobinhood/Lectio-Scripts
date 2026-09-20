@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         Lectio - Unread Message Notifications
-// @namespace    https://www.lectio.dk/lectio/223/
-// @version      0.5.0
-// @description  Shows one unread-message badge using Lectio's own unread count. Includes direct and group-addressed messages.
-// @match        https://www.lectio.dk/lectio/223/*
+// @namespace    https://www.lectio.dk/
+// @version      0.6.1
+// @description  Shows one unread-message badge using Lectio's own unread count, at any Lectio school. Includes direct and group-addressed messages.
+// @match        https://www.lectio.dk/lectio/*
 // @grant        none
 // @run-at       document-idle
 // @updateURL    https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Unread-Message-Notifications.user.js
@@ -13,6 +13,25 @@
 (() => {
     'use strict';
 
+    /*
+     * The school this page belongs to, read off the URL rather than
+     * hardcoded - a browser can be signed in to more than one Lectio
+     * installation, and every path and cached count below is only
+     * meaningful within one of them. Empty on any Lectio page that
+     * carries no school id at all; the guard below stops there.
+     *
+     * Declared first because the config section builds its URLs and
+     * its cache key out of it.
+     */
+    const SCHOOL =
+        (location.pathname.match(/^\/lectio\/(\d+)\//) || [])[1] || '';
+
+    /*
+     * Settings are deliberately NOT scoped per school: how often to
+     * check and how big the bubble is are preferences about the
+     * person, not about the installation. The cached count is, and
+     * is scoped below.
+     */
     const SETTINGS_KEY = 'lectioUnreadMessages.settings.v1';
     const DEFAULT_SETTINGS = {
         pollMinutes: 10,
@@ -33,7 +52,7 @@
     (function registerWithLectioManager() {
         const MODULE_ID = 'message-notifications';
         const MODULE_NAME = 'Lectio - Unread Message Notifications';
-        const MODULE_VERSION = '0.5.0';
+        const MODULE_VERSION = '0.6.1';
 
         function announce() {
             window.dispatchEvent(new CustomEvent('lectio-module:register', {
@@ -201,8 +220,6 @@
     // CONFIG
     // ============================================================
 
-    const SCHOOL = '223';
-
     const HOME_URL =
         `/lectio/${SCHOOL}/forside.aspx`;
 
@@ -212,9 +229,15 @@
     /*
      * New cache version deliberately avoids the bad "100 unread"
      * state produced by v0.2.2.
+     *
+     * v4 additionally carries the school id: an unread count read at
+     * one school says nothing about another, and the unsuffixed v3 key
+     * would have let two installations overwrite each other's badge in
+     * the same browser. Old v3 entries are simply left behind - this
+     * cache expires after ten minutes anyway.
      */
     const CACHE_KEY =
-        'lectioUnreadMessages.cache.v3';
+        `lectioUnreadMessages.cache.v4.${SCHOOL}`;
 
     const RETURN_REFRESH_AGE =
         10 * 60 * 1000;
@@ -235,6 +258,18 @@
 
     const MESSAGE_LINK_SELECTOR =
         `a[href*="/lectio/${SCHOOL}/beskeder2.aspx"]`;
+
+    /*
+     * Every Lectio page that means anything to this module sits under
+     * /lectio/<school>/. Anything else - the bare /lectio/ entry point
+     * among them - has no front page to read a count off, so the module
+     * stops here rather than fetching a path it just built out of an
+     * empty string. The Manager handshake above has already run, so the
+     * module still reports itself as installed on such a page.
+     */
+    if (!SCHOOL) {
+        return;
+    }
 
     let state =
         loadCache();
