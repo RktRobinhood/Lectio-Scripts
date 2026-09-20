@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.21.1
+// @version      1.21.2
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules, including their settings and shared dock controls.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
@@ -260,7 +260,7 @@
     // Kept in step with the @version header by scripts/check-versions.mjs. The
     // header is metadata Tampermonkey reads; this is the only copy the running
     // script can see, and it is what the self-update notice compares.
-    const MANAGER_VERSION = '1.21.1';
+    const MANAGER_VERSION = '1.21.2';
 
     const STABLE_CATALOGUE_URL =
         'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/catalogue/modules.json';
@@ -1706,23 +1706,67 @@
         dockElements.root.dataset.orientation = isVerticalDock() ? 'vertical' : 'horizontal';
         dockElements.root.classList.toggle('is-auto-hide', dockPreferences.autoHide);
 
-        /*
-         * Both fills are written as ready-made percentages rather than as raw
-         * numbers, so the stylesheet can drop them straight into color-mix()
-         * and keep its own values as the fallback. The shell's second stop is
-         * the weaker end of its gradient, and a tile lifts by a fixed amount
-         * under the pointer, which is what keeps an icon readable while it is
-         * also the thing being scaled.
-         */
-        const shellOpacity = clampDockOpacity(dockPreferences.shellOpacity, DOCK_SHELL_OPACITY_DEFAULT);
-        const itemOpacity = clampDockOpacity(dockPreferences.itemOpacity, DOCK_ITEM_OPACITY_DEFAULT);
-        dockElements.root.style.setProperty('--lectio-dock-shell-fill', `${shellOpacity}%`);
-        dockElements.root.style.setProperty('--lectio-dock-shell-fill-fade', `${Math.round(shellOpacity * 0.45)}%`);
-        dockElements.root.style.setProperty('--lectio-dock-item-fill', `${itemOpacity}%`);
-        dockElements.root.style.setProperty('--lectio-dock-item-fill-hover', `${Math.min(100, itemOpacity + 20)}%`);
+        applyDockGlass(
+            clampDockOpacity(dockPreferences.shellOpacity, DOCK_SHELL_OPACITY_DEFAULT),
+            clampDockOpacity(dockPreferences.itemOpacity, DOCK_ITEM_OPACITY_DEFAULT)
+        );
         hideDockTooltip();
         syncDockPreferenceControls();
         updateDockFit();
+    }
+
+    /*
+     * Glass is not just a fill. A panel at zero fill still showed up, because
+     * the blur, the specular inset and the drop shadow were fixed: the page
+     * behind it was visibly smeared inside a rectangle with a bright top edge
+     * and a shadow under it, which is a panel however transparent its fill is.
+     * So everything that paints *inside* the shape scales with the slider and
+     * reaches nothing at 0 - the blur, the saturation boost, the inset
+     * highlight, the hairline and both drop shadows. The border is deliberately
+     * left alone: at 0 an outline is all that says where the dock is, and it
+     * does not obscure anything behind it.
+     *
+     * The values are the ones the stylesheet already used, kept there as its
+     * var() fallbacks and reproduced here as the full-strength end of each
+     * scale, so 100% is exactly the dock as it was drawn before.
+     */
+    function applyDockGlass(shellOpacity, itemOpacity) {
+        const alpha = (full, factor) => (full * factor).toFixed(3);
+        const backdrop = (blur, saturate, factor) => (factor === 0
+            ? 'none'
+            : `blur(${(blur * factor).toFixed(1)}px) saturate(${Math.round(100 + ((saturate - 100) * factor))}%)`);
+
+        const shell = shellOpacity / 100;
+        const item = itemOpacity / 100;
+
+        const properties = {
+            '--lectio-dock-shell-fill': `${shellOpacity}%`,
+            '--lectio-dock-shell-fill-fade': `${Math.round(shellOpacity * 0.45)}%`,
+            // No blur to lean on, so this branch needs a denser fill to say the
+            // same thing - but it still has to disappear at 0 like the rest.
+            '--lectio-dock-shell-fill-solid': `${Math.min(100, Math.round(shellOpacity * 1.6))}%`,
+            '--lectio-dock-shell-backdrop': backdrop(24, 190, shell),
+            '--lectio-dock-shell-sheen': alpha(0.45, shell),
+            '--lectio-dock-shell-hairline': alpha(0.08, shell),
+            '--lectio-dock-shell-shadow': alpha(0.16, shell),
+            '--lectio-dock-shell-shadow-soft': alpha(0.08, shell),
+
+            '--lectio-dock-item-fill': `${itemOpacity}%`,
+            // A tile lifts by a fixed amount under the pointer, which is what
+            // keeps an icon readable while it is also the thing being scaled -
+            // except at 0, where a plate appearing under the pointer would be
+            // the one thing the setting asked not to see. The magnification
+            // says which tile it is either way.
+            '--lectio-dock-item-fill-hover': `${itemOpacity === 0 ? 0 : Math.min(100, itemOpacity + 20)}%`,
+            '--lectio-dock-item-backdrop': backdrop(12, 160, item),
+            '--lectio-dock-item-sheen': alpha(0.5, item),
+            '--lectio-dock-item-sheen-lit': alpha(0.7, item),
+            '--lectio-dock-item-shadow': alpha(0.12, item)
+        };
+
+        for (const [property, value] of Object.entries(properties)) {
+            dockElements.root.style.setProperty(property, value);
+        }
     }
 
     // "Start" and "end" mean different things on a column than on a row, so the
@@ -5166,23 +5210,26 @@
                         color-mix(in srgb, var(--lectio-theme-surface, #ffffff) var(--lectio-dock-shell-fill-fade, 9%), transparent)
                     );
                 box-shadow:
-                    0 12px 32px rgba(0, 0, 0, .16),
-                    0 2px 8px rgba(0, 0, 0, .08),
-                    inset 0 1px 0 rgba(255, 255, 255, .45),
-                    inset 0 0 0 1px rgba(255, 255, 255, .08);
+                    0 12px 32px rgba(0, 0, 0, var(--lectio-dock-shell-shadow, .16)),
+                    0 2px 8px rgba(0, 0, 0, var(--lectio-dock-shell-shadow-soft, .08)),
+                    inset 0 1px 0 rgba(255, 255, 255, var(--lectio-dock-shell-sheen, .45)),
+                    inset 0 0 0 1px rgba(255, 255, 255, var(--lectio-dock-shell-hairline, .08));
                 /* Most of the legibility comes from the blur and the saturation
                    boost, not from the fill - which is why the fill can be this
-                   thin and the photo behind it still reads as the photo. */
-                -webkit-backdrop-filter: blur(24px) saturate(190%);
-                backdrop-filter: blur(24px) saturate(190%);
+                   thin and the photo behind it still reads as the photo. Both
+                   follow the slider with everything else that paints inside the
+                   shape, so at 0 the panel really is only its outline. */
+                -webkit-backdrop-filter: var(--lectio-dock-shell-backdrop, blur(24px) saturate(190%));
+                backdrop-filter: var(--lectio-dock-shell-backdrop, blur(24px) saturate(190%));
                 transition: transform 150ms ease, opacity 150ms ease;
             }
 
             /* Without a backdrop-filter the fill alone is far too faint to sit
-               on a photo, so those browsers get an opaque shell instead. */
+               on a photo, so those browsers get a denser one - but it is still
+               the same slider, and it still reaches nothing at 0. */
             @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
                 .lectio-manager-dock-shell {
-                    background: color-mix(in srgb, var(--lectio-theme-surface, #ffffff) 90%, transparent);
+                    background: color-mix(in srgb, var(--lectio-theme-surface, #ffffff) var(--lectio-dock-shell-fill-solid, 90%), transparent);
                 }
             }
 
@@ -5261,11 +5308,11 @@
                 padding: 0;
                 cursor: pointer;
                 touch-action: none;
-                -webkit-backdrop-filter: blur(12px) saturate(160%);
-                backdrop-filter: blur(12px) saturate(160%);
+                -webkit-backdrop-filter: var(--lectio-dock-item-backdrop, blur(12px) saturate(160%));
+                backdrop-filter: var(--lectio-dock-item-backdrop, blur(12px) saturate(160%));
                 box-shadow:
-                    0 2px 6px rgba(0, 0, 0, .12),
-                    inset 0 1px 0 rgba(255, 255, 255, .5);
+                    0 2px 6px rgba(0, 0, 0, var(--lectio-dock-item-shadow, .12)),
+                    inset 0 1px 0 rgba(255, 255, 255, var(--lectio-dock-item-sheen, .5));
                 transform-origin: var(--lectio-dock-grow, center center);
                 transition:
                     transform 200ms cubic-bezier(.22, .8, .3, 1.1),
@@ -5294,8 +5341,9 @@
                because focus moves deliberately rather than with the pointer. */
             .lectio-manager-dock-item:focus-visible {
                 box-shadow:
-                    0 2px 6px rgba(0, 0, 0, .12),
-                    inset 0 1px 0 rgba(255, 255, 255, .7),
+                    0 2px 6px rgba(0, 0, 0, var(--lectio-dock-item-shadow, .12)),
+                    inset 0 1px 0 rgba(255, 255, 255, var(--lectio-dock-item-sheen-lit, .7)),
+                    /* The ring is where the keyboard is; it never fades. */
                     0 0 0 2px color-mix(in srgb, var(--lectio-theme-accent, #0f6f6f) 55%, transparent);
             }
 

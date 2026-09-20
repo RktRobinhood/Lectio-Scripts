@@ -299,13 +299,55 @@
                 assert(JSON.parse(storage.get('lectioManager.dock.v1')).shellOpacity === 70,
                     'A settled drag was not persisted');
 
-                itemOpacity.value = '0';
-                itemOpacity.dispatchEvent(new Event('input', { bubbles: true }));
-                itemOpacity.dispatchEvent(new Event('change', { bubbles: true }));
-                assert(fill('--lectio-dock-item-fill') === '0%' && fill('--lectio-dock-item-fill-hover') === '20%',
-                    'Clearing the icon background did not reach the tiles');
+                // Zero has to mean zero. A fill of 0 with a fixed blur, inset
+                // highlight and drop shadow still drew a panel: the page behind
+                // it was smeared inside a rectangle with a bright top edge. Only
+                // the border survives 0, because at 0 an outline is all that
+                // says where the dock is and it hides nothing behind it.
+                const shellBorder = getComputedStyle(document.querySelector('.lectio-manager-dock-shell')).borderTopColor;
+                const tileBorder = getComputedStyle(steady).borderTopColor;
+                for (const slider of [shellOpacity, itemOpacity]) {
+                    slider.value = '0';
+                    slider.dispatchEvent(new Event('input', { bubbles: true }));
+                    slider.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+
+                for (const property of [
+                    '--lectio-dock-shell-fill', '--lectio-dock-shell-fill-fade', '--lectio-dock-shell-fill-solid',
+                    '--lectio-dock-item-fill', '--lectio-dock-item-fill-hover'
+                ]) {
+                    assert(fill(property) === '0%', `${property} was still painting at zero: ${fill(property)}`);
+                }
+                for (const property of [
+                    '--lectio-dock-shell-sheen', '--lectio-dock-shell-hairline',
+                    '--lectio-dock-shell-shadow', '--lectio-dock-shell-shadow-soft',
+                    '--lectio-dock-item-sheen', '--lectio-dock-item-sheen-lit', '--lectio-dock-item-shadow'
+                ]) {
+                    assert(Number(fill(property)) === 0, `${property} was still painting at zero: ${fill(property)}`);
+                }
+                assert(fill('--lectio-dock-shell-backdrop') === 'none' && fill('--lectio-dock-item-backdrop') === 'none',
+                    'The glass still blurred the page behind it at zero');
+                assert(getComputedStyle(document.querySelector('.lectio-manager-dock-shell')).borderTopColor === shellBorder &&
+                    getComputedStyle(steady).borderTopColor === tileBorder,
+                    'Clearing the fills also took the edge line with them');
                 assert(getComputedStyle(litIcon).opacity === '1' && getComputedStyle(litIcon).color === litColour,
                     'Fading the plate behind an icon also faded the icon');
+
+                // And 100 is the glass exactly as the stylesheet drew it before
+                // any of this was adjustable.
+                for (const slider of [shellOpacity, itemOpacity]) {
+                    slider.value = '100';
+                    slider.dispatchEvent(new Event('input', { bubbles: true }));
+                    slider.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                assert(fill('--lectio-dock-shell-backdrop') === 'blur(24.0px) saturate(190%)' &&
+                    fill('--lectio-dock-item-backdrop') === 'blur(12.0px) saturate(160%)',
+                    `Full strength did not restore the original glass: ${fill('--lectio-dock-shell-backdrop')}`);
+                assert(Number(fill('--lectio-dock-shell-sheen')) === 0.45 &&
+                    Number(fill('--lectio-dock-shell-shadow')) === 0.16 &&
+                    Number(fill('--lectio-dock-item-sheen')) === 0.5 &&
+                    Number(fill('--lectio-dock-item-shadow')) === 0.12,
+                    'Full strength did not restore the original shadows');
 
                 window.dispatchEvent(new CustomEvent('lectio-manager:dock:remove', {
                     detail: { moduleId: 'test-module' }
