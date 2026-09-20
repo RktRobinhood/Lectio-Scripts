@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Change Radar
 // @namespace    https://github.com/RktRobinhood/Lectio-Scripts
-// @version      0.5.0
+// @version      0.6.0
 // @description  Watches Lectio for the changes you choose to track - timetable, assignments, absence, documents - and keeps a compact recent-change HUD.
 // @author       RktRobinhood
 // @match        https://www.lectio.dk/lectio/*
@@ -20,7 +20,7 @@
     id: 'change-radar',
     aliases: ['schedule-change-radar', 'lectio-change-radar', 'change-log'],
     name: 'Lectio Change Radar',
-    version: '0.5.0',
+    version: '0.6.0',
     channel: 'unstable'
   });
 
@@ -62,6 +62,7 @@
 
     trackAssignments: true,
     trackNewAssignments: true,
+    trackUpcomingAssignments: true,
     trackAssignmentDeadlines: true,
     trackAssignmentStatus: false,
 
@@ -140,6 +141,7 @@
 
     makeToggleSetting('trackAssignments', 'Watch assignments', 'Check your assignment list as well as your timetable. Costs one extra request per check, at most twice an hour.', true, 'Assignments'),
     makeToggleSetting('trackNewAssignments', 'New assignments', 'Report an assignment appearing on your list.', true, 'Assignments'),
+    makeToggleSetting('trackUpcomingAssignments', 'Due soon', 'Raise an assignment on the radar once its deadline comes inside the window you set under Weeks to watch, so a deadline announces itself before it is on top of you rather than only when it moves.', true, 'Assignments'),
     makeToggleSetting('trackAssignmentDeadlines', 'Deadline changes', 'Report an assignment deadline moving.', true, 'Assignments'),
     makeToggleSetting('trackAssignmentStatus', 'Status and grades', 'Report an assignment changing status, or a grade being published for one.', false, 'Assignments'),
 
@@ -559,8 +561,17 @@
       // Its first read is a baseline, not a pile of news.
       if (!before || !after) continue;
 
+      // Both snapshots carry the horizon they were built with, so "how far ahead
+      // is it looking" means the same thing for an assignment deadline as it
+      // does for the timetable, and follows the same Weeks-to-watch setting.
+      const window = {
+        previousEnd: previous?.rangeEnd || '',
+        currentEnd: current?.rangeEnd || '',
+        today: toIsoDate(new Date())
+      };
+
       changes.push(
-        ...getSourceReader(source.key).compare(before, after, noticedAt).slice(0, MAX_CHANGES_PER_SOURCE)
+        ...getSourceReader(source.key).compare(before, after, noticedAt, window).slice(0, MAX_CHANGES_PER_SOURCE)
       );
     }
 
@@ -776,6 +787,7 @@
         dueDate: due.dateIso,
         dueTime: due.time,
         status: findAssignmentStatus(row.cells),
+        context: findAssignmentContext(row.cells, row.title),
         url: row.url
       };
     }
@@ -808,6 +820,21 @@
     }
 
     return parts.join(' · ');
+  }
+
+  // Whatever else the row carries once its title, deadline, status and grade are
+  // accounted for - the class and the expected hours, on the lists seen so far.
+  // Taking the remainder rather than named columns means the radar shows what
+  // the assignment page shows without claiming to know its layout.
+  function findAssignmentContext(cells, title) {
+    const parts = cells.filter((cell) => {
+      if (!cell || cell === title) return false;
+      if (/\b\d{1,2}\/\d{1,2}-\d{4}\b/.test(cell)) return false;
+      if (ASSIGNMENT_STATUS_PATTERN.test(cell)) return false;
+      return !GRADE_TOKENS.includes(cell);
+    });
+
+    return truncate(parts.join(' · '), 60);
   }
 
   function parseAbsence(doc) {
@@ -876,7 +903,7 @@
     return records;
   }
 
-  function compareAssignments(before, after, noticedAt) {
+  function compareAssignments(before, after, noticedAt, window) {
     const settings = runtime.settings || DEFAULT_SETTINGS;
     const changes = [];
 
@@ -890,7 +917,7 @@
           changes.push(makeSourceEntry({
             kind: 'assignment',
             title: next.title,
-            detail: next.dueDate ? `New assignment, due ${formatDeadline(next)}` : 'New assignment',
+            detail: withContext(next.dueDate ? `New assignment, due ${formatDeadline(next)}` : 'New assignment', next),
             noticedAt,
             record: next
           }));
@@ -898,11 +925,29 @@
         continue;
       }
 
-      if (settings.trackAssignmentDeadlines && (previous.dueDate !== next.dueDate || previous.dueTime !== next.dueTime)) {
+      const deadlineMoved = previous.dueDate !== next.dueDate || previous.dueTime !== next.dueTime;
+
+      if (settings.trackAssignmentDeadlines && deadlineMoved) {
         changes.push(makeSourceEntry({
           kind: 'deadline',
           title: next.title,
-          detail: `Deadline: ${formatDeadline(previous)} -> ${formatDeadline(next)}`,
+          detail: withContext(`Deadline: ${formatDeadline(previous)} -> ${formatDeadline(next)}`, next),
+          noticedAt,
+          record: next
+        }));
+      }
+
+      // The deadline crossing into the watched window is its own news, and it
+      // arrives without the assignment itself changing at all - usually just the
+      // window rolling forward a week. A moved deadline already names the new
+      // date, so it is not also announced as due soon.
+      if (settings.trackUpcomingAssignments && !deadlineMoved &&
+          isDueSoon(next, window.currentEnd, window.today) &&
+          !isDueSoon(previous, window.previousEnd, window.today)) {
+        changes.push(makeSourceEntry({
+          kind: 'due',
+          title: next.title,
+          detail: withContext(`Due ${formatDeadline(next)}`, next),
           noticedAt,
           record: next
         }));
@@ -1006,6 +1051,15 @@
       detail,
       noticedAt
     });
+  }
+
+  function isDueSoon(record, rangeEnd, today) {
+    if (!record?.dueDate || !rangeEnd) return false;
+    return record.dueDate >= today && record.dueDate <= rangeEnd;
+  }
+
+  function withContext(detail, record) {
+    return record?.context ? `${detail} · ${record.context}` : detail;
   }
 
   function formatDeadline(record) {
@@ -1943,7 +1997,7 @@
         urgentUnseen: urgentItems.length,
         heading: 'Urgent change',
         subheading: `${urgentItems.length} unseen change${urgentItems.length === 1 ? '' : 's'} coming up soon`,
-        tooltip: `Urgent: ${urgentItems.length} unseen upcoming timetable change${urgentItems.length === 1 ? '' : 's'}.`,
+        tooltip: `Urgent: ${urgentItems.length} unseen upcoming Lectio change${urgentItems.length === 1 ? '' : 's'}.`,
         ariaLabel: `Lectio Change Radar. Red alert. ${urgentItems.length} urgent unseen change${urgentItems.length === 1 ? '' : 's'}.`
       };
     }
@@ -1961,7 +2015,7 @@
         urgentUnseen: 0,
         heading: unseenItems.length ? 'Changes to review' : 'Recent change',
         subheading,
-        tooltip: unseenItems.length ? `${unseenItems.length} unseen timetable change${unseenItems.length === 1 ? '' : 's'}.` : 'Recent timetable changes have been reviewed.',
+        tooltip: unseenItems.length ? `${unseenItems.length} unseen Lectio change${unseenItems.length === 1 ? '' : 's'}.` : 'Recent Lectio changes have been reviewed.',
         ariaLabel: `Lectio Change Radar. Amber. ${subheading}.`
       };
     }
@@ -2323,6 +2377,7 @@
       note: 'Note',
       assignment: 'Assignment',
       deadline: 'Deadline',
+      due: 'Due soon',
       status: 'Status',
       absence: 'Absence',
       document: 'Document',

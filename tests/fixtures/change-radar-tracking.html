@@ -35,11 +35,34 @@
             '<tr><td><a href="/lectio/223/ElevAflevering.aspx?exerciseid=' + id + '&amp;elevid=1">' + title + '</a></td>' +
             '<td>3a DA</td><td>' + due + '</td><td>' + status + '</td></tr>';
 
+        const pad2 = (value) => String(value).padStart(2, '0');
+        const addDays = (date, days) => {
+            const copy = new Date(date);
+            copy.setDate(copy.getDate() + days);
+            return copy;
+        };
+        const startOfIsoWeek = (date) => {
+            const copy = new Date(date);
+            copy.setDate(copy.getDate() - ((copy.getDay() + 6) % 7));
+            copy.setHours(0, 0, 0, 0);
+            return copy;
+        };
+        const lectioDate = (date) => date.getDate() + '/' + (date.getMonth() + 1) + '-' + date.getFullYear();
+
+        window.isoDate = (date) => date.getFullYear() + '-' + pad2(date.getMonth() + 1) + '-' + pad2(date.getDate());
+
+        // 17 days past the start of this ISO week: always beyond a one-week
+        // lookahead and always inside a three-week one, whichever day the suite
+        // runs on. Its deadline never moves, so the only thing that can put it
+        // on the radar is the watched window widening to reach it.
+        window.horizonProbe = addDays(startOfIsoWeek(new Date()), 17);
+
         const assignments = () => {
+            const probe = assignmentRow(103, 'Rapport', lectioDate(window.horizonProbe) + ' 23:59', 'Ikke afleveret');
             const rows = round === 0
-                ? assignmentRow(101, 'Essay 1', '01/10-2030 23:59', 'Ikke afleveret')
+                ? assignmentRow(101, 'Essay 1', '01/10-2030 23:59', 'Ikke afleveret') + probe
                 : assignmentRow(101, 'Essay 1', '05/10-2030 23:59', 'Ikke afleveret') +
-                  assignmentRow(102, 'Essay 2', '12/10-2030 23:59', 'Ikke afleveret');
+                  assignmentRow(102, 'Essay 2', '12/10-2030 23:59', 'Ikke afleveret') + probe;
 
             return '<!doctype html><html><body><table>' + rows + '</table></body></html>';
         };
@@ -131,8 +154,8 @@
                 'assignments are tracked by default, so the baseline should carry them'
             );
             assert(
-                Object.keys(baseline?.sources?.assignments?.records || {}).length === 1,
-                'the baseline assignment list should hold one assignment'
+                Object.keys(baseline?.sources?.assignments?.records || {}).length === 2,
+                'the baseline assignment list should hold both assignments'
             );
             assert(
                 !baseline?.sources?.absence && !baseline?.sources?.documents,
@@ -200,6 +223,30 @@
             assert(
                 newAssignment?.eventDate === '2030-10-12',
                 'an assignment should carry its deadline as the event date so the urgency window can use it, got: ' + newAssignment?.eventDate
+            );
+
+            // --- Round 4: the lookahead widens and a deadline that was beyond
+            // it arrives on the radar, without the assignment itself changing.
+            assert(
+                !kinds().includes('due'),
+                'a deadline outside the watched window should not be announced yet'
+            );
+
+            setTrackers({ weeksAhead: 2 });
+            await waitFor(() => kinds().includes('due'), 'the deadline coming inside the window');
+
+            const dueEntry = readHistory().find((item) => item.kind === 'due');
+            assert(
+                dueEntry?.eventDate === window.isoDate(window.horizonProbe),
+                'a due-soon entry should carry its deadline, got: ' + dueEntry?.eventDate
+            );
+            assert(
+                /3a DA/.test(dueEntry?.detail || ''),
+                'a due-soon entry should carry what else the assignment page shows on the row, got: ' + dueEntry?.detail
+            );
+            assert(
+                readHistory().filter((item) => item.kind === 'due').length === 1,
+                'a deadline should announce itself once, not on every later check'
             );
 
             // --- Switching a source off must stop it being fetched at all.
