@@ -33,12 +33,14 @@
       ],
       "status": "unstable",
       "version": "1.2.1",
+      "changelog": "Chairs Up works again after you press Back. Its room lookups used to switch themselves off for the rest of that page, with nothing on screen to say so.",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Chairs-Up.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
       "i18n": {
         "da": {
           "name": "Stole Op",
-          "description": "Markerer en lektion, når den er dagens sidste aktive booking i det lokale."
+          "description": "Markerer en lektion, når den er dagens sidste aktive booking i det lokale.",
+          "changelog": "Stole Op virker nu igen, når du trykker Tilbage. Opslagene af lokaler slog før sig selv fra resten af siden, uden at noget på skærmen sagde det."
         }
       }
     },
@@ -58,6 +60,7 @@
       ],
       "status": "unstable",
       "version": "0.7.1",
+      "changelog": "Leaving a page now stops the checks the radar still had running, instead of letting them finish against a page you have already left.",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Change-Radar.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
       "i18n": {

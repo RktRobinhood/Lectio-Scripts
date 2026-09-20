@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.24.0
+// @version      1.25.0
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules, including their settings and shared dock controls.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
@@ -116,6 +116,7 @@
             allInstalled: 'All available modules are installed.',
             noneMatch: 'No available modules match this filter.',
             updateAvailable: (version, installed) => `Update available: v${version} (installed v${installed})`,
+            whatsNew: 'What’s new:',
             channelTarget: (channel, version, installed) => `${channel} target: v${version} (installed v${installed})`,
             selectedTarget: 'Selected',
             lastRefreshed: (time) => `Last refreshed: ${time}`,
@@ -212,6 +213,7 @@
             allInstalled: 'Alle tilgængelige moduler er installeret.',
             noneMatch: 'Ingen tilgængelige moduler matcher dette filter.',
             updateAvailable: (version, installed) => `Opdatering tilgængelig: v${version} (installeret v${installed})`,
+            whatsNew: 'Nyt i denne version:',
             channelTarget: (channel, version, installed) => `${channel} mål: v${version} (installeret v${installed})`,
             selectedTarget: 'Valgt',
             lastRefreshed: (time) => `Sidst opdateret: ${time}`,
@@ -292,7 +294,7 @@
     // Kept in step with the @version header by scripts/check-versions.mjs. The
     // header is metadata Tampermonkey reads; this is the only copy the running
     // script can see, and it is what the self-update notice compares.
-    const MANAGER_VERSION = '1.24.0';
+    const MANAGER_VERSION = '1.25.0';
 
     const STABLE_CATALOGUE_URL =
         'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/catalogue/modules.json';
@@ -743,6 +745,7 @@
                 audience: Array.isArray(entry.audience) ? entry.audience.filter(isNonEmptyString) : [],
                 aliases: Array.isArray(entry.aliases) ? entry.aliases.filter(isNonEmptyString) : [],
                 status: isNonEmptyString(entry.status) ? entry.status : 'stable',
+                changelog: boundedChangelog(entry.changelog),
                 i18n: validateTranslations(entry.i18n),
                 version,
                 installUrl,
@@ -775,13 +778,14 @@
      * it simply means no notice.
      */
     /*
-     * Optional per-module translations from the Catalogue, kept to the two
-     * fields that are prose - a name and a description - and to languages this
-     * build knows. Everything else in an entry is either machinery or part of
-     * the closed vocabulary translated in CATALOGUE_VOCABULARY, so there is
-     * nothing to be gained by letting the Catalogue override it, and something
-     * to be lost: these strings are rendered as text, never as markup, and the
-     * narrower the surface the easier that is to keep true.
+     * Optional per-module translations from the Catalogue, kept to the three
+     * fields that are prose - a name, a description and a changelog - and to
+     * languages this build knows. Everything else in an entry is either
+     * machinery or part of the closed vocabulary translated in
+     * CATALOGUE_VOCABULARY, so there is nothing to be gained by letting the
+     * Catalogue override it, and something to be lost: these strings are
+     * rendered as text, never as markup, and the narrower the surface the
+     * easier that is to keep true.
      */
     function validateTranslations(value) {
         if (!value || typeof value !== 'object') return null;
@@ -793,14 +797,38 @@
             if (!entry || typeof entry !== 'object') continue;
 
             const fields = {};
-            for (const field of ['name', 'description']) {
-                if (isNonEmptyString(entry[field])) fields[field] = entry[field];
+            for (const field of ['name', 'description', 'changelog']) {
+                const text = field === 'changelog' ? boundedChangelog(entry[field]) : entry[field];
+                if (isNonEmptyString(text)) fields[field] = text;
             }
 
             if (Object.keys(fields).length) translations[code] = fields;
         }
 
         return Object.keys(translations).length ? translations : null;
+    }
+
+    /*
+     * A Catalogue entry may carry an optional `changelog`: a sentence or two,
+     * written for the person reading it, about what the offered version
+     * changes. It is prose the Manager knows nothing about (ADR-0001) and is
+     * rendered as text, never as markup.
+     *
+     * Bounded here, at the point untrusted text enters, rather than trusted to
+     * be short: the panel is a fixed-width surface and one entry with a
+     * runaway field must not be able to push everything else off it. Collapsing
+     * whitespace also removes the other way to make one line very tall.
+     */
+    const CHANGELOG_MAX_LENGTH = 240;
+
+    function boundedChangelog(value) {
+        if (!isNonEmptyString(value)) return null;
+
+        const text = value.replace(/\s+/g, ' ').trim();
+
+        return text.length > CHANGELOG_MAX_LENGTH
+            ? `${text.slice(0, CHANGELOG_MAX_LENGTH - 1).trimEnd()}…`
+            : text;
     }
 
     function validateManagerEntry(entry) {
@@ -3668,6 +3696,8 @@
         const actions = document.createElement('div');
         actions.className = 'lectio-manager-card-actions';
 
+        let changelogNote = null;
+
         if (record) {
             const comparison = module.outsideSelectedChannel
                 ? 0
@@ -3685,6 +3715,7 @@
             if (hasUpdate) {
                 installedLabel.textContent =
                     t('updateAvailable', module.version, record.version);
+                changelogNote = buildChangelogNote(module);
             } else if (hasDowngrade) {
                 installedLabel.textContent =
                     t('channelTarget', releaseChannel === 'stable' ? t('stable') : t('selectedTarget'), module.version, record.version);
@@ -3761,7 +3792,43 @@
         status.appendChild(actions);
         card.append(main, status);
 
+        if (changelogNote) card.appendChild(changelogNote);
+
         return card;
+    }
+
+    /*
+     * The line under the update row that says why to bother. Two version
+     * numbers tell a teacher nothing; this is the Catalogue's own sentence
+     * about what the offered version changes for them.
+     *
+     * The Manager supplies only the label. The prose is the entry's, and the
+     * Manager neither knows nor checks what it says (ADR-0001) - it renders
+     * it through textContent, so markup in a Catalogue fetched over HTTPS into
+     * an authenticated Lectio page arrives on screen as the characters it is
+     * made of and nothing runs.
+     *
+     * The field is optional, and absent is the ordinary case: no field, no
+     * element, and the card is exactly the card it was before this existed.
+     */
+    function buildChangelogNote(module) {
+        const text = localizedField(module, 'changelog');
+
+        if (!isNonEmptyString(text)) return null;
+
+        const note = document.createElement('div');
+        note.className = 'lectio-manager-card-changelog';
+
+        const label = document.createElement('span');
+        label.className = 'lectio-manager-card-changelog-label';
+        label.textContent = t('whatsNew');
+
+        const body = document.createElement('span');
+        body.textContent = text;
+
+        note.append(label, body);
+
+        return note;
     }
 
     function isExperimentalModule(module, record) {
@@ -5864,6 +5931,33 @@
                 font-style: italic;
                 color: var(--lectio-theme-muted, #5e6870);
                 white-space: nowrap;
+            }
+
+            /*
+             * Under the update row, not inside it: the row is a one-line flex
+             * that ends in the Update button, and prose belongs below it. The
+             * wrapping rules are the bound on a Catalogue nobody here reviews
+             * before it renders - the text is already length-capped when it is
+             * validated, and anywhere-wrapping keeps one unbroken run of
+             * characters from widening the panel instead of folding into it.
+             */
+            .lectio-manager-card-changelog {
+                margin-top: 7px;
+                padding: 6px 8px;
+                border-left: 2px solid var(--lectio-theme-accent-alt, #69a9a5);
+                border-radius: 0 6px 6px 0;
+                background: var(--lectio-theme-surface-alt, #f1f7f6);
+                color: var(--lectio-theme-text, #394a57);
+                font-size: 11px;
+                line-height: 1.45;
+                overflow-wrap: anywhere;
+                word-break: break-word;
+            }
+
+            .lectio-manager-card-changelog-label {
+                margin-right: 5px;
+                font-weight: 700;
+                color: var(--lectio-theme-accent, #0f6f6f);
             }
 
             .lectio-manager-card-actions {

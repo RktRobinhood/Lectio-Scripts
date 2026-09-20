@@ -172,6 +172,16 @@ test('every published Manager can still read the current catalogue', async (t) =
     const ids = new Set([...stable.modules, ...unstable.modules].map((m) => m.id));
     const expected = ids.size;
 
+    // The claim being tested is that an added key is ignored rather than fatal,
+    // so the catalogue these Managers read has to actually contain one they
+    // have never heard of. `changelog` (#32) is that key today; if the last
+    // entry carrying one is ever edited away, this run quietly stops proving
+    // anything and should say so instead.
+    assert.ok(
+        [...stable.modules, ...unstable.modules].some((m) => m.changelog !== undefined),
+        'no catalogue entry carries a field these Managers predate, so this run proves nothing about added keys'
+    );
+
     for (const shipped of SHIPPED_MANAGERS) {
         await t.test(`Manager ${shipped.version}`, async () => {
             await runAgainst(shipped, expected);

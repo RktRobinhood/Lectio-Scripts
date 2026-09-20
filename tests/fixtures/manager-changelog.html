@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio Manager changelog fixture</title>
+</head>
+<body>
+    <script>
+        // A catalogue entry may carry an optional `changelog` describing the
+        // version it offers. Five entries, each one a case that matters:
+        //
+        //   plain    - an update with no changelog at all, the ordinary case.
+        //              Its card must be what it was before this field existed.
+        //   noted    - an update with a changelog, English only.
+        //   trans    - an update with a changelog translated into Danish, so
+        //              the active language picks the translation and falling
+        //              back to English is a choice rather than the only path.
+        //   hostile  - a changelog full of markup. The Catalogue is fetched
+        //              over HTTPS into an authenticated Lectio session; it is
+        //              data, and must reach the screen as characters.
+        //   huge     - a changelog nobody would write, to prove the panel is
+        //              bounded by the Manager rather than by good manners.
+        const MARKUP =
+            '<img src=x onerror="window.pwned=1"><script>window.pwned=1;<\/script>' +
+            '<b>bold</b> & <a href="javascript:window.pwned=1">link</a>';
+
+        const HUGE = ('Everything about this module changed in ways too numerous to list here. ').repeat(40);
+        const UNBROKEN = 'x'.repeat(600);
+
+        const entry = (id, extra) => Object.assign({
+            id,
+            name: id[0].toUpperCase() + id.slice(1),
+            description: `Catalogue entry for ${id}.`,
+            category: 'Interface',
+            audience: ['student'],
+            status: 'stable',
+            version: '2.0.0',
+            installUrl: `https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/${id}.user.js`,
+            supportUrl: 'https://github.com/RktRobinhood/Lectio-Scripts/issues'
+        }, extra);
+
+        const catalogue = {
+            schemaVersion: 1,
+            generatedAt: '2026-09-20T00:00:00.000Z',
+            manager: {
+                version: '1.0.0',
+                installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/manager/Lectio-Manager.user.js'
+            },
+            modules: [
+                entry('plain'),
+                entry('noted', { changelog: 'The colour key now stays put when you scroll.' }),
+                entry('trans', {
+                    changelog: 'English changelog for trans.',
+                    i18n: { da: { name: 'Trans', description: 'Dansk beskrivelse.', changelog: 'Dansk ændringstekst.' } }
+                }),
+                entry('hostile', { changelog: MARKUP }),
+                entry('huge', { changelog: `${HUGE} ${UNBROKEN}` }),
+                // Current, with a changelog: a changelog is about the version
+                // being offered, so with nothing offered there is nothing to say.
+                entry('current', { version: '1.0.0', changelog: 'Should never be shown - nothing is being offered.' })
+            ]
+        };
+
+        const storage = new Map([
+            ['lectioManager.catalogue.v1', JSON.stringify(catalogue)],
+            ['lectioManager.lastRefresh.v1', Date.now()],
+            ['lectioManager.updateTipDismissed.v1', true]
+        ]);
+
+        window.GM_getValue = (key, fallback) => storage.has(key) ? storage.get(key) : fallback;
+        window.GM_setValue = (key, value) => storage.set(key, value);
+        window.GM_xmlhttpRequest = () => {};
+
+        window.pageErrors = [];
+        window.addEventListener('error', (event) => window.pageErrors.push(String(event.message)));
+
+        function register(id, version) {
+            window.dispatchEvent(new CustomEvent('lectio-module:register', {
+                detail: { id, name: id[0].toUpperCase() + id.slice(1), version, settingsSchema: [] }
+            }));
+        }
+    </script>
+    <script src="../../manager/Lectio-Manager.user.js"></script>
+    <script>
+        function assert(condition, message) {
+            if (!condition) throw new Error(message);
+        }
+
+        const card = (id) => document.querySelector(`.lectio-manager-card[data-module-id="${id}"]`);
+        const note = (id) => card(id)?.querySelector('.lectio-manager-card-changelog');
+
+        window.addEventListener('load', () => {
+            try {
+                // #27 made the panel lazy. Registering before the first open is
+                // the normal order, and none of this may throw without a panel.
+                for (const id of ['plain', 'noted', 'trans', 'hostile', 'huge']) register(id, '1.0.0');
+                register('current', '1.0.0');
+
+                assert(!document.querySelector('#lectio-manager-panel'),
+                    'The panel was built before the gear was clicked');
+                assert(window.pageErrors.length === 0,
+                    `Something threw before the panel existed: ${window.pageErrors.join(' | ')}`);
+
+                // The default view is Installed, which is where an update is
+                // offered and so where the changelog has to appear.
+                document.querySelector('#lectio-manager-toggle').click();
+
+                // 1. No changelog, and nothing appears. The card is exactly the
+                //    card this Manager drew before the field existed: the same
+                //    children in the same order, with nothing added.
+                assert(card('plain'), 'The plain card was not rendered');
+                assert(note('plain') === null, 'An entry with no changelog rendered one anyway');
+                assert(card('plain').querySelector('.lectio-manager-status-update'),
+                    'The plain card lost its update row');
+                assert([...card('plain').children].map((child) => child.className).join('|') ===
+                    'lectio-manager-card-main|lectio-manager-card-status',
+                    `The card without a changelog gained structure: ${[...card('plain').children].map((c) => c.className).join('|')}`);
+
+                // 2. A changelog is shown, under the update row, in the active
+                //    language - English here, which is the Manager's default.
+                const noted = note('noted');
+                assert(noted, 'An entry with a changelog rendered nothing');
+                assert(noted.textContent.includes('The colour key now stays put when you scroll.'),
+                    `The changelog text is missing: ${noted.textContent}`);
+                assert(noted.textContent.includes('What’s new'),
+                    `The changelog is unlabelled: ${noted.textContent}`);
+
+                const statusRow = card('noted').querySelector('.lectio-manager-card-status');
+                assert(statusRow.compareDocumentPosition(noted) & Node.DOCUMENT_POSITION_FOLLOWING,
+                    'The changelog is not under the update row');
+                assert(noted.getBoundingClientRect().top >= statusRow.getBoundingClientRect().bottom - 1,
+                    'The changelog overlaps the update row rather than sitting under it');
+
+                // 3. Nothing is offered, so there is nothing to say - even
+                //    though the entry carries a changelog.
+                assert(note('current') === null,
+                    'A module that is already current was told what is new');
+
+                // 4. Catalogue text is data. The markup arrives as characters:
+                //    no element it named exists, and nothing it asked for ran.
+                const hostile = note('hostile');
+                assert(hostile, 'The hostile entry rendered no changelog at all');
+                assert(hostile.textContent.includes('<img src=x onerror='),
+                    `The markup did not survive as literal text: ${hostile.textContent}`);
+                assert(hostile.textContent.includes('<b>bold</b>') && hostile.textContent.includes('<\/script>'),
+                    `Tags were swallowed instead of shown: ${hostile.textContent}`);
+                assert(!hostile.querySelector('img, b, a, script'),
+                    'The changelog was parsed as HTML');
+                assert(hostile.children.length === 2,
+                    `The changelog grew elements from its own text: ${hostile.innerHTML}`);
+                assert(window.pwned === undefined,
+                    'Script in a catalogue changelog executed');
+                assert(!document.querySelector('img[src="x"]'),
+                    'The catalogue injected an element into the page');
+
+                // 5. An absurd changelog is bounded by the Manager, not by the
+                //    author being reasonable. The text is capped, and neither
+                //    the card nor the panel can be pushed sideways by it.
+                const huge = note('huge');
+                assert(huge, 'The over-long entry rendered no changelog');
+                assert(huge.textContent.length <= 260,
+                    `An over-long changelog was rendered in full: ${huge.textContent.length} characters`);
+                assert(huge.textContent.trimEnd().endsWith('…'),
+                    `A truncated changelog does not say it was cut: ${huge.textContent.slice(-40)}`);
+
+                const panel = document.querySelector('#lectio-manager-panel');
+                const overflowing = [...document.querySelectorAll('.lectio-manager-card')]
+                    .filter((element) => element.scrollWidth > element.clientWidth + 1)
+                    .map((element) => element.dataset.moduleId);
+
+                assert(overflowing.length === 0,
+                    `A changelog widened its card past the panel: ${overflowing.join(', ')}`);
+                assert(panel.scrollWidth <= panel.clientWidth + 1,
+                    `A changelog gave the panel a horizontal scrollbar: ${panel.scrollWidth} > ${panel.clientWidth}`);
+                assert(huge.getBoundingClientRect().right <= card('huge').getBoundingClientRect().right + 1,
+                    'The changelog spills out past the edge of its card');
+                assert(card('huge').getBoundingClientRect().height < 260,
+                    `One entry's changelog took over the panel: ${card('huge').getBoundingClientRect().height}px tall`);
+
+                // 6. The changelog follows the Manager's language the same way
+                //    a description does: the translation when the entry has
+                //    one, the English the Catalogue was written in when it does
+                //    not. No translation is invented for an untranslated line.
+                const select = document.querySelector('.lectio-manager-language-select');
+                assert(select, 'the Manager has no language control');
+                select.value = 'da';
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+
+                assert(document.documentElement.dataset.lectioLanguage === 'da',
+                    'the language did not actually switch');
+                assert(note('trans')?.textContent.includes('Dansk ændringstekst.'),
+                    `Danish did not pick the Danish changelog: ${note('trans')?.textContent}`);
+                assert(note('trans')?.textContent.includes('Nyt i denne version'),
+                    `The label did not follow the language: ${note('trans')?.textContent}`);
+                assert(note('noted')?.textContent.includes('The colour key now stays put when you scroll.'),
+                    `An untranslated changelog did not fall back to English: ${note('noted')?.textContent}`);
+                assert(note('plain') === null,
+                    'Switching language conjured a changelog out of an entry without one');
+
+                assert(window.pageErrors.length === 0,
+                    `The changelog threw: ${window.pageErrors.join(' | ')}`);
+
+                document.documentElement.dataset.testResult = 'pass';
+            } catch (error) {
+                document.documentElement.dataset.testResult = `fail: ${error.message}`;
+            }
+        });
+    </script>
+</body>
+</html>

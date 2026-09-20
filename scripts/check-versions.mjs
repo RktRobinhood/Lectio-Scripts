@@ -52,9 +52,30 @@ function moduleId(source) {
     return source.match(/(?:MODULE_ID\s*=\s*'|id:\s*')([a-z0-9-]+)'/)?.[1] ?? null;
 }
 
+/*
+ * `changelog` is optional prose about the version in the same entry, shown by
+ * the Manager under the update row. The Manager ignores one that is not a
+ * usable string, which is the safe thing for it to do and the wrong thing to
+ * find out about later: the line just never appears. Wrong shape is caught
+ * here instead, where it is a failing check rather than a silent omission.
+ */
+function checkChangelog(path, entry) {
+    for (const [where, value] of [
+        [`'${entry.id}'`, entry.changelog],
+        ...Object.entries(entry.i18n ?? {}).map(([code, fields]) => [`'${entry.id}' (${code})`, fields?.changelog])
+    ]) {
+        if (value === undefined) continue;
+
+        if (typeof value !== 'string' || !value.trim()) {
+            problems.push(`${path}: ${where} has a changelog that is not a non-empty string - the Manager will ignore it`);
+        }
+    }
+}
+
 function readCatalogue(path) {
     const entries = new Map();
     for (const entry of JSON.parse(readFileSync(path, 'utf8')).modules) {
+        checkChangelog(path, entry);
         entries.set(entry.id, { version: entry.version, path });
     }
     return entries;

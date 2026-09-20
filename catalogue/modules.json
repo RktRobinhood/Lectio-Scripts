@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "generatedAt": "2026-09-20T18:00:00Z",
   "manager": {
-    "version": "1.24.0",
+    "version": "1.25.0",
     "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/manager/Lectio-Manager.user.js",
     "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues"
   },
@@ -77,12 +77,14 @@
       ],
       "status": "stable",
       "version": "0.6.1",
+      "changelog": "The badge now works at any Lectio school instead of only the one it was first written for — it reads your school from the page address.",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Unread-Message-Notifications.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
       "i18n": {
         "da": {
           "name": "Ulæste beskeder",
-          "description": "Viser et mærke med ulæste beskeder ved siden af Beskeder. Virker på alle Lectio-skoler og læser skolens id fra sidens adresse."
+          "description": "Viser et mærke med ulæste beskeder ved siden af Beskeder. Virker på alle Lectio-skoler og læser skolens id fra sidens adresse.",
+          "changelog": "Mærket virker nu på alle Lectio-skoler og ikke kun den, det oprindeligt blev skrevet til — det læser din skole i sidens adresse."
         }
       }
     },

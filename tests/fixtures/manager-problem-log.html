@@ -164,11 +164,16 @@
                 //    previewed as the exact text that gets copied.
                 const preview = document.querySelector('.lectio-manager-log-report').value;
                 for (const field of [
-                    'Affected script:', 'Release channel: Stable', 'Manager version: 1.24.0',
+                    'Affected script:', 'Release channel: Stable', 'Manager version:',
                     'Browser:', 'Userscript manager:', 'Lectio school ID:', 'Lectio page:'
                 ]) {
                     assert(preview.includes(field), `The report block is missing "${field}": ${preview}`);
                 }
+
+                // Which version, not which literal - pinning the number here
+                // made every Manager bump break a test about the problem log.
+                assert(/Manager version: \d+\.\d+\.\d+\b/.test(preview),
+                    `The report block does not carry a real Manager version: ${preview}`);
 
                 for (const secret of mustNotSurvive.concat(['fixtures', 'file:', 'phase='])) {
                     assert(!preview.includes(secret),
