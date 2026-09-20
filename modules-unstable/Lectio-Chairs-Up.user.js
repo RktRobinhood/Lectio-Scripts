@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Chairs Up
 // @namespace    https://www.lectio.dk/
-// @version      1.2.0
+// @version      1.2.1
 // @description  Shows when a lesson is the final active booking of the day in its room. Universal Lectio version.
 // @match        https://www.lectio.dk/lectio/*
 // @grant        none
@@ -35,7 +35,7 @@
   (function registerWithLectioManager() {
     const MODULE_ID = 'chairs-up';
     const MODULE_NAME = 'Lectio - Chairs Up';
-    const MODULE_VERSION = '1.2.0';
+    const MODULE_VERSION = '1.2.1';
 
     function announce() {
       window.dispatchEvent(new CustomEvent('lectio-module:register', {
@@ -207,8 +207,9 @@
    *
    * Every piece of state here lives for one page view and is
    * released on pagehide: the controllers are aborted and the
-   * set emptied, the jitter timer is cleared and its waiter
-   * resolved, and the listener itself is { once: true }.
+   * set emptied, and the jitter timer is cleared and its waiter
+   * resolved. A page frozen for the back/forward cache gets that
+   * same release and then has it lifted again on pageshow.
    */
 
   const liveFetchControllers =
@@ -235,12 +236,81 @@
   let pageIsGoingAway =
     false;
 
+  let pageIsGone =
+    false;
 
+
+  /*
+   * Deliberately not { once: true }, and deliberately split in
+   * two. A page frozen for the back/forward cache fires pagehide
+   * with persisted set and may be restored without this script
+   * ever running again, so a spent listener plus a flag nothing
+   * could lift left a restored page permanently switched off -
+   * every fetch skipped for the rest of that page's life, with
+   * no error to show for it. That is issue #41.
+   *
+   * A frozen page therefore only has its background fetching
+   * suspended, and pageshow puts it back; a page that is
+   * genuinely going away is marked gone, and nothing - not even
+   * a stray persisted pageshow - lifts the gate again.
+   *
+   * One registration each, at module scope, so neither listener
+   * can accumulate: a bfcache restore does not re-execute the
+   * script, and a real navigation discards the page along with
+   * both listeners.
+   */
   window.addEventListener(
     'pagehide',
-    abortBackgroundFetches,
-    { once: true }
+    handlePageHide
   );
+
+  window.addEventListener(
+    'pageshow',
+    resumeBackgroundFetches
+  );
+
+
+  function handlePageHide(
+    event
+  ) {
+    abortBackgroundFetches();
+
+
+    if (
+      event &&
+      event.persisted
+    ) {
+      return;
+    }
+
+
+    pageIsGone =
+      true;
+  }
+
+
+  /*
+   * Chairs Up does its background work in one pass per page
+   * view, driven by main(), so "resume" is exactly this: lift
+   * the gate, and the jobs the freeze cut short go through on
+   * the pass that is still running. There is no timer to
+   * restart.
+   */
+  function resumeBackgroundFetches(
+    event
+  ) {
+    if (
+      !event ||
+      !event.persisted ||
+      pageIsGone
+    ) {
+      return;
+    }
+
+
+    pageIsGoingAway =
+      false;
+  }
 
 
   function abortBackgroundFetches() {

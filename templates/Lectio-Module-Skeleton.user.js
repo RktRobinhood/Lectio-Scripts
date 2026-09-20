@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Module Skeleton
 // @namespace    https://github.com/RktRobinhood/Lectio-Scripts
-// @version      0.2.0
+// @version      0.2.1
 // @description  A complete, do-nothing module you copy to start a new one. Registers, renders one control of every type, themes itself, speaks both languages, and tears down cleanly.
 // @author       RktRobinhood
 // @match        https://www.lectio.dk/lectio/*
@@ -50,7 +50,7 @@
     // next to this file; `node scripts/check-versions.mjs` enforces it.
     const MODULE_ID = 'module-skeleton';
     const MODULE_NAME = 'Lectio - Module Skeleton';
-    const MODULE_VERSION = '0.2.0';
+    const MODULE_VERSION = '0.2.1';
 
     const STYLE_ID = 'lectio-module-skeleton-styles';
     const SETTINGS_KEY = 'lectioModuleSkeleton.settings.v1';
@@ -79,6 +79,7 @@
     let preview = null;        // The option currently being hovered in the Manager, never persisted.
     let dockMount = null;      // The Manager's disposable flyout mount, valid only while connected.
     let exampleTimer = 0;
+    let suspended = false;   // True while the page is frozen for the back/forward cache.
 
     /* ---------------------------------------------------------------- *
      * Discovery (ADR-0002)
@@ -493,6 +494,26 @@
      * go away again, or they accumulate for as long as the tab is open.
      * ---------------------------------------------------------------- */
 
+    // What a frozen page must stop doing, and nothing more: timers, polling,
+    // background requests. Not the styles, nodes or dock item it has already
+    // put on the page - the person will be looking at those again the moment
+    // the page comes back.
+    function suspend() {
+        suspended = true;
+        window.clearTimeout(exampleTimer);                  // every timer and interval
+        exampleTimer = 0;
+        // TODO: abort in-flight fetches and stop any poll interval here, and
+        // have the work itself check `suspended` before it starts something.
+    }
+
+    function resume(event) {
+        // Only a bfcache restore, and never after a real teardown.
+        if (!event || !event.persisted || lifecycle.signal.aborted) return;
+
+        suspended = false;
+        // TODO: restart whatever suspend() stopped.
+    }
+
     function teardown() {
         lifecycle.abort();                                  // every listener added with the signal
         window.clearTimeout(exampleTimer);                  // every timer and interval
@@ -519,7 +540,25 @@
         renderDockPanel();
     }, { signal: lifecycle.signal });
 
-    window.addEventListener('pagehide', teardown, { once: true });
+    // Deliberately not { once: true }, and deliberately split in two. A page
+    // frozen for the back/forward cache fires pagehide with persisted set and
+    // may be restored without this script ever running again, so tearing the
+    // module down there leaves a restored page permanently switched off - no
+    // listeners, no styles, no dock item, for the rest of that page's life,
+    // with no error to show for it. That is the bug filed as #41. A frozen
+    // page therefore only has its background work suspended, and pageshow
+    // puts it back; a page that is genuinely going away is torn down exactly
+    // as before. One registration each, at module scope, so neither listener
+    // can accumulate: a bfcache restore does not re-execute the script, and a
+    // real navigation discards the page along with both listeners.
+    window.addEventListener('pagehide', (event) => {
+        suspend();
+
+        if (event && event.persisted) return;
+
+        teardown();
+    });
+    window.addEventListener('pageshow', resume);
 
     function start() {
         addStyles();
