@@ -1,0 +1,114 @@
+# The checks AGENTS.md asks for before a change is called finished, run as a gate.
+#
+# Nothing here is a build step: every gate is plain `node` against files already
+# in the repository. No package.json, no dependencies, no bundler - see the
+# no-build-step invariant in AGENTS.md.
+name: Checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    # The suite drives real Chrome processes; a hung one should fail, not idle.
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+        with:
+          # Full history, for two reasons. scripts/check-versions.mjs diffs each
+          # userscript against origin/main to catch a file changed with its
+          # @version left alone, and tests/catalogue-compat.browser.test.js does
+          # `git show <commit>:manager/Lectio-Manager.user.js` for every Manager
+          # version ever shipped. A shallow clone has neither.
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      # A syntax error is the one failure mode that bricks a userscript
+      # completely and silently in a user's browser, and it costs nothing to
+      # catch here.
+      - name: Syntax-check every userscript
+        run: |
+          set -euo pipefail
+          directories=()
+          for directory in manager modules modules-unstable templates; do
+            [ -d "$directory" ] && directories+=("$directory")
+          done
+
+          checked=0
+          while IFS= read -r -d '' file; do
+            echo "node --check $file"
+            node --check "$file"
+            checked=$((checked + 1))
+          done < <(find "${directories[@]}" -type f -name '*.user.js' -print0 | sort -z)
+
+          if [ "$checked" -eq 0 ]; then
+            echo "No .user.js files were found - the syntax gate checked nothing." >&2
+            exit 1
+          fi
+          echo "Syntax-checked $checked userscript(s)."
+
+      # The version triple, the unstable-ahead-of-stable rule, the
+      # @updateURL/@downloadURL-stays-in-its-own-folder rule, and the
+      # changed-but-not-bumped drift check against origin/main.
+      - name: Versions agree
+        run: node scripts/check-versions.mjs
+
+      - name: Dock icons are up to date
+        run: node scripts/build-dock-icons.mjs --check
+
+      # The browser tests shell out to Chrome via CHROME_PATH, falling back to a
+      # Windows path that does not exist here, so the runner's Chrome is found
+      # and exported instead. CHROME_PATH points at a small wrapper rather than
+      # at Chrome itself: the tests own their flags (--headless=new, --disable-gpu,
+      # --allow-file-access-from-files, --dump-dom) and must stay unchanged, but
+      # Chrome's own sandbox cannot be counted on inside a runner, so the two
+      # flags that are purely about running in CI are added here instead.
+      - name: Locate Chrome
+        run: |
+          set -euo pipefail
+          chrome=""
+          for candidate in "${CHROME_BIN:-}" google-chrome-stable google-chrome chromium-browser chromium; do
+            [ -n "$candidate" ] || continue
+            if found=$(command -v "$candidate" 2>/dev/null); then
+              chrome="$found"
+              break
+            fi
+          done
+
+          if [ -z "$chrome" ]; then
+            echo "No Chrome on the runner image; installing Google Chrome stable."
+            curl -fsSL -o /tmp/google-chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+            sudo apt-get update
+            sudo apt-get install -y /tmp/google-chrome.deb
+            chrome=$(command -v google-chrome-stable)
+          fi
+
+          "$chrome" --version
+
+          wrapper="$RUNNER_TEMP/chrome-for-tests"
+          {
+            echo '#!/usr/bin/env bash'
+            echo "exec \"$chrome\" --no-sandbox --disable-dev-shm-usage \"\$@\""
+          } > "$wrapper"
+          chmod +x "$wrapper"
+          echo "CHROME_PATH=$wrapper" >> "$GITHUB_ENV"
+
+      # The pattern is quoted so Node expands it itself, and it is a pattern
+      # rather than the directory: on Node 24 a bare `node --test tests/` takes
+      # the directory for a test file and fails to load it as a module, so the
+      # suite never runs.
+      - name: Test suite
+        run: node --test "tests/**/*.test.js"
