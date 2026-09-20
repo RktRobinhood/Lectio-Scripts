@@ -1,6 +1,8 @@
 # Lectio Manager dock API
 
-The Manager owns one compact dock on the left of the viewport. It stays completely hidden and non-interactive while no module has a visible item. Modules remain standalone Tampermonkey userscripts and communicate with it through DOM `CustomEvent`s; they do not import Manager code or manipulate the dock DOM.
+The Manager owns one compact dock. It stays completely hidden and non-interactive while no module has a visible item. Modules remain standalone Tampermonkey userscripts and communicate with it through DOM `CustomEvent`s; they do not import Manager code or manipulate the dock DOM.
+
+Where the dock sits is the user's choice, not the module's: they pick a screen edge (left by default, or right, top, or bottom) and a position along that edge. A left or right dock is a column; a top or bottom dock is a row. A module never needs to know which — the Manager places every item, tooltip, and flyout itself.
 
 ## Register an item
 
@@ -85,9 +87,18 @@ window.addEventListener('lectio-manager:dock:render-panel', (event) => {
 Only one dock panel is open at once. The Manager closes it on Escape, outside click, a second activation, or item removal. The module may style content inside `mount`, but must not position the flyout shell or inject styles into the shared dock chrome.
 Each opening receives a disposable mount node. It is disconnected when that panel closes or another panel opens; modules should treat `mount.isConnected === false` as the end of that rendering session.
 
+## Falling back when the Manager is absent
+
+A module that had its own floating control before the dock existed keeps that control as a fallback, because the module must still work installed on its own. The recommended default is an `auto` setting rather than a fixed choice:
+
+- `auto` — the dock once `lectio-manager:discover` has fired, the module's own floating control once it is clear none will;
+- `dock` and `floating` — explicit overrides for people who want one or the other regardless.
+
+Discovery arrives a moment after page load, so resolving `auto` straight to `floating` would show a floating control that immediately jumps into the dock. Hold the decision for a short grace window (2.5s in Subject Colours and Change Radar), render nothing until it closes, and re-render once either Discovery fires or the window expires. Clear the timer on `pagehide`.
+
 ## Ordering and cleanup
 
-Users can drag items or press Ctrl+Arrow Up/Down while an item is focused. The Manager persists their order. New items follow known items and then use `defaultPriority`; removing an item does not corrupt saved ordering.
+Users can drag items or press Ctrl with an arrow key while an item is focused. The Manager persists their order. New items follow known items and then use `defaultPriority`; removing an item does not corrupt saved ordering.
 
 Register again when Discovery fires so the dock recovers regardless of Manager/module startup order. Remove items when a module has a real runtime unload path. A failure in one activation or panel listener must not make another module depend on its state.
 
@@ -99,8 +110,8 @@ The unstable channel test module in [`modules-unstable/Lectio-Unstable-Channel-T
 |---|---|---|---|---|
 | Unstable Channel Test | Diagnostic launcher and details | Former fixed chip/panel | `panel` | Migrated as the v1 reference; no module-owned coordinates remain. |
 | English Mode | Global DA/EN switch and transient toast | Fixed viewport control | `toggle` | Good next candidate, but medium complexity because users already configure the switch position. Keep the toast module-owned. |
-| Subject Colours | Optional colour key on schedule pages | Floating or Manager dock | `panel` | Migrated; users choose the location in the module settings. |
-| Lectio Change Radar | Floating radar HUD and change log | Floating or Manager dock | `panel` | Migrated; the unseen count and urgency state become the dock badge and item state. |
+| Subject Colours | Optional colour key on schedule pages | Manager dock, or floating | `panel` | Migrated. Defaults to Automatic: the dock when the Manager answers Discovery, the floating key when nothing does. |
+| Lectio Change Radar | Radar HUD and change log | Manager dock, or floating | `panel` | Migrated. Defaults to Automatic; the unseen count and urgency state become the dock badge and item state. |
 | Unread Message Notifications | Badge attached to Lectio's Messages navigation | In-page navigation badge | Possibly `status`/`panel` | Defer: its current UI belongs to the Messages link rather than a free-floating HUD. |
 | Chairs Up | Urgent notice/dialog surfaces | Page-local overlays | Poor | Keep page-local because the warning is contextual and time-sensitive, not a global launcher. |
 | Schedule Summary | Compact schedule row | In-page schedule content | None | Keep page-local; it is not persistent global UI. |

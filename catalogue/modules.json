@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-09-15T22:30:00Z",
+  "generatedAt": "2026-09-20T12:00:00Z",
   "modules": [
     {
       "id": "english-mode",
@@ -64,7 +64,7 @@
       "category": "Timetable",
       "audience": ["student", "teacher"],
       "status": "experimental",
-      "version": "0.7.0",
+      "version": "0.8.0",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Subject-Colours.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues"
     }

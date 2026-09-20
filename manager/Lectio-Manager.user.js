@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.16.0
+// @version      1.17.0
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules, including their settings and shared dock controls.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
@@ -651,15 +651,29 @@
     // SHARED DOCK
     // ============================================================
 
+    // Placement is two independent choices: which screen edge the dock hugs, and
+    // where along that edge it sits. The edge also decides the dock's
+    // orientation, so a left/right dock is a column and a top/bottom dock a row.
+    const DOCK_EDGES = ['left', 'right', 'top', 'bottom'];
+    const DOCK_ALIGNMENTS = ['start', 'center', 'end'];
+
+    // v1 stored a single vertical `position` and always hugged the left edge.
+    const LEGACY_DOCK_POSITIONS = { top: 'start', center: 'center', bottom: 'end' };
+
     function defaultDockPreferences() {
         return {
-            version: 1,
+            version: 2,
             order: [],
-            position: 'center',
+            edge: 'left',
+            align: 'center',
             sizeMode: 'auto',
             autoFit: true,
             autoHide: false
         };
+    }
+
+    function isVerticalDock(edge = dockPreferences?.edge) {
+        return edge === 'left' || edge === 'right';
     }
 
     function loadDockPreferences() {
@@ -672,14 +686,17 @@
             const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
             if (!parsed || typeof parsed !== 'object') return defaults;
 
+            const migratedAlign = LEGACY_DOCK_POSITIONS[parsed.position];
+
             return {
                 ...defaults,
                 order: Array.isArray(parsed.order)
                     ? [...new Set(parsed.order.filter((key) => typeof key === 'string'))]
                     : [],
-                position: ['top', 'center', 'bottom'].includes(parsed.position)
-                    ? parsed.position
-                    : defaults.position,
+                edge: DOCK_EDGES.includes(parsed.edge) ? parsed.edge : defaults.edge,
+                align: DOCK_ALIGNMENTS.includes(parsed.align)
+                    ? parsed.align
+                    : (migratedAlign || defaults.align),
                 sizeMode: ['auto', 'small', 'normal', 'large'].includes(parsed.sizeMode)
                     ? parsed.sizeMode
                     : defaults.sizeMode,
@@ -911,9 +928,12 @@
         button.addEventListener('focus', () => showDockTooltip(button, item.tooltip));
         button.addEventListener('blur', hideDockTooltip);
         button.addEventListener('keydown', (event) => {
-            if (!event.ctrlKey || !['ArrowUp', 'ArrowDown'].includes(event.key)) return;
+            // Both axes are accepted whatever the edge, so the shortcut still
+            // works when someone's muscle memory does not match the orientation.
+            const offsets = { ArrowUp: -1, ArrowLeft: -1, ArrowDown: 1, ArrowRight: 1 };
+            if (!event.ctrlKey || !(event.key in offsets)) return;
             event.preventDefault();
-            moveDockItemByKeyboard(key, event.key === 'ArrowUp' ? -1 : 1);
+            moveDockItemByKeyboard(key, offsets[event.key]);
         });
         button.addEventListener('pointerdown', (event) => beginPointerDockDrag(event, key, button));
         button.addEventListener('pointermove', updatePointerDockDrag);
@@ -936,7 +956,17 @@
         dockElements.tooltip.hidden = false;
         const rootRect = dockElements.root.getBoundingClientRect();
         const buttonRect = button.getBoundingClientRect();
-        dockElements.tooltip.style.top = `${buttonRect.top - rootRect.top + (buttonRect.height / 2)}px`;
+
+        // A column dock centres its tooltip on the item's row; a row dock
+        // centres it on the item's column instead. The unused axis is cleared so
+        // a stale offset from the previous edge cannot survive a settings change.
+        if (isVerticalDock()) {
+            dockElements.tooltip.style.left = '';
+            dockElements.tooltip.style.top = `${buttonRect.top - rootRect.top + (buttonRect.height / 2)}px`;
+        } else {
+            dockElements.tooltip.style.top = '';
+            dockElements.tooltip.style.left = `${buttonRect.left - rootRect.left + (buttonRect.width / 2)}px`;
+        }
     }
 
     function hideDockTooltip() {
@@ -1130,21 +1160,42 @@
     function applyDockPreferences() {
         if (!dockElements) return;
 
-        dockElements.root.dataset.position = dockPreferences.position;
+        dockElements.root.dataset.edge = dockPreferences.edge;
+        dockElements.root.dataset.align = dockPreferences.align;
+        dockElements.root.dataset.orientation = isVerticalDock() ? 'vertical' : 'horizontal';
         dockElements.root.classList.toggle('is-auto-hide', dockPreferences.autoHide);
+        hideDockTooltip();
         syncDockPreferenceControls();
         updateDockFit();
+    }
+
+    // "Start" and "end" mean different things on a column than on a row, so the
+    // labels follow the chosen edge rather than exposing the raw values.
+    function dockAlignmentLabels(edge) {
+        return isVerticalDock(edge)
+            ? { start: 'Top', center: 'Middle', end: 'Bottom' }
+            : { start: 'Left', center: 'Centre', end: 'Right' };
     }
 
     function syncDockPreferenceControls() {
         if (!elements || !dockPreferences) return;
 
-        const position = elements.root.querySelector('.lectio-manager-dock-position');
+        const edge = elements.root.querySelector('.lectio-manager-dock-edge');
+        const align = elements.root.querySelector('.lectio-manager-dock-align');
         const size = elements.root.querySelector('.lectio-manager-dock-size');
         const fit = elements.root.querySelector('.lectio-manager-dock-fit');
         const autoHide = elements.root.querySelector('.lectio-manager-dock-autohide');
 
-        if (position) position.value = dockPreferences.position;
+        if (edge) edge.value = dockPreferences.edge;
+
+        if (align) {
+            const labels = dockAlignmentLabels(dockPreferences.edge);
+            for (const option of align.options) {
+                option.textContent = labels[option.value] || option.value;
+            }
+            align.value = dockPreferences.align;
+        }
+
         if (size) size.value = dockPreferences.sizeMode;
         if (fit) fit.checked = dockPreferences.autoFit;
         if (autoHide) autoHide.checked = dockPreferences.autoHide;
@@ -1155,21 +1206,27 @@
 
         const configuredSizes = { auto: 42, small: 34, normal: 42, large: 50 };
         const itemCount = sortedDockEntries().length;
-        const availableHeight = Math.max(120, window.innerHeight - 32);
+        const vertical = isVerticalDock();
+        // A column is bounded by the window height, a row by its width. Some room
+        // is left for Lectio's own chrome at either end of the run.
+        const available = vertical
+            ? Math.max(120, window.innerHeight - 32)
+            : Math.max(120, window.innerWidth - 120);
         let itemSize = configuredSizes[dockPreferences.sizeMode] || 42;
         let gap = itemSize >= 48 ? 7 : 6;
 
         if (dockPreferences.autoFit && itemCount > 0) {
             const required = (itemCount * itemSize) + ((itemCount - 1) * gap) + 12;
-            if (required > availableHeight) {
-                itemSize = Math.max(30, Math.floor((availableHeight - 12 - ((itemCount - 1) * 4)) / itemCount));
+            if (required > available) {
+                itemSize = Math.max(30, Math.floor((available - 12 - ((itemCount - 1) * 4)) / itemCount));
                 gap = Math.max(3, Math.min(6, Math.floor(itemSize / 7)));
             }
         }
 
         dockElements.root.style.setProperty('--lectio-dock-item-size', `${itemSize}px`);
         dockElements.root.style.setProperty('--lectio-dock-gap', `${gap}px`);
-        dockElements.items.style.maxHeight = `${availableHeight - 12}px`;
+        dockElements.items.style.maxHeight = vertical ? `${available - 12}px` : '';
+        dockElements.items.style.maxWidth = vertical ? '' : `${available - 12}px`;
     }
 
     function dockIconSvg(key) {
@@ -1211,26 +1268,35 @@
                     <button type="button" class="lectio-manager-close" title="Close" aria-label="Close">${closeSvg()}</button>
                 </div>
                 <div class="lectio-manager-channel-panel lectio-manager-prefs-panel" hidden>
-                    <details class="lectio-manager-prefs-section" open>
-                        <summary>Release channel</summary>
-                        <label class="lectio-manager-channel-option">
-                            <input type="radio" name="lectio-manager-channel" value="stable">
-                            <span><strong>Stable</strong><small>Production module versions only.</small></span>
-                        </label>
-                        <label class="lectio-manager-channel-option is-unstable">
-                            <input type="radio" name="lectio-manager-channel" value="unstable">
-                            <span><strong>Unstable</strong><small>Add experimental modules and test versions from modules-unstable.</small></span>
-                        </label>
-                        <div class="lectio-manager-channel-note">Switching channel only changes what the Manager offers. It never installs, disables, or removes a userscript automatically.</div>
-                    </details>
+                    <div class="lectio-manager-prefs-field lectio-manager-channel-field">
+                        <span class="lectio-manager-channel-label">
+                            <label for="lectio-manager-channel-select">Release channel</label>
+                            <button type="button" class="lectio-manager-setting-info lectio-manager-channel-info" title="What is a release channel?" aria-label="What is a release channel?" aria-controls="lectio-manager-channel-help" aria-expanded="false">${helpSvg()}</button>
+                        </span>
+                        <select id="lectio-manager-channel-select" class="lectio-manager-channel-select">
+                            <option value="stable">Stable</option>
+                            <option value="unstable">Unstable</option>
+                        </select>
+                    </div>
+                    <small id="lectio-manager-channel-help" class="lectio-manager-channel-help" hidden>A release channel decides which list of modules the Manager reads. <strong>Stable</strong> offers finished modules only. <strong>Unstable</strong> also offers experimental ones that are still being built, so they can change or break without warning.</small>
+                    <small class="lectio-manager-channel-note" hidden>Unstable adds experimental modules from modules-unstable. Switching channel only changes what the Manager offers. It never installs, disables, or removes a userscript automatically.</small>
                     <details class="lectio-manager-prefs-section">
                         <summary>Dock</summary>
                         <label class="lectio-manager-prefs-field">
-                            <span>Vertical position</span>
-                            <select class="lectio-manager-dock-position">
+                            <span>Screen edge</span>
+                            <select class="lectio-manager-dock-edge">
+                                <option value="left">Left</option>
+                                <option value="right">Right</option>
                                 <option value="top">Top</option>
-                                <option value="center">Center</option>
                                 <option value="bottom">Bottom</option>
+                            </select>
+                        </label>
+                        <label class="lectio-manager-prefs-field">
+                            <span>Position on edge</span>
+                            <select class="lectio-manager-dock-align">
+                                <option value="start">Top</option>
+                                <option value="center">Middle</option>
+                                <option value="end">Bottom</option>
                             </select>
                         </label>
                         <label class="lectio-manager-prefs-field">
@@ -1244,14 +1310,14 @@
                         </label>
                         <label class="lectio-manager-prefs-check">
                             <input type="checkbox" class="lectio-manager-dock-fit">
-                            <span>Fit icons to window height</span>
+                            <span>Shrink icons to fit the screen</span>
                         </label>
                         <label class="lectio-manager-prefs-check">
                             <input type="checkbox" class="lectio-manager-dock-autohide">
                             <span>Auto-hide until hovered or focused</span>
                         </label>
                         <button type="button" class="lectio-manager-dock-reset">Reset dock order</button>
-                        <small class="lectio-manager-prefs-warning">The dock only appears when a module is using it.</small>
+                        <small class="lectio-manager-prefs-warning">The dock only appears when a module is using it. Drag an icon, or press Ctrl with an arrow key, to reorder.</small>
                     </details>
                 </div>
                 <div class="lectio-manager-help-panel" hidden>
@@ -1337,9 +1403,20 @@
         });
 
         channelPanel.addEventListener('change', (event) => {
-            const input = event.target.closest('input[name="lectio-manager-channel"]');
-            if (!input) return;
-            setReleaseChannel(input.value);
+            const select = event.target.closest('.lectio-manager-channel-select');
+            if (!select) return;
+            setReleaseChannel(select.value);
+        });
+
+        // "Release channel" means nothing on its own, so the row keeps one line
+        // and hides the explanation behind the same info toggle module settings use.
+        const channelInfo = channelPanel.querySelector('.lectio-manager-channel-info');
+        const channelHelp = channelPanel.querySelector('.lectio-manager-channel-help');
+
+        channelInfo.addEventListener('click', () => {
+            const willShow = channelHelp.hidden;
+            channelHelp.hidden = !willShow;
+            channelInfo.setAttribute('aria-expanded', String(willShow));
         });
 
         helpBtn.addEventListener('click', () => {
@@ -1353,8 +1430,16 @@
             }
         });
 
-        root.querySelector('.lectio-manager-dock-position').addEventListener('change', (event) => {
-            dockPreferences.position = event.target.value;
+        root.querySelector('.lectio-manager-dock-edge').addEventListener('change', (event) => {
+            if (!DOCK_EDGES.includes(event.target.value)) return;
+            dockPreferences.edge = event.target.value;
+            saveDockPreferences();
+            applyDockPreferences();
+        });
+
+        root.querySelector('.lectio-manager-dock-align').addEventListener('change', (event) => {
+            if (!DOCK_ALIGNMENTS.includes(event.target.value)) return;
+            dockPreferences.align = event.target.value;
             saveDockPreferences();
             applyDockPreferences();
         });
@@ -1562,10 +1647,14 @@
             return;
         }
 
-        for (const input of elements.channelPanel.querySelectorAll('input[name="lectio-manager-channel"]')) {
-            input.checked = input.value === releaseChannel;
-        }
+        const select = elements.channelPanel.querySelector('.lectio-manager-channel-select');
+        if (select) select.value = releaseChannel;
 
+        // The caveat is only worth a line of the panel while it actually applies.
+        const note = elements.channelPanel.querySelector('.lectio-manager-channel-note');
+        if (note) note.hidden = releaseChannel !== 'unstable';
+
+        elements.channelPanel.classList.toggle('is-unstable', releaseChannel === 'unstable');
         elements.channelBtn.classList.toggle('is-unstable', releaseChannel === 'unstable');
         elements.channelBtn.title = releaseChannel === 'unstable'
             ? 'Manager settings — channel: Unstable'
@@ -3123,24 +3212,33 @@
         return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"></path><path d="M19.4 13.5a7.6 7.6 0 0 0 0-3l1.9-1.5-2-3.4-2.2.9a7.6 7.6 0 0 0-2.6-1.5L14 2.6h-4l-.5 2.4a7.6 7.6 0 0 0-2.6 1.5l-2.2-.9-2 3.4L4.6 10.5a7.6 7.6 0 0 0 0 3l-1.9 1.5 2 3.4 2.2-.9c.77.66 1.65 1.17 2.6 1.5l.5 2.4h4l.5-2.4a7.6 7.6 0 0 0 2.6-1.5l2.2.9 2-3.4-1.9-1.5Z"></path></svg>`;
     }
 
+    // Two opposing three-quarter arcs, each closed by its own arrow head. The
+    // previous drawing set the large-arc flag on the lower arc, so it swept past
+    // 180deg, swallowed the upper arc, and read as a single lopsided half circle.
     function refreshSvg() {
-        return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 12a8 8 0 0 1 13.66-5.66L20 8"></path><path d="M20 4v4h-4"></path><path d="M20 12a8 8 0 1 0-13.66 5.66L4 16"></path><path d="M4 20v-4h4"></path></svg>`;
+        return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 11.5A8 8 0 0 1 17.7 6.3L20.5 9"></path><path d="M20.5 4.5V9H16"></path><path d="M20 12.5A8 8 0 0 1 6.3 17.7L3.5 15"></path><path d="M3.5 19.5V15H8"></path></svg>`;
     }
 
     function closeSvg() {
-        return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 5l14 14"></path><path d="M19 5 5 19"></path></svg>`;
+        return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>`;
     }
 
     function chevronSvg() {
         return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 9l6 6 6-6"></path></svg>`;
     }
 
+    // Two sliders rather than a cog: the header renders this at 16px, where the
+    // cog's twelve tooth curves collapsed into a smudge, and a cog beside the
+    // Manager's own cog-shaped launcher read as the same button twice.
     function settingsSvg() {
-        return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.86 2.86-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 1.55V21h-4v-.05a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.88.34l-.06.06-2.86-2.86.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3v-4h.05A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.88l-.06-.06L7.06 4.2l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.55V3h4v.05a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.88-.34l.06-.06 2.86 2.86-.06.06A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 1.55 1H21v4h-.05a1.7 1.7 0 0 0-1.55 1Z"></path></svg>`;
+        return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 8h9"></path><path d="M18 8h2"></path><circle cx="15.5" cy="8" r="2.5"></circle><path d="M4 16h3"></path><path d="M12 16h8"></path><circle cx="8.5" cy="16" r="2.5"></circle></svg>`;
     }
 
+    // The full stop was a filled 0.15-radius circle, which is a third of a device
+    // pixel at this size and disappeared. A zero-length round-capped stroke draws
+    // a dot the same weight as the rest of the glyph, at any size.
     function helpSvg() {
-        return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"></circle><path d="M9.5 9.3a2.5 2.5 0 0 1 4.9.8c0 1.7-2.4 1.9-2.4 3.4"></path><circle cx="12" cy="16.8" r=".15" fill="currentColor" stroke-width="1.2"></circle></svg>`;
+        return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"></circle><path d="M9.6 9.4a2.5 2.5 0 0 1 4.86.83c0 1.67-2.46 2.1-2.46 3.43"></path><path d="M12 16.9h.01"></path></svg>`;
     }
 
     // ============================================================
@@ -3259,8 +3357,8 @@
             .lectio-manager-help,
             .lectio-manager-refresh,
             .lectio-manager-close {
-                width: 26px;
-                height: 26px;
+                width: 28px;
+                height: 28px;
                 border: none;
                 background: transparent;
                 color: #ffffff;
@@ -3269,15 +3367,46 @@
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                border-radius: 6px;
+                border-radius: 7px;
+                -webkit-tap-highlight-color: transparent;
+                transition:
+                    background-color 140ms ease,
+                    color 140ms ease,
+                    transform 140ms cubic-bezier(.2,.7,.3,1);
             }
 
             .lectio-manager-channel-btn:hover,
             .lectio-manager-channel-btn[aria-expanded='true'],
             .lectio-manager-help:hover,
+            .lectio-manager-help[aria-expanded='true'],
             .lectio-manager-refresh:hover,
             .lectio-manager-close:hover {
                 background: rgba(255,255,255,.16);
+            }
+
+            .lectio-manager-channel-btn:focus-visible,
+            .lectio-manager-help:focus-visible,
+            .lectio-manager-refresh:focus-visible,
+            .lectio-manager-close:focus-visible {
+                outline: 2px solid #ffffff;
+                outline-offset: 1px;
+                background: rgba(255,255,255,.16);
+            }
+
+            .lectio-manager-channel-btn:active,
+            .lectio-manager-help:active,
+            .lectio-manager-refresh:active:not(:disabled),
+            .lectio-manager-close:active {
+                transform: scale(.9);
+            }
+
+            /* The icon moves, not the button, so the hover plate stays still. */
+            .lectio-manager-close:hover svg {
+                transform: rotate(90deg);
+            }
+
+            .lectio-manager-refresh:hover:not(:disabled) svg {
+                transform: rotate(-38deg);
             }
 
             .lectio-manager-refresh:disabled {
@@ -3285,17 +3414,26 @@
                 cursor: default;
             }
 
+            /* 16px off a 24 viewBox is a 2:3 scale, so stroke-width 1.8 lands on
+               1.2 CSS px instead of the 1.25 that 15px/2 produced — close enough
+               to a whole device pixel on a 2x screen to stop the fuzz. The
+               geometricPrecision hint keeps curves from being snapped to that
+               grid, which is what was eating the small detail. */
             .lectio-manager-channel-btn svg,
             .lectio-manager-help svg,
             .lectio-manager-refresh svg,
             .lectio-manager-close svg {
-                width: 15px;
-                height: 15px;
+                width: 16px;
+                height: 16px;
+                display: block;
                 fill: none;
                 stroke: currentColor;
-                stroke-width: 2;
+                stroke-width: 1.8;
                 stroke-linecap: round;
                 stroke-linejoin: round;
+                shape-rendering: geometricPrecision;
+                transform-origin: 50% 50%;
+                transition: transform 180ms cubic-bezier(.2,.7,.3,1);
             }
 
             .lectio-manager-channel-btn.is-unstable {
@@ -3315,62 +3453,49 @@
                 display: none !important;
             }
 
-            .lectio-manager-channel-title {
-                margin-bottom: 7px;
-                font-size: 11px;
-                font-weight: 800;
-                color: var(--lectio-theme-text, #203431);
+            .lectio-manager-channel-field {
+                padding: 1px 1px 7px;
             }
 
-            .lectio-manager-channel-option {
-                display: grid;
-                grid-template-columns: auto minmax(0, 1fr);
-                align-items: start;
-                gap: 7px;
-                padding: 6px 7px;
-                border-radius: 7px;
+            .lectio-manager-channel-label {
+                display: inline-flex;
+                align-items: center;
+                gap: 5px;
+                min-width: 0;
+            }
+
+            .lectio-manager-channel-label label {
                 cursor: pointer;
             }
 
-            .lectio-manager-channel-option:hover {
-                background:
-                    color-mix(
-                        in srgb,
-                        var(--lectio-theme-accent, #0f6f6f) 8%,
-                        transparent
-                    );
+            .lectio-manager-channel-help {
+                display: block;
+                margin: 0 0 8px;
+                color: var(--lectio-theme-text, #2a4250);
+                font-size: 10px;
+                line-height: 1.35;
             }
 
-            .lectio-manager-channel-option input {
-                margin-top: 2px;
-                accent-color: var(--lectio-theme-accent, #0f6f6f);
+            .lectio-manager-channel-help[hidden] {
+                display: none !important;
             }
 
-            .lectio-manager-channel-option span {
-                display: flex;
-                flex-direction: column;
-                gap: 1px;
+            .lectio-manager-channel-panel.is-unstable .lectio-manager-channel-select {
+                border-color: #c08324;
+                color: #a35d00;
+                font-weight: 700;
             }
 
-            .lectio-manager-channel-option strong {
-                font-size: 11px;
-            }
-
-            .lectio-manager-channel-option small,
             .lectio-manager-channel-note {
+                display: block;
+                margin: 0 0 8px;
                 color: var(--lectio-theme-muted, #68767b);
                 font-size: 10px;
                 line-height: 1.3;
             }
 
-            .lectio-manager-channel-option.is-unstable strong {
-                color: #a35d00;
-            }
-
-            .lectio-manager-channel-note {
-                margin-top: 6px;
-                padding-top: 6px;
-                border-top: 1px solid var(--lectio-theme-muted, #d8e3e9);
+            .lectio-manager-channel-note[hidden] {
+                display: none !important;
             }
 
             .lectio-manager-help-panel {
@@ -3476,13 +3601,43 @@
                 font-weight: 700;
                 cursor: pointer;
             }
+
+            /* The arrow heads point clockwise, so the spin has to run clockwise
+               too, or the icon reads as winding itself backwards. */
             .lectio-manager-refresh.is-spinning svg {
-                animation: lectio-manager-spin 800ms linear infinite;
+                animation: lectio-manager-spin 900ms linear infinite;
+                transition: none;
             }
 
             @keyframes lectio-manager-spin {
                 from { transform: rotate(0deg); }
                 to { transform: rotate(360deg); }
+            }
+
+            @media (prefers-reduced-motion: reduce) {
+                .lectio-manager-channel-btn,
+                .lectio-manager-help,
+                .lectio-manager-refresh,
+                .lectio-manager-close,
+                .lectio-manager-channel-btn svg,
+                .lectio-manager-help svg,
+                .lectio-manager-refresh svg,
+                .lectio-manager-close svg {
+                    transition: none;
+                }
+
+                .lectio-manager-channel-btn:active,
+                .lectio-manager-help:active,
+                .lectio-manager-refresh:active:not(:disabled),
+                .lectio-manager-close:active,
+                .lectio-manager-close:hover svg,
+                .lectio-manager-refresh:hover:not(:disabled) svg {
+                    transform: none;
+                }
+
+                .lectio-manager-refresh.is-spinning svg {
+                    animation-duration: 2.4s;
+                }
             }
 
             .lectio-manager-main-view,
@@ -4016,8 +4171,8 @@
                 display: inline-flex;
                 align-items: center;
                 justify-content: center;
-                width: 15px;
-                height: 15px;
+                width: 16px;
+                height: 16px;
                 padding: 0;
                 border: none;
                 border-radius: 50%;
@@ -4025,16 +4180,19 @@
                 color: var(--lectio-theme-muted, #8a969b);
                 cursor: pointer;
                 flex: none;
+                transition: color 140ms ease;
             }
 
             .lectio-manager-setting-info svg {
                 width: 100%;
                 height: 100%;
+                display: block;
                 fill: none;
                 stroke: currentColor;
-                stroke-width: 2;
+                stroke-width: 1.8;
                 stroke-linecap: round;
                 stroke-linejoin: round;
+                shape-rendering: geometricPrecision;
             }
 
             .lectio-manager-setting-info:hover,
@@ -4221,7 +4379,6 @@
                 --lectio-dock-item-size: 42px;
                 --lectio-dock-gap: 6px;
                 position: fixed;
-                left: 14px;
                 z-index: 999998;
                 display: flex;
                 align-items: flex-start;
@@ -4234,17 +4391,42 @@
                 pointer-events: none !important;
             }
 
-            #lectio-manager-dock-root[data-position='top'] {
+            /* Which edge the dock hugs. */
+            #lectio-manager-dock-root[data-edge='left'] { left: 14px; }
+            #lectio-manager-dock-root[data-edge='right'] { right: 14px; }
+            #lectio-manager-dock-root[data-edge='top'] { top: 14px; }
+            #lectio-manager-dock-root[data-edge='bottom'] { bottom: 14px; }
+
+            /* Where it sits along that edge. */
+            #lectio-manager-dock-root[data-orientation='vertical'][data-align='start'] {
                 top: 16px;
             }
 
-            #lectio-manager-dock-root[data-position='center'] {
+            #lectio-manager-dock-root[data-orientation='vertical'][data-align='center'] {
                 top: 50%;
                 transform: translateY(-50%);
             }
 
-            #lectio-manager-dock-root[data-position='bottom'] {
+            #lectio-manager-dock-root[data-orientation='vertical'][data-align='end'] {
                 bottom: 16px;
+            }
+
+            #lectio-manager-dock-root[data-orientation='horizontal'][data-align='start'] {
+                left: 16px;
+            }
+
+            #lectio-manager-dock-root[data-orientation='horizontal'][data-align='center'] {
+                left: 50%;
+                transform: translateX(-50%);
+            }
+
+            /* A bottom-right dock would land on the Manager's own gear button. */
+            #lectio-manager-dock-root[data-orientation='horizontal'][data-align='end'] {
+                right: 16px;
+            }
+
+            #lectio-manager-dock-root[data-edge='bottom'][data-align='end'] {
+                right: 72px;
             }
 
             .lectio-manager-dock-shell {
@@ -4257,18 +4439,43 @@
                 transition: transform 150ms ease, opacity 150ms ease;
             }
 
+            /* Auto-hide slides the shell off whichever edge it is docked to. */
             #lectio-manager-dock-root.is-auto-hide:not(:hover):not(:focus-within):not(.has-open-panel) .lectio-manager-dock-shell {
-                transform: translateX(calc(-100% + 10px));
                 opacity: .55;
+            }
+
+            #lectio-manager-dock-root[data-edge='left'].is-auto-hide:not(:hover):not(:focus-within):not(.has-open-panel) .lectio-manager-dock-shell {
+                transform: translateX(calc(-100% + 10px));
+            }
+
+            #lectio-manager-dock-root[data-edge='right'].is-auto-hide:not(:hover):not(:focus-within):not(.has-open-panel) .lectio-manager-dock-shell {
+                transform: translateX(calc(100% - 10px));
+            }
+
+            #lectio-manager-dock-root[data-edge='top'].is-auto-hide:not(:hover):not(:focus-within):not(.has-open-panel) .lectio-manager-dock-shell {
+                transform: translateY(calc(-100% + 10px));
+            }
+
+            #lectio-manager-dock-root[data-edge='bottom'].is-auto-hide:not(:hover):not(:focus-within):not(.has-open-panel) .lectio-manager-dock-shell {
+                transform: translateY(calc(100% - 10px));
             }
 
             .lectio-manager-dock-items {
                 display: flex;
-                flex-direction: column;
                 gap: var(--lectio-dock-gap);
+                scrollbar-width: thin;
+            }
+
+            #lectio-manager-dock-root[data-orientation='vertical'] .lectio-manager-dock-items {
+                flex-direction: column;
                 overflow-x: hidden;
                 overflow-y: auto;
-                scrollbar-width: thin;
+            }
+
+            #lectio-manager-dock-root[data-orientation='horizontal'] .lectio-manager-dock-items {
+                flex-direction: row;
+                overflow-x: auto;
+                overflow-y: hidden;
             }
 
             .lectio-manager-dock-item {
@@ -4302,8 +4509,12 @@
                 opacity: .45;
             }
 
-            .lectio-manager-dock-item.is-drop-target {
+            #lectio-manager-dock-root[data-orientation='vertical'] .lectio-manager-dock-item.is-drop-target {
                 box-shadow: 0 -3px 0 var(--lectio-theme-accent, #0f6f6f);
+            }
+
+            #lectio-manager-dock-root[data-orientation='horizontal'] .lectio-manager-dock-item.is-drop-target {
+                box-shadow: -3px 0 0 var(--lectio-theme-accent, #0f6f6f);
             }
 
             .lectio-manager-dock-item:disabled {
@@ -4369,10 +4580,8 @@
 
             .lectio-manager-dock-tooltip {
                 position: absolute;
-                left: calc(100% + 8px);
                 z-index: 2;
                 max-width: min(260px, calc(100vw - 100px));
-                transform: translateY(-50%);
                 border: 1px solid var(--lectio-theme-muted, #d6dde0);
                 border-radius: 6px;
                 background: var(--lectio-theme-text, #10201e);
@@ -4385,14 +4594,33 @@
                 white-space: nowrap;
             }
 
+            /* The tooltip always sits on the inward side of the dock. */
+            #lectio-manager-dock-root[data-edge='left'] .lectio-manager-dock-tooltip {
+                left: calc(100% + 8px);
+                transform: translateY(-50%);
+            }
+
+            #lectio-manager-dock-root[data-edge='right'] .lectio-manager-dock-tooltip {
+                right: calc(100% + 8px);
+                transform: translateY(-50%);
+            }
+
+            #lectio-manager-dock-root[data-edge='top'] .lectio-manager-dock-tooltip {
+                top: calc(100% + 8px);
+                transform: translateX(-50%);
+            }
+
+            #lectio-manager-dock-root[data-edge='bottom'] .lectio-manager-dock-tooltip {
+                bottom: calc(100% + 8px);
+                transform: translateX(-50%);
+            }
+
             .lectio-manager-dock-tooltip[hidden] {
                 display: none !important;
             }
 
             .lectio-manager-dock-flyout {
                 position: absolute;
-                left: calc(100% + 10px);
-                top: 0;
                 width: min(360px, calc(100vw - 100px));
                 max-height: min(76vh, 560px);
                 box-sizing: border-box;
@@ -4408,14 +4636,47 @@
                 display: none !important;
             }
 
-            #lectio-manager-dock-root[data-position='center'] .lectio-manager-dock-flyout {
+            /* The flyout opens away from the edge, then lines up with the dock. */
+            #lectio-manager-dock-root[data-edge='left'] .lectio-manager-dock-flyout {
+                left: calc(100% + 10px);
+            }
+
+            #lectio-manager-dock-root[data-edge='right'] .lectio-manager-dock-flyout {
+                right: calc(100% + 10px);
+            }
+
+            #lectio-manager-dock-root[data-edge='top'] .lectio-manager-dock-flyout {
+                top: calc(100% + 10px);
+            }
+
+            #lectio-manager-dock-root[data-edge='bottom'] .lectio-manager-dock-flyout {
+                bottom: calc(100% + 10px);
+            }
+
+            #lectio-manager-dock-root[data-orientation='vertical'][data-align='start'] .lectio-manager-dock-flyout {
+                top: 0;
+            }
+
+            #lectio-manager-dock-root[data-orientation='vertical'][data-align='center'] .lectio-manager-dock-flyout {
                 top: 50%;
                 transform: translateY(-50%);
             }
 
-            #lectio-manager-dock-root[data-position='bottom'] .lectio-manager-dock-flyout {
-                top: auto;
+            #lectio-manager-dock-root[data-orientation='vertical'][data-align='end'] .lectio-manager-dock-flyout {
                 bottom: 0;
+            }
+
+            #lectio-manager-dock-root[data-orientation='horizontal'][data-align='start'] .lectio-manager-dock-flyout {
+                left: 0;
+            }
+
+            #lectio-manager-dock-root[data-orientation='horizontal'][data-align='center'] .lectio-manager-dock-flyout {
+                left: 50%;
+                transform: translateX(-50%);
+            }
+
+            #lectio-manager-dock-root[data-orientation='horizontal'][data-align='end'] .lectio-manager-dock-flyout {
+                right: 0;
             }
 
             .lectio-manager-dock-flyout-close {
@@ -4460,8 +4721,12 @@
                     width: calc(100vw - 20px);
                 }
 
-                #lectio-manager-dock-root {
+                #lectio-manager-dock-root[data-edge='left'] {
                     left: 8px;
+                }
+
+                #lectio-manager-dock-root[data-edge='right'] {
+                    right: 8px;
                 }
 
                 .lectio-manager-dock-flyout {

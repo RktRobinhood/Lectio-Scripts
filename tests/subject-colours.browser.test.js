@@ -14,12 +14,16 @@ const chromePath = process.env.CHROME_PATH ||
 test('subject colours are learned from a repeating timetable and keep their own colour space', async () => {
     const profileDirectory = await mkdtemp(join(tmpdir(), 'lectio-subject-colours-'));
     const fixtureUrl = pathToFileURL(resolve(__dirname, 'fixtures', 'subject-colours.html')).href;
-    const runFixture = async (phase) => {
+    // A phase that has to outlast a timer needs Chrome to keep the page alive
+    // past the load event, which a virtual-time budget does by fast-forwarding
+    // its clock instead of making the suite wait in real time.
+    const runFixture = async (phase, { virtualTimeMs = 0 } = {}) => {
         const { stdout } = await execFileAsync(chromePath, [
             '--headless=new',
             '--disable-gpu',
             '--allow-file-access-from-files',
             `--user-data-dir=${profileDirectory}`,
+            ...(virtualTimeMs ? [`--virtual-time-budget=${virtualTimeMs}`] : []),
             '--dump-dom',
             phase ? `${fixtureUrl}?phase=${phase}` : fixtureUrl
         ]);
@@ -72,6 +76,14 @@ test('subject colours are learned from a repeating timetable and keep their own 
         // leaving its old floating control behind.
         const dock = await runFixture('dock');
         assert.match(dock, /data-test-result="pass"/, dock);
+
+        // Left on automatic, the key goes to the dock when a Manager answers
+        // Discovery, and falls back to the page when none ever does.
+        const autoDock = await runFixture('auto-dock');
+        assert.match(autoDock, /data-test-result="pass"/, autoDock);
+
+        const autoFloating = await runFixture('auto-floating', { virtualTimeMs: 12000 });
+        assert.match(autoFloating, /data-test-result="pass"/, autoFloating);
 
         // Turning the key off in settings removes it from the page entirely.
         const legendOff = await runFixture('legend-off');

@@ -63,7 +63,9 @@
             scanWeeks: 0,
             colourOther: true,
             showLegend: phase !== 'legend-off',
-            legendLocation: phase === 'dock' ? 'dock' : 'floating',
+            legendLocation: phase === 'dock'
+                ? 'dock'
+                : (phase.startsWith('auto-') ? 'auto' : 'floating'),
             patternMarkers: phase === 'pattern' || phase === 'pattern-scale',
             patternScale: phase === 'pattern-scale' ? 150 : 100,
             // The locked phase pins one class to a colour of its own and asks
@@ -219,9 +221,10 @@
     <script src="../../modules/Lectio-Theming.user.js"></script>
     <script src="../../modules/Lectio-Subject-Colours.user.js"></script>
     <script>
-        window.addEventListener('load', () => {
+        window.addEventListener('load', async () => {
             const result = document.createElement('pre');
             result.id = 'test-result';
+            const wait = (ms) => new Promise((done) => window.setTimeout(done, ms));
 
             const phase = new URLSearchParams(location.search).get('phase') || 'first';
             const kindOf = (id) => document.getElementById(id).getAttribute('data-lectio-subject');
@@ -469,6 +472,38 @@
                     if (rows.length !== 2) {
                         throw new Error(`the dock colour key listed ${rows.length} classes instead of 2`);
                     }
+                }
+
+                // 'auto' holds the key back until it knows whether a Manager is
+                // there to hand it to, rather than flashing a floating key.
+                if (phase.startsWith('auto-')) {
+                    if (document.getElementById('lectio-subject-colours-legend')) {
+                        throw new Error('the floating colour key appeared before the Manager grace window closed');
+                    }
+                }
+
+                if (phase === 'auto-dock') {
+                    // The Manager asking every module to register is how a
+                    // module learns the Manager is installed at all.
+                    window.dispatchEvent(new CustomEvent('lectio-manager:discover'));
+
+                    if (document.getElementById('lectio-subject-colours-legend')) {
+                        throw new Error('automatic mode left a floating key on a page with the Manager');
+                    }
+                    if (!window.dockRegistrations.get('subject-colours:colour-key')) {
+                        throw new Error('automatic mode did not hand the colour key to the dock');
+                    }
+                }
+
+                if (phase === 'auto-floating') {
+                    // No Manager ever answers, so the key falls back to the page.
+                    await wait(3200);
+
+                    if (window.dockRegistrations.get('subject-colours:colour-key')) {
+                        throw new Error('automatic mode registered a dock item with no Manager present');
+                    }
+                    const fallback = document.getElementById('lectio-subject-colours-legend');
+                    if (!fallback) throw new Error('automatic mode never fell back to the floating colour key');
                 }
 
                 // Off by default: no other phase in this run turns the

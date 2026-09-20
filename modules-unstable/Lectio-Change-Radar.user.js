@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Change Radar
 // @namespace    https://github.com/RktRobinhood/Lectio-Scripts
-// @version      0.3.0
+// @version      0.4.0
 // @description  Watches your Lectio timetable for cancellations and schedule changes and keeps a compact recent-change HUD.
 // @author       RktRobinhood
 // @match        https://www.lectio.dk/lectio/*
@@ -20,7 +20,7 @@
     id: 'change-radar',
     aliases: ['schedule-change-radar', 'lectio-change-radar', 'change-log'],
     name: 'Lectio Change Radar',
-    version: '0.3.0',
+    version: '0.4.0',
     channel: 'unstable'
   });
 
@@ -32,8 +32,10 @@
     autoSeenDelayMs: 1200
   });
 
+  const DISPLAY_MODES = Object.freeze(['auto', 'dock', 'floating']);
+
   const DEFAULT_SETTINGS = Object.freeze({
-    displayMode: 'floating',
+    displayMode: 'auto',
     pollMinutes: 10,
     weeksAhead: 1,
     urgentHours: 24,
@@ -44,8 +46,8 @@
   });
 
   const SETTING_SCHEMA = Object.freeze([
-    makeSelectSetting('displayMode', 'Radar location', 'Keep the radar floating on the page or place it in Lectio Manager\'s shared dock.', 'floating', [
-      ['floating', 'Floating on the page'], ['dock', 'Shared Manager dock']
+    makeSelectSetting('displayMode', 'Radar location', 'Where the radar lives. Automatic uses Lectio Manager\'s shared dock when the Manager is installed, and falls back to a floating radar when it is not.', 'auto', [
+      ['auto', 'Automatic'], ['dock', 'Always the Manager dock'], ['floating', 'Always floating on the page']
     ]),
     makeSelectSetting('pollMinutes', 'Check frequency', 'How often Change Radar checks Lectio while a Lectio tab is open.', 10, [
       [5, 'Every 5 minutes'], [10, 'Every 10 minutes'], [15, 'Every 15 minutes'], [30, 'Every 30 minutes']
@@ -97,20 +99,29 @@
     timer: null,
     viewTimer: null,
     dockMount: null,
+    managerSeen: false,
+    graceTimer: null,
     lastError: ''
   };
+
+  // The Manager announces itself by asking every module to register. Automatic
+  // mode waits that long before falling back to a floating radar, so a page with
+  // the Manager installed does not flash a floating HUD that then jumps away.
+  const MANAGER_GRACE_MS = 2500;
+  const loadedAt = Date.now();
 
   runtime.settings = loadSettings();
   runtime.state = loadState();
 
   registerWithManager();
-  window.addEventListener('lectio-manager:discover', registerWithManager);
+  window.addEventListener('lectio-manager:discover', handleDiscovery);
   window.addEventListener('lectio-manager:set-setting', handleManagerSettingsEvent);
   window.addEventListener('lectio-manager:dock:render-panel', handleDockPanelRender);
   window.addEventListener('pagehide', () => {
     removeDockItem();
     window.clearInterval(runtime.timer);
     window.clearTimeout(runtime.viewTimer);
+    window.clearTimeout(runtime.graceTimer);
   }, { once: true });
 
   for (const eventName of [
@@ -1029,6 +1040,22 @@
       </svg>`;
   }
 
+  function handleDiscovery() {
+    runtime.managerSeen = true;
+    window.clearTimeout(runtime.graceTimer);
+    runtime.graceTimer = null;
+    registerWithManager();
+  }
+
+  // 'auto' resolves to the dock once the Manager has spoken, and to the floating
+  // radar once it is clear no Manager is going to. 'waiting' is that short gap.
+  function resolveDisplayMode() {
+    const mode = runtime.settings.displayMode;
+    if (mode === 'dock' || mode === 'floating') return mode;
+    if (runtime.managerSeen) return 'dock';
+    return Date.now() - loadedAt < MANAGER_GRACE_MS ? 'waiting' : 'floating';
+  }
+
   function renderHud() {
     syncTheme();
 
@@ -1036,8 +1063,20 @@
     const lastViewed = readNumber(STORAGE.lastViewed);
     const status = getRadarState(history, lastViewed);
     const view = { status, history, lastViewed };
+    const mode = resolveDisplayMode();
 
-    if (runtime.settings.displayMode === 'dock') {
+    if (mode === 'waiting') {
+      document.getElementById(UI.root)?.remove();
+      if (!runtime.graceTimer) {
+        runtime.graceTimer = window.setTimeout(() => {
+          runtime.graceTimer = null;
+          renderHud();
+        }, MANAGER_GRACE_MS - (Date.now() - loadedAt));
+      }
+      return;
+    }
+
+    if (mode === 'dock') {
       document.getElementById(UI.root)?.remove();
       registerDockItem(status);
       renderDockPanel(view);
@@ -1471,7 +1510,7 @@
 
   function sanitizeSettings(values) {
     const out = { ...DEFAULT_SETTINGS };
-    if (['floating', 'dock'].includes(values?.displayMode)) {
+    if (DISPLAY_MODES.includes(values?.displayMode)) {
       out.displayMode = values.displayMode;
     }
     const allowed = {

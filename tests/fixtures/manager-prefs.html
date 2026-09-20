@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio Manager preferences fixture</title>
+</head>
+<body>
+    <script>
+        const catalogue = {
+            schemaVersion: 1,
+            generatedAt: '2026-09-19T00:00:00.000Z',
+            modules: []
+        };
+        // A dock record written by the previous release: a single vertical
+        // position, and the left edge taken for granted.
+        const legacyDock = JSON.stringify({
+            version: 1,
+            order: ['test-module:only'],
+            position: 'bottom',
+            sizeMode: 'small',
+            autoFit: false,
+            autoHide: false
+        });
+        const storage = new Map([
+            ['lectioManager.catalogue.v1', JSON.stringify(catalogue)],
+            ['lectioManager.lastRefresh.v1', Date.now()],
+            ['lectioManager.updateTipDismissed.v1', true],
+            ['lectioManager.dock.v1', legacyDock],
+            ['lectioManager.releaseChannel.v1', 'unstable']
+        ]);
+
+        window.GM_getValue = (key, fallback) => storage.has(key) ? storage.get(key) : fallback;
+        window.GM_setValue = (key, value) => storage.set(key, value);
+        window.GM_xmlhttpRequest = () => {};
+    </script>
+    <script src="../../manager/Lectio-Manager.user.js"></script>
+    <script>
+        function assert(condition, message) {
+            if (!condition) throw new Error(message);
+        }
+
+        window.addEventListener('load', async () => {
+            try {
+                const dock = document.querySelector('#lectio-manager-dock-root');
+                window.dispatchEvent(new CustomEvent('lectio-manager:dock:register', {
+                    detail: { moduleId: 'test-module', itemId: 'only', type: 'action', label: 'Only item' }
+                }));
+
+                assert(dock.dataset.edge === 'left', `Migrated dock left its edge unset: ${dock.dataset.edge}`);
+                assert(dock.dataset.align === 'end', `Legacy position 'bottom' did not migrate to align 'end': ${dock.dataset.align}`);
+                assert(dock.dataset.orientation === 'vertical', 'Migrated dock was not vertical');
+
+                document.querySelector('#lectio-manager-toggle').click();
+                document.querySelector('.lectio-manager-channel-btn').click();
+
+                // The other migrated preferences survive the version bump.
+                assert(document.querySelector('.lectio-manager-dock-size').value === 'small', 'Migration dropped the saved icon size');
+                assert(document.querySelector('.lectio-manager-dock-fit').checked === false, 'Migration dropped the saved fit preference');
+                assert(document.querySelector('.lectio-manager-dock-align').value === 'end', 'Migrated alignment did not reach its control');
+
+                // Release channel is one row with a dropdown, not a radio group.
+                assert(!document.querySelector('input[name="lectio-manager-channel"]'), 'Release channel still renders radio buttons');
+                const channel = document.querySelector('.lectio-manager-channel-select');
+                assert(channel.value === 'unstable', `Channel dropdown did not show the stored channel: ${channel.value}`);
+                const note = document.querySelector('.lectio-manager-channel-note');
+                assert(!note.hidden, 'The unstable caveat was hidden while the unstable channel was selected');
+
+                channel.value = 'stable';
+                channel.dispatchEvent(new Event('change', { bubbles: true }));
+                assert(storage.get('lectioManager.releaseChannel.v1') === 'stable', 'Channel dropdown did not persist its choice');
+                assert(note.hidden, 'The unstable caveat stayed visible on the stable channel');
+
+                // "Release channel" explains itself on demand rather than taking
+                // permanent space in the panel.
+                const channelInfo = document.querySelector('.lectio-manager-channel-info');
+                const channelHelp = document.querySelector('.lectio-manager-channel-help');
+                assert(channelHelp.hidden, 'The channel explanation was showing before it was asked for');
+                assert(channelInfo.getAttribute('aria-controls') === channelHelp.id, 'The channel info button is not wired to its explanation');
+                channelInfo.click();
+                assert(!channelHelp.hidden, 'The channel info button did not reveal its explanation');
+                assert(channelInfo.getAttribute('aria-expanded') === 'true', 'The channel info button did not report itself expanded');
+                channelInfo.click();
+                assert(channelHelp.hidden, 'The channel info button did not hide its explanation again');
+
+                // Alignment is named for the edge it runs along.
+                const edge = document.querySelector('.lectio-manager-dock-edge');
+                const align = document.querySelector('.lectio-manager-dock-align');
+                assert(align.querySelector('option[value="start"]').textContent === 'Top', 'A left-edge dock did not label its alignment vertically');
+                edge.value = 'top';
+                edge.dispatchEvent(new Event('change', { bubbles: true }));
+                assert(align.querySelector('option[value="start"]').textContent === 'Left', 'A top-edge dock did not relabel its alignment horizontally');
+                assert(dock.dataset.orientation === 'horizontal', 'A top-edge dock did not turn into a row');
+
+                document.documentElement.dataset.testResult = 'pass';
+            } catch (error) {
+                document.documentElement.dataset.testResult = `fail: ${error.message}`;
+            }
+        });
+    </script>
+</body>
+</html>

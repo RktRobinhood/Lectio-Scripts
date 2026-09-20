@@ -11,9 +11,9 @@ const execFileAsync = promisify(execFile);
 const chromePath = process.env.CHROME_PATH ||
     'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe';
 
-test('manager dock supports lifecycle, activation, panels, ordering, and preferences', async () => {
-    const profileDirectory = await mkdtemp(join(tmpdir(), 'lectio-manager-dock-'));
-    const fixtureUrl = pathToFileURL(resolve(__dirname, 'fixtures', 'manager-dock.html')).href;
+async function runFixture(fixtureName, profilePrefix) {
+    const profileDirectory = await mkdtemp(join(tmpdir(), profilePrefix));
+    const fixtureUrl = pathToFileURL(resolve(__dirname, 'fixtures', fixtureName)).href;
 
     try {
         const { stdout } = await execFileAsync(chromePath, [
@@ -30,4 +30,12 @@ test('manager dock supports lifecycle, activation, panels, ordering, and prefere
     } finally {
         await rm(profileDirectory, { recursive: true, force: true });
     }
+}
+
+test('manager dock supports lifecycle, activation, panels, ordering, and placement', async () => {
+    await runFixture('manager-dock.html', 'lectio-manager-dock-');
+});
+
+test('manager migrates v1 dock placement and renders the channel as one dropdown', async () => {
+    await runFixture('manager-prefs.html', 'lectio-manager-prefs-');
 });

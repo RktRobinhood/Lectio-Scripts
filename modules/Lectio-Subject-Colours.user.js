@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Subject Colours
 // @namespace    https://www.lectio.dk/
-// @version      0.7.0
+// @version      0.8.0
 // @description  Learns which classes are actually yours from your own timetable and gives each one its own colour, with a separate muted spectrum for one-off activities like assemblies and meetings.
 // @match        https://www.lectio.dk/lectio/*
 // @grant        none
@@ -15,7 +15,7 @@
 
     const MODULE_ID = 'subject-colours';
     const MODULE_NAME = 'Lectio - Subject Colours';
-    const MODULE_VERSION = '0.7.0';
+    const MODULE_VERSION = '0.8.0';
     const LOG = '[Lectio Subject Colours]';
     const STYLE_ID = 'lectio-subject-colours-styles';
 
@@ -85,9 +85,14 @@
         { value: 'strict', label: 'Strict — only firm weekly classes' }
     ];
     const LEGEND_LOCATION_OPTIONS = [
-        { value: 'floating', label: 'Floating on the page' },
-        { value: 'dock', label: 'Shared Manager dock' }
+        { value: 'auto', label: 'Automatic' },
+        { value: 'dock', label: 'Always the Manager dock' },
+        { value: 'floating', label: 'Always floating on the page' }
     ];
+    // The Manager announces itself by asking every module to register. Automatic
+    // mode waits that long before falling back to the floating key, so a page
+    // with the Manager installed does not flash a key that then jumps away.
+    const MANAGER_GRACE_MS = 2500;
     const REGULARITY_THRESHOLDS = Object.freeze({
         loose: { minWeeks: 1, minOccurrences: 2 },
         balanced: { minWeeks: 2, minOccurrences: 3 },
@@ -102,7 +107,7 @@
         scanWeeks: 8,
         colourOther: true,
         showLegend: false,
-        legendLocation: 'floating',
+        legendLocation: 'auto',
         patternMarkers: false,
         patternScale: 100,
         lockColours: false,
@@ -156,6 +161,9 @@
     let previewStyle = null;
     let legendExpanded = false;
     let dockLegendMount = null;
+    let managerSeen = false;
+    let managerGraceTimer = 0;
+    const loadedAt = Date.now();
     let scanning = false;
     let applyHandle = 0;
     let themeHandle = 0;
@@ -1660,6 +1668,23 @@
         renderDockLegendPanel();
     }
 
+    function handleDiscovery() {
+        managerSeen = true;
+        window.clearTimeout(managerGraceTimer);
+        managerGraceTimer = 0;
+        announce();
+    }
+
+    // 'auto' resolves to the dock once the Manager has spoken, and to the
+    // floating key once it is clear no Manager is going to. 'waiting' is the gap.
+    function resolveLegendLocation() {
+        if (settings.legendLocation === 'dock' || settings.legendLocation === 'floating') {
+            return settings.legendLocation;
+        }
+        if (managerSeen) return 'dock';
+        return Date.now() - loadedAt < MANAGER_GRACE_MS ? 'waiting' : 'floating';
+    }
+
     function renderLegend() {
         if (!settings.showLegend) {
             removeLegend();
@@ -1672,7 +1697,20 @@
             return;
         }
 
-        if (settings.legendLocation === 'dock') {
+        const location = resolveLegendLocation();
+
+        if (location === 'waiting') {
+            removeFloatingLegend();
+            if (!managerGraceTimer) {
+                managerGraceTimer = window.setTimeout(() => {
+                    managerGraceTimer = 0;
+                    if (!lifecycle.signal.aborted) renderLegend();
+                }, MANAGER_GRACE_MS - (Date.now() - loadedAt));
+            }
+            return;
+        }
+
+        if (location === 'dock') {
             removeFloatingLegend();
             registerDockLegend(keys);
             renderDockLegendPanel(keys);
@@ -1893,7 +1931,8 @@
                     type: 'select',
                     label: 'Colour key location',
                     section: 'Colours',
-                    description: 'Keep the key floating on the page or place it in Lectio Manager\'s shared dock.',
+                    description: 'Automatic puts the key in Lectio Manager\'s shared dock when the Manager is '
+                        + 'installed, and falls back to a floating key on the page when it is not.',
                     options: LEGEND_LOCATION_OPTIONS
                 }]
                 : []),
@@ -2151,13 +2190,14 @@
         }
     }
 
-    window.addEventListener('lectio-manager:discover', announce, { signal: lifecycle.signal });
+    window.addEventListener('lectio-manager:discover', handleDiscovery, { signal: lifecycle.signal });
     window.addEventListener('lectio-manager:set-setting', handleSetting, { signal: lifecycle.signal });
     window.addEventListener('lectio-manager:preview-setting', handlePreview, { signal: lifecycle.signal });
     window.addEventListener('lectio-manager:clear-setting-preview', handleClearPreview, { signal: lifecycle.signal });
     window.addEventListener('lectio-manager:dock:render-panel', handleDockPanelRender, { signal: lifecycle.signal });
     window.addEventListener('pagehide', () => {
         removeDockLegend();
+        window.clearTimeout(managerGraceTimer);
         lifecycle.abort();
     }, { once: true });
 

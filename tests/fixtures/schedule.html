@@ -162,8 +162,18 @@
                 setSetting('hoverPreview', false);
                 if (summaryRow.dataset.hoverPreview !== 'false') throw new Error('hover preview was not disabled immediately');
 
+                // The tooltip fades in, and a computed style read in the same task as
+                // the focus change still reports the transition's *start* value, so a
+                // plain read here says 0 whatever the preview actually does. Settle the
+                // running transitions first and read the state they land on.
+                const settledOpacity = (element) => {
+                    element.getAnimations().forEach(animation => animation.finish());
+                    return parseFloat(getComputedStyle(element).opacity);
+                };
+
+                if (settledOpacity(tooltip) !== 0) throw new Error('preview is showing without hover or focus');
                 toggle.focus();
-                if (parseFloat(getComputedStyle(tooltip).opacity) === 0) throw new Error('keyboard preview was lost when hover preview was disabled');
+                if (settledOpacity(tooltip) === 0) throw new Error('keyboard preview was lost when hover preview was disabled');
                 const originalInformationCell = informationRow.querySelector('td:nth-child(2)');
                 const tooltipFontSize = parseFloat(getComputedStyle(tooltip).fontSize);
                 const originalFontSize = parseFloat(getComputedStyle(originalInformationCell).fontSize);

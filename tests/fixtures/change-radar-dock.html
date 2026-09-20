@@ -10,7 +10,7 @@
             modules: [{
                 id: 'change-radar',
                 name: 'Lectio Change Radar',
-                version: '0.3.0',
+                version: '0.4.0',
                 description: 'Test radar',
                 status: 'unstable',
                 installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Change-Radar.user.js'
@@ -56,12 +56,17 @@
                 assert(registration, 'Change Radar did not register with the Manager');
                 assert(registration.settingsSchema.find((item) => item.key === 'displayMode')?.type === 'select', 'Radar location was not exposed as a select setting');
                 assert(registration.settingsSchema.find((item) => item.key === 'hoverOpen')?.type === 'toggle', 'Radar toggle settings did not use the Manager schema');
-                assert(document.getElementById('lectio-change-radar'), 'The default floating radar was missing');
+                assert(registration.currentValues.displayMode === 'auto', `Radar location did not default to automatic: ${registration.currentValues.displayMode}`);
+
+                // The Manager is installed on this page, so automatic mode puts
+                // the radar in the shared dock rather than floating on the page.
+                assert(!document.getElementById('lectio-change-radar'), 'Automatic mode left a floating radar on a page with the Manager');
+                assert(document.querySelector('[data-dock-key="change-radar:radar"]'), 'Automatic mode did not place the radar in the dock');
 
                 window.dispatchEvent(new CustomEvent('lectio-manager:set-setting', {
-                    detail: { id: 'another-module', key: 'displayMode', value: 'dock' }
+                    detail: { id: 'another-module', key: 'displayMode', value: 'floating' }
                 }));
-                assert(document.getElementById('lectio-change-radar'), 'An unrelated module setting moved the radar');
+                assert(!document.getElementById('lectio-change-radar'), 'An unrelated module setting moved the radar');
 
                 window.dispatchEvent(new CustomEvent('lectio-manager:set-setting', {
                     detail: { id: 'change-radar', key: 'displayMode', value: 'dock' }
@@ -85,6 +90,13 @@
                 assert(document.getElementById('lectio-change-radar'), 'The floating radar did not return');
                 assert(!document.querySelector('[data-dock-key="change-radar:radar"]'), 'The radar dock item was not removed');
                 assert(dock.hidden && dock.hasAttribute('inert'), 'The empty dock remained visible or interactive');
+
+                // Going back to automatic returns the radar to the dock.
+                window.dispatchEvent(new CustomEvent('lectio-manager:set-setting', {
+                    detail: { id: 'change-radar', key: 'displayMode', value: 'auto' }
+                }));
+                assert(!document.getElementById('lectio-change-radar'), 'Automatic mode left the floating radar behind');
+                assert(document.querySelector('[data-dock-key="change-radar:radar"]'), 'Automatic mode did not return the radar to the dock');
 
                 result.dataset.testResult = 'pass';
                 result.textContent = 'PASS';

@@ -39,7 +39,7 @@ They run locally in your browser while you use Lectio. Install only the modules 
 - opens on a compact **Installed** tab, with a counted **Available** tab for discovering modules you have not installed yet; its audience and category filters narrow only that available set, and an installed module never appears in both,
 - sorts either tab by Category or Name immediately, without interrupting navigation,
 - explains a setting when you click the small **ⓘ** next to it, instead of always showing that text, so a module's settings panel doesn't read as more overwhelming than it needs to; and keeps a settings group most people will never need — such as Lectio Theming's **Custom palette** — collapsed behind a click, so the built-in themes stay what you see first,
-- owns a compact shared **left dock** for modules that need an always-available control, including consistent icons, badges, flyouts, adaptive sizing, and saved drag ordering; it disappears completely when no module uses it,
+- owns a compact **shared dock** for modules that need an always-available control, including consistent icons, badges, flyouts, adaptive sizing, and saved drag ordering; it sits on the left edge by default, can be moved to any screen edge, and disappears completely when no module uses it,
 - has one **wrench button** in the header that opens Tampermonkey's own dashboard directly, for disabling, updating, or removing any script — since that dashboard already lists everything installed, there's no need for a separate button per module,
 - has a **Report a bug or idea** link at the bottom of the panel, straight to this repository's GitHub Issue templates.
 
@@ -47,7 +47,7 @@ The Manager itself contains **no feature logic**. Translation, message polling, 
 
 Look for a small teal gear button in the bottom-right corner of any Lectio page after installing it.
 
-The settings button inside the Manager header opens grouped Manager preferences. **Release channel** keeps the Stable/Unstable choice and its warning separate from **Dock**, where you can choose the dock's vertical position and icon size, fit it to the window, enable auto-hide, or reset the saved order. Dock controls can also be reordered directly by dragging them or by focusing one and pressing **Ctrl+Arrow Up/Down**.
+The settings button inside the Manager header opens Manager preferences. **Release channel** is a single dropdown for the Stable/Unstable choice, with an **ⓘ** beside it that explains what a channel is; the extra warning appears only while Unstable is selected. Under **Dock**, **Screen edge** puts the dock on the left (the default), right, top, or bottom of the window, and **Position on edge** slides it along that edge — top/middle/bottom for a left or right dock, left/centre/right for a top or bottom one. The same section sets icon size, whether icons shrink to fit the screen, auto-hide, and a reset for the saved order. Dock controls can also be reordered directly by dragging them or by focusing one and pressing **Ctrl** with an arrow key.
 
 > [!NOTE]
 > A module tells the Manager it exists by replying to a handshake, which it can only do on pages its own `@match` covers — Schedule Summary only runs on the schedule page, for example. The Manager therefore **remembers** each module it has seen and keeps counting it as installed everywhere, marking it *"Not active on this page"* where it isn't running. Settings stay hidden there, because a module that isn't running cannot receive them.

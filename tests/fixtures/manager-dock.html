@@ -172,17 +172,40 @@
 
                 document.querySelector('#lectio-manager-toggle').click();
                 document.querySelector('.lectio-manager-channel-btn').click();
-                const position = document.querySelector('.lectio-manager-dock-position');
-                position.value = 'bottom';
-                position.dispatchEvent(new Event('change', { bubbles: true }));
+
+                // Placement starts on the left edge, vertically centred, and the
+                // alignment labels read as a column reads.
+                assert(dock.dataset.edge === 'left', `Dock did not default to the left edge: ${dock.dataset.edge}`);
+                assert(dock.dataset.align === 'center', `Dock did not default to the middle: ${dock.dataset.align}`);
+                assert(dock.dataset.orientation === 'vertical', 'A left-edge dock was not vertical');
+                const align = document.querySelector('.lectio-manager-dock-align');
+                assert([...align.options].map((option) => option.textContent).join('|') === 'Top|Middle|Bottom',
+                    `Vertical alignment labels were wrong: ${[...align.options].map((option) => option.textContent)}`);
+
+                align.value = 'end';
+                align.dispatchEvent(new Event('change', { bubbles: true }));
+                assert(dock.dataset.align === 'end', 'Dock alignment preference was not applied');
+
+                const edge = document.querySelector('.lectio-manager-dock-edge');
+                edge.value = 'bottom';
+                edge.dispatchEvent(new Event('change', { bubbles: true }));
+                assert(dock.dataset.edge === 'bottom', 'Dock edge preference was not applied');
+                assert(dock.dataset.orientation === 'horizontal', 'A bottom-edge dock was not horizontal');
+                assert([...align.options].map((option) => option.textContent).join('|') === 'Left|Centre|Right',
+                    `Horizontal alignment labels were wrong: ${[...align.options].map((option) => option.textContent)}`);
+                assert(align.value === 'end', 'Changing edge silently dropped the chosen alignment');
+                assert(getComputedStyle(document.querySelector('.lectio-manager-dock-items')).flexDirection === 'row',
+                    'A horizontal dock still laid its items out as a column');
+
                 const size = document.querySelector('.lectio-manager-dock-size');
                 size.value = 'large';
                 size.dispatchEvent(new Event('change', { bubbles: true }));
                 const autoHide = document.querySelector('.lectio-manager-dock-autohide');
                 autoHide.click();
-                assert(dock.dataset.position === 'bottom', 'Dock position preference was not applied');
                 assert(dock.classList.contains('is-auto-hide'), 'Auto-hide preference was not applied');
-                assert(JSON.parse(storage.get('lectioManager.dock.v1')).sizeMode === 'large', 'Dock size preference was not persisted');
+                const saved = JSON.parse(storage.get('lectioManager.dock.v1'));
+                assert(saved.sizeMode === 'large', 'Dock size preference was not persisted');
+                assert(saved.edge === 'bottom' && saved.align === 'end', 'Dock placement was not persisted');
 
                 window.dispatchEvent(new CustomEvent('lectio-manager:dock:remove', {
                     detail: { moduleId: 'test-module' }
