@@ -47,6 +47,26 @@
           "description": "Eksperimentel Lectio-vagt med en kompakt radar-HUD i temaets farver. Du vælger selv, hvad den holder øje med - aflysninger, flytninger, lokaler, lærere og lektier i skemaet, plus valgfri overvågning af opgaver, fravær og dokumenter - med hastestatus, styr på usete ændringer og en roterende lokal ændringslog."
         }
       }
+    },
+    {
+      "id": "message-notifications",
+      "name": "Unread Message Notifications",
+      "description": "Shows an unread-message badge beside Beskeder / Messages. Works at any Lectio school, reading the school id from the page URL.",
+      "category": "Messages",
+      "audience": [
+        "student",
+        "teacher"
+      ],
+      "status": "unstable",
+      "version": "0.6.0",
+      "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Unread-Message-Notifications.user.js",
+      "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
+      "i18n": {
+        "da": {
+          "name": "Ulæste beskeder",
+          "description": "Viser et mærke med ulæste beskeder ved siden af Beskeder. Virker på alle Lectio-skoler og læser skolens id fra sidens adresse."
+        }
+      }
     }
   ]
 }
