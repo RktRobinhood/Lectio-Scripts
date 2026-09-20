@@ -69,6 +69,8 @@ Tampermonkey itself (not a custom browser extension) is the deliberately chosen 
 
 ## Adding a new module
 
+**Start from [`templates/Lectio-Module-Skeleton.user.js`](./templates/Lectio-Module-Skeleton.user.js)** rather than reproducing the boilerplate below by hand. It is a complete, working, do-nothing module — Discovery on load and on request, one setting of every control type the Manager renders, the theming seam, both languages, an optional dock item that fails quietly, and clean teardown — that you copy, rename, and cut down. It is a starting point, not a dependency: nothing imports it, it is in neither catalogue, and a module built from it is fully self-contained. [`templates/README.md`](./templates/README.md) carries the checklist for the two things a skeleton cannot enforce, the Experimental-first release path and the four places a version number lives.
+
 A new module starts in Unstable like every other module change ([ADR-0014](./docs/adr/0014-unstable-first-releases.md)), so read `modules-unstable/` for `modules/` and `modules-unstable/modules.json` for `catalogue/modules.json` below until the owner promotes it. A new module is just:
 
 1. A new `modules-unstable/<Name>.user.js` file with a standard header (`@name`, `@version`, `@match https://www.lectio.dk/lectio/*` or a narrower path, `@updateURL`/`@downloadURL` pointing at its own raw GitHub path — the one in the folder it actually lives in) that, on load and on receiving the `lectio-manager:discover` event, dispatches `lectio-module:register` with `{ id, name, version, settingsSchema, currentValues }` (an empty `settingsSchema: []` is fine if the module has no configurable options yet).

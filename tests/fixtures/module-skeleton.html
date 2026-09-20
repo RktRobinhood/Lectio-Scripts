@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio module skeleton fixture</title>
+    <script>
+        /*
+         * Acceptance for issue #33 asks that the template loads clean both with
+         * and without the Manager. There is no Manager here: nothing answers
+         * the module's dock dispatches, which is exactly the "fails quietly"
+         * case. The second half of the driver then plays the Manager's part -
+         * discover, set-setting, preview, dock panel render - by dispatching
+         * the same events the real one does.
+         *
+         * Everything the module throws is recorded, because a template that
+         * throws on a Lectio page is the one failure that matters most.
+         */
+        window.registrations = [];
+        window.dockEvents = [];
+        window.failures = [];
+
+        window.addEventListener('error', (event) => {
+            window.failures.push(String(event.message));
+        });
+
+        window.addEventListener('lectio-module:register', (event) => {
+            window.registrations.push(event.detail);
+        });
+
+        for (const name of ['register', 'remove', 'update']) {
+            window.addEventListener(`lectio-manager:dock:${name}`, (event) => {
+                window.dockEvents.push({ name, detail: event.detail });
+            });
+        }
+
+        // A snapshot of the page the module must not touch.
+        window.snapshotBody = () => document.getElementById('masterContent').innerHTML;
+    </script>
+</head>
+<body>
+    <main id="masterContent">
+        <nav><a href="/lectio/223/beskeder2.aspx">Beskeder</a></nav>
+        <a class="s2skemabrik s2brik" data-tooltip="Matematik&#10;12/1-2026 08:00 til 09:30">Matematik</a>
+    </main>
+
+    <script src="../../templates/Lectio-Module-Skeleton.user.js"></script>
+
+    <script>
+        window.addEventListener('load', () => {
+            function assert(condition, message) {
+                if (!condition) throw new Error(message);
+            }
+
+            try {
+                const before = window.snapshotBody();
+
+                /* --- No Manager present ------------------------------- */
+
+                assert(window.failures.length === 0, `Loading threw: ${window.failures[0]}`);
+                assert(window.registrations.length === 1,
+                    `Expected one registration on load, got ${window.registrations.length}`);
+
+                const registration = window.registrations[0];
+                assert(registration.id === 'module-skeleton', 'Registered under an unexpected id');
+                assert(/^\d+\.\d+\.\d+$/.test(registration.version), 'Registered version is not MAJOR.MINOR.PATCH');
+
+                // The version it reports must match its own @version header.
+                const header = document.querySelector('script[src*="Lectio-Module-Skeleton"]');
+                assert(header, 'The skeleton was not loaded by this fixture');
+
+                // One control of every type the Manager renders, plus a section,
+                // a description, an advanced control and the previewOnHover pair.
+                const schema = registration.settingsSchema;
+                const types = new Set(schema.map(control => control.type));
+                for (const type of ['toggle', 'select', 'range', 'text', 'color', 'button']) {
+                    assert(types.has(type), `No ${type} control in the skeleton's schema`);
+                }
+                assert(schema.every(control => control.key && control.label && control.section),
+                    'A control is missing a key, label or section');
+                assert(schema.some(control => control.description), 'No control carries a description');
+                assert(schema.some(control => control.advanced === true), 'No control is marked advanced');
+                assert(schema.some(control => control.previewOnHover === true), 'No select opts into hover previews');
+                assert(schema.every(control => control.key in registration.currentValues),
+                    'A declared control has no entry in currentValues');
+
+                // Danish by default: the fixture is <html lang="da"> and no
+                // Manager has published a language.
+                assert(schema[0].section === 'Skabelon',
+                    `Expected Danish labels with no Manager, got "${schema[0].section}"`);
+
+                // Colours go through the theming seam with a hard-coded fallback.
+                const styles = document.getElementById('lectio-module-skeleton-styles');
+                assert(styles, 'The skeleton did not add its own stylesheet');
+                assert(/var\(--lectio-theme-accent,\s*#0f6f6f\)/.test(styles.textContent),
+                    'A colour is not written through var(--lectio-theme-*, <fallback>)');
+                assert(!/:\s*#[0-9a-f]{3,8}\s*;/i.test(styles.textContent),
+                    'A bare colour literal was written outside a var() fallback');
+                assert(styles.textContent.includes('.lectio-module-skeleton'),
+                    'The stylesheet does not scope itself to the module');
+
+                // It touches nothing Lectio rendered.
+                assert(window.snapshotBody() === before, 'The skeleton modified the Lectio page');
+
+                // With no Manager it still offers its dock item, and that is a
+                // no-op rather than an error.
+                assert(window.dockEvents.some(entry => entry.name === 'register'),
+                    'The skeleton never offered a dock item');
+
+                /* --- A stub Manager answers --------------------------- */
+
+                document.documentElement.dataset.lectioLanguage = 'en';
+                window.dispatchEvent(new CustomEvent('lectio-manager:language', { detail: { language: 'en' } }));
+                window.dispatchEvent(new CustomEvent('lectio-manager:discover'));
+
+                assert(window.registrations.length === 2,
+                    `Discovery should produce exactly one more registration, got ${window.registrations.length}`);
+                assert(window.registrations[1].settingsSchema[0].section === 'Skeleton',
+                    'The module did not follow the Manager into English');
+
+                window.dispatchEvent(new CustomEvent('lectio-manager:set-setting', {
+                    detail: { id: 'module-skeleton', key: 'scale', value: '130' }
+                }));
+                assert(window.registrations.at(-1).currentValues.scale === 130,
+                    'A range change was not accepted and re-announced as a number');
+                assert(JSON.parse(localStorage.getItem('lectioModuleSkeleton.settings.v1')).scale === 130,
+                    'A setting was not persisted');
+
+                // An invalid value is rejected without throwing and without
+                // re-announcing.
+                const announced = window.registrations.length;
+                window.dispatchEvent(new CustomEvent('lectio-manager:set-setting', {
+                    detail: { id: 'module-skeleton', key: 'scale', value: 'nonsense' }
+                }));
+                assert(window.registrations.length === announced, 'An invalid value was accepted');
+
+                // Another module's settings are not this module's business.
+                window.dispatchEvent(new CustomEvent('lectio-manager:set-setting', {
+                    detail: { id: 'some-other-module', key: 'scale', value: '60' }
+                }));
+                assert(window.registrations.length === announced, 'The module answered for another module');
+
+                // A hover preview applies but is never saved.
+                const saved = localStorage.getItem('lectioModuleSkeleton.settings.v1');
+                window.dispatchEvent(new CustomEvent('lectio-manager:preview-setting', {
+                    detail: { id: 'module-skeleton', key: 'accent', value: 'plum' }
+                }));
+                const previewed = document.documentElement.style.getPropertyValue('--lectio-module-skeleton-accent');
+                assert(previewed.includes('--lectio-theme-accent-alt'), 'A hover preview was not applied');
+                assert(localStorage.getItem('lectioModuleSkeleton.settings.v1') === saved,
+                    'A hover preview was persisted');
+
+                window.dispatchEvent(new CustomEvent('lectio-manager:clear-setting-preview', {
+                    detail: { id: 'module-skeleton', key: 'accent' }
+                }));
+                assert(document.documentElement.style.getPropertyValue('--lectio-module-skeleton-accent')
+                    .includes('--lectio-theme-accent,'), 'Clearing the preview did not restore the saved accent');
+
+                // The Manager hands over a disposable mount; the module renders
+                // only inside it.
+                const mount = document.createElement('div');
+                document.body.appendChild(mount);
+                window.dispatchEvent(new CustomEvent('lectio-manager:dock:render-panel', {
+                    detail: { moduleId: 'module-skeleton', itemId: 'main', mount, close() {} }
+                }));
+                assert(mount.querySelector('.lectio-module-skeleton'), 'The dock panel rendered nothing');
+                assert(window.snapshotBody() === before, 'Rendering the dock panel changed the Lectio page');
+
+                // A mount from a closed panel session must be ignored, not thrown on.
+                mount.remove();
+                window.dispatchEvent(new CustomEvent('lectio-manager:language', { detail: { language: 'da' } }));
+
+                /* --- Teardown ----------------------------------------- */
+
+                window.dispatchEvent(new Event('pagehide'));
+
+                assert(!document.getElementById('lectio-module-skeleton-styles'),
+                    'Teardown left the stylesheet behind');
+                assert(window.dockEvents.at(-1).name === 'remove', 'Teardown did not remove the dock item');
+
+                const afterTeardown = window.registrations.length;
+                window.dispatchEvent(new CustomEvent('lectio-manager:discover'));
+                window.dispatchEvent(new CustomEvent('lectio-manager:set-setting', {
+                    detail: { id: 'module-skeleton', key: 'scale', value: '50' }
+                }));
+                assert(window.registrations.length === afterTeardown,
+                    'The module still answered after teardown - a listener leaked');
+
+                assert(window.failures.length === 0, `Something threw: ${window.failures[0]}`);
+                assert(window.snapshotBody() === before, 'The Lectio page was modified at some point');
+
+                document.documentElement.dataset.testResult = 'pass';
+            } catch (error) {
+                document.documentElement.dataset.testResult = `fail: ${error.message}`;
+            }
+        });
+    </script>
+</body>
+</html>
