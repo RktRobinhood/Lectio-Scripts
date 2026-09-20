@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio Manager dock tooltip fixture</title>
+</head>
+<body>
+    <script>
+        const catalogue = {
+            schemaVersion: 1,
+            generatedAt: '2026-09-21T00:00:00.000Z',
+            modules: []
+        };
+        const storage = new Map([
+            ['lectioManager.catalogue.v1', JSON.stringify(catalogue)],
+            ['lectioManager.lastRefresh.v1', Date.now()],
+            ['lectioManager.updateTipDismissed.v1', true]
+        ]);
+
+        window.GM_getValue = (key, fallback) => storage.has(key) ? storage.get(key) : fallback;
+        window.GM_setValue = (key, value) => storage.set(key, value);
+        window.GM_xmlhttpRequest = () => {};
+
+        window.addEventListener('lectio-manager:dock:render-panel', (event) => {
+            const mark = document.createElement('p');
+            mark.className = 'test-panel-content';
+            mark.textContent = 'panel';
+            event.detail.mount?.appendChild(mark);
+        });
+    </script>
+    <script src="../../manager/Lectio-Manager.user.js"></script>
+    <script>
+        function assert(condition, message) {
+            if (!condition) throw new Error(message);
+        }
+
+        function register(item) {
+            window.dispatchEvent(new CustomEvent('lectio-manager:dock:register', { detail: item }));
+        }
+
+        function patch(moduleId, itemId, change) {
+            window.dispatchEvent(new CustomEvent('lectio-manager:dock:update', {
+                detail: { moduleId, itemId, patch: change }
+            }));
+        }
+
+        function tile(key) {
+            return document.querySelector(`[data-dock-key="${key}"]`);
+        }
+
+        const tip = () => document.querySelector('.lectio-manager-dock-tooltip');
+        const shown = () => (tip().hidden ? null : tip().textContent);
+
+        window.addEventListener('load', () => {
+            try {
+                // Two modules, because the reported fault was one module's poll
+                // closing the tooltip of another module's item.
+                register({
+                    moduleId: 'watcher', itemId: 'main', type: 'panel', icon: 'radar',
+                    label: 'Watcher', tooltip: 'Watcher is all clear.', defaultPriority: 10
+                });
+                register({
+                    moduleId: 'poller', itemId: 'main', type: 'action', icon: 'refresh',
+                    label: 'Poller', tooltip: 'Poller tooltip', defaultPriority: 20
+                });
+
+                const watcher = tile('watcher:main');
+
+                /*
+                 * THE REPORTED BUG (issue #48).
+                 *
+                 * renderDock() ended in an unconditional applyDockPreferences(),
+                 * which hid the tooltip - so every dock:register and every
+                 * dock:update from ANY module closed the tooltip of whatever
+                 * item the pointer was resting on, and nothing re-opened it
+                 * because the pointer never fires a fresh pointerenter. Change
+                 * Radar re-registers from a poll timer, which is what turned
+                 * this into "the tooltip closes itself a moment after it
+                 * appears", dock-wide.
+                 *
+                 * The first of these three is the exact shape reported: a peer
+                 * module repeating a registration that changes nothing at all.
+                 */
+                watcher.dispatchEvent(new PointerEvent('pointerenter'));
+                assert(shown() === 'Watcher is all clear.', `Hover did not show the tooltip: ${shown()}`);
+
+                register({
+                    moduleId: 'poller', itemId: 'main', type: 'action', icon: 'refresh',
+                    label: 'Poller', tooltip: 'Poller tooltip', defaultPriority: 20
+                });
+                assert(shown() === 'Watcher is all clear.',
+                    `A peer module's no-op re-registration closed the tooltip mid-hover: ${shown()}`);
+
+                // A peer that really does change rebuilds the row, so the
+                // hovered tile survives a replaceChildren it had no part in.
+                patch('poller', 'main', { badge: 4 });
+                assert(shown() === 'Watcher is all clear.',
+                    `A peer module's badge change closed the tooltip mid-hover: ${shown()}`);
+
+                // And the hovered item's own change replaces the very button the
+                // pointer is on. The tooltip has to come back against the new
+                // one, carrying the new text.
+                const beforeOwnChange = tile('watcher:main');
+                patch('watcher', 'main', { badge: 2, tooltip: '2 unseen changes.' });
+                assert(tile('watcher:main') !== beforeOwnChange,
+                    'Test setup: the hovered tile was not actually rebuilt');
+                assert(shown() === '2 unseen changes.',
+                    `The hovered item's own update dropped its tooltip: ${shown()}`);
+
+                // Leaving still closes it, and a later render must not bring a
+                // dismissed tooltip back.
+                tile('watcher:main').dispatchEvent(new PointerEvent('pointerleave'));
+                assert(shown() === null, `Leaving the item did not close the tooltip: ${shown()}`);
+                patch('poller', 'main', { badge: 5 });
+                assert(shown() === null, 'A render re-opened a tooltip the pointer had already left');
+
+                /*
+                 * THE KEYBOARD PATH. A tooltip that only answers a pointer is
+                 * not an accessible tooltip, so focus is the same contract as
+                 * hover: it shows, it survives another module's render, blur
+                 * closes it, and Escape dismisses it without the pointer having
+                 * to move.
+                 */
+                tile('watcher:main').focus();
+                assert(shown() === '2 unseen changes.', `Keyboard focus did not show the tooltip: ${shown()}`);
+
+                patch('poller', 'main', { badge: 6 });
+                assert(shown() === '2 unseen changes.',
+                    `A peer module's render closed the tooltip while the item was focused: ${shown()}`);
+
+                // A rebuild of the focused tile must not cost the keyboard user
+                // their place in the toolbar.
+                patch('watcher', 'main', { state: 'warning' });
+                assert(document.activeElement === tile('watcher:main'),
+                    'Rebuilding the focused tile sent focus to the body');
+                assert(shown() === '2 unseen changes.',
+                    `Rebuilding the focused tile dropped its tooltip: ${shown()}`);
+
+                document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+                assert(shown() === null, `Escape did not dismiss the tooltip: ${shown()}`);
+                assert(document.activeElement === tile('watcher:main'),
+                    'Escape moved focus away from the dock item');
+                patch('poller', 'main', { badge: 7 });
+                assert(shown() === null, 'A render re-opened a tooltip Escape had dismissed');
+
+                tile('watcher:main').blur();
+                assert(shown() === null, `Blur did not close the tooltip: ${shown()}`);
+
+                // Arriving again is a fresh arrival, so a dismissed tooltip is
+                // offered once more rather than suppressed for good.
+                tile('watcher:main').focus();
+                assert(shown() === '2 unseen changes.', 'Focus after an Escape did not show the tooltip again');
+                tile('watcher:main').blur();
+
+                /*
+                 * WHAT REACHES ASSISTIVE TECHNOLOGY. The visual tooltip is one
+                 * shared, absolutely-positioned div that is hidden whenever
+                 * nothing is hovered; pointing every button's aria-describedby
+                 * at it described whichever tooltip happened to be up, which is
+                 * usually none. The text belongs on the control.
+                 */
+                const described = tile('watcher:main').getAttribute('aria-describedby');
+                const description = described && document.getElementById(described);
+                assert(description && tile('watcher:main').contains(description),
+                    'A dock item described itself with a node that is not its own');
+                assert(description.textContent === '2 unseen changes.',
+                    `The accessible description did not carry the tooltip text: ${description.textContent}`);
+                assert(tip().getAttribute('aria-hidden') === 'true',
+                    'The decorative tooltip was still exposed to assistive technology');
+                assert(getComputedStyle(description).position === 'absolute' &&
+                    description.getBoundingClientRect().width <= 2,
+                    'The accessible description was visible on screen');
+
+                /*
+                 * CLICK, FLYOUT AND DRAG all still dismiss it. A tooltip that
+                 * survived a click would sit over the flyout the click opened.
+                 */
+                const poller = tile('poller:main');
+                poller.dispatchEvent(new PointerEvent('pointerenter'));
+                assert(shown() === 'Poller tooltip', 'Test setup: the poller tooltip did not show');
+                poller.click();
+                assert(shown() === null, `Clicking the item left its tooltip up: ${shown()}`);
+
+                watcher_open: {
+                    const panelTile = tile('watcher:main');
+                    panelTile.dispatchEvent(new PointerEvent('pointerenter'));
+                    assert(shown() !== null, 'Test setup: the panel tooltip did not show');
+                    panelTile.click();
+                    assert(!document.querySelector('.lectio-manager-dock-flyout').hidden,
+                        'Test setup: the flyout did not open');
+                    assert(shown() === null, `Opening a flyout left the tooltip up: ${shown()}`);
+                    panelTile.click();
+                }
+
+                const dragTile = tile('poller:main');
+                dragTile.dispatchEvent(new PointerEvent('pointerenter'));
+                assert(shown() === 'Poller tooltip', 'Test setup: the drag tooltip did not show');
+                dragTile.dispatchEvent(new PointerEvent('pointerdown', {
+                    pointerId: 77, pointerType: 'touch', button: 0, bubbles: true, clientX: 5, clientY: 200
+                }));
+                dragTile.dispatchEvent(new PointerEvent('pointermove', {
+                    pointerId: 77, pointerType: 'touch', bubbles: true, clientX: 5, clientY: 140
+                }));
+                assert(dragTile.classList.contains('is-dragging'), 'Test setup: the drag never started');
+                assert(shown() === null, `Starting a drag left the tooltip up: ${shown()}`);
+                dragTile.dispatchEvent(new PointerEvent('pointerup', {
+                    pointerId: 77, pointerType: 'touch', bubbles: true, clientX: 5, clientY: 140
+                }));
+
+                /*
+                 * LANGUAGE. A module may hand over the same { en, da } shape a
+                 * catalogue entry's i18n block uses, and the Manager resolves it
+                 * when it renders rather than when it registers - so switching
+                 * language repaints what is already on screen, with no reload
+                 * and no re-registration by the module.
+                 */
+                register({
+                    moduleId: 'bilingual', itemId: 'main', type: 'action', icon: 'bell',
+                    label: { en: 'Message watch', da: 'Beskedvagt' },
+                    tooltip: { en: '3 unread messages.', da: '3 ulæste beskeder.' },
+                    badge: 3, defaultPriority: 30
+                });
+
+                const bilingual = () => tile('bilingual:main');
+                assert(document.documentElement.dataset.lectioLanguage === 'en',
+                    'Test setup: the Manager did not start in English');
+                assert(bilingual().getAttribute('aria-label') === 'Message watch, 3 notifications',
+                    `An { en, da } label was not resolved in English: ${bilingual().getAttribute('aria-label')}`);
+                bilingual().dispatchEvent(new PointerEvent('pointerenter'));
+                assert(shown() === '3 unread messages.',
+                    `An { en, da } tooltip was not resolved in English: ${shown()}`);
+
+                // The plain-string path is untouched: shown as written.
+                assert(tile('poller:main').getAttribute('aria-label') === 'Poller, 7 notifications',
+                    `A plain-string label stopped working: ${tile('poller:main').getAttribute('aria-label')}`);
+
+                document.querySelector('#lectio-manager-toggle').click();
+                const languageSelect = document.querySelector('.lectio-manager-language-select');
+                languageSelect.value = 'da';
+                languageSelect.dispatchEvent(new Event('change', { bubbles: true }));
+
+                assert(bilingual().getAttribute('aria-label') === 'Beskedvagt, 3 notifikationer',
+                    `Switching language did not repaint the item: ${bilingual().getAttribute('aria-label')}`);
+                assert(bilingual().querySelector('.lectio-manager-dock-badge').getAttribute('aria-label') === '3 notifikationer',
+                    'The badge’s own accessible name stayed English');
+                assert(shown() === '3 ulæste beskeder.',
+                    `Switching language did not repaint the tooltip already on screen: ${shown()}`);
+                const danishDescription = document.getElementById(bilingual().getAttribute('aria-describedby'));
+                assert(danishDescription.textContent === '3 ulæste beskeder.',
+                    `The accessible description stayed English: ${danishDescription.textContent}`);
+
+                /*
+                 * An untranslated registration is not broken by any of this,
+                 * and shows exactly where the line is: the Manager cannot know
+                 * what "Poller" means and leaves it alone, while the count it
+                 * adds around it is its own text and is translated.
+                 */
+                assert(tile('poller:main').getAttribute('aria-label') === 'Poller, 7 notifikationer',
+                    `The Manager translated a module string, or failed to translate its own: ${tile('poller:main').getAttribute('aria-label')}`);
+
+                languageSelect.value = 'en';
+                languageSelect.dispatchEvent(new Event('change', { bubbles: true }));
+                assert(shown() === '3 unread messages.', `Switching back did not repaint: ${shown()}`);
+
+                /*
+                 * A tile is compared on the text it is showing, not on the
+                 * value it was registered with. A module re-registering with
+                 * only the language that is NOT on screen changed says nothing
+                 * about what is on screen, so it must not rebuild the tile the
+                 * pointer is resting on - that rebuild is the flicker the
+                 * signature check exists to prevent in the first place.
+                 */
+                const beforeQuietChange = bilingual();
+                register({
+                    moduleId: 'bilingual', itemId: 'main', type: 'action', icon: 'bell',
+                    label: { en: 'Message watch', da: 'Beskedvagt!' },
+                    tooltip: { en: '3 unread messages.', da: '3 ulæste beskeder!' },
+                    badge: 3, defaultPriority: 30
+                });
+                assert(bilingual() === beforeQuietChange,
+                    'A change to the language not on screen still rebuilt the tile under the pointer');
+                assert(shown() === '3 unread messages.',
+                    `A quiet re-registration disturbed the tooltip: ${shown()}`);
+
+                // A value carrying only one language still shows that language.
+                register({
+                    moduleId: 'partial', itemId: 'main', type: 'action', icon: 'info',
+                    label: { da: 'Kun dansk' }, defaultPriority: 40
+                });
+                assert(tile('partial:main').getAttribute('aria-label') === 'Kun dansk',
+                    `A single-language value was dropped: ${tile('partial:main').getAttribute('aria-label')}`);
+
+                // An item that goes away takes its tooltip with it.
+                tile('poller:main').dispatchEvent(new PointerEvent('pointerenter'));
+                assert(shown() === 'Poller tooltip', 'Test setup: the removal tooltip did not show');
+                window.dispatchEvent(new CustomEvent('lectio-manager:dock:remove', {
+                    detail: { moduleId: 'poller', itemId: 'main' }
+                }));
+                assert(shown() === null, `Removing the hovered item left its tooltip on screen: ${shown()}`);
+
+                document.documentElement.dataset.testResult = 'pass';
+            } catch (error) {
+                document.documentElement.dataset.testResult = `fail: ${error.message}`;
+            }
+        });
+    </script>
+</body>
+</html>

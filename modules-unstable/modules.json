@@ -61,15 +61,15 @@
         "teacher"
       ],
       "status": "unstable",
-      "version": "0.9.0",
-      "changelog": "With the Lectio Manager installed, Change Radar now waits its turn before checking in the background, so the modules stop hitting Lectio all at once. With no Manager, an older one, or one that does not answer, nothing waits.",
+      "version": "0.9.1",
+      "changelog": "Change Radar's dock tooltip now follows the language you chose in the Lectio Manager, in Danish as well as English.",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Change-Radar.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
       "i18n": {
         "da": {
           "name": "Lectio Ændringsradar",
           "description": "Eksperimentel Lectio-vagt med en kompakt radar-HUD i temaets farver. Du vælger selv, hvad den holder øje med - aflysninger, flytninger, lokaler, lærere og lektier i skemaet, plus valgfri overvågning af opgaver, fravær og dokumenter - plus kommende opgavefrister, der meldes, når de kommer inden for det valgte tidsrum - med hastestatus, styr på usete ændringer og en roterende lokal ændringslog.",
-          "changelog": "Med Lectio Manager installeret venter Ændringsradaren nu på tur, før den tjekker i baggrunden, så modulerne ikke rammer Lectio på én gang. Uden Manager, med en ældre en eller en, der ikke svarer, venter intet."
+          "changelog": "Ændringsradarens tekst i dokken følger nu det sprog, du har valgt i Lectio Manager - både dansk og engelsk."
         }
       }
     },

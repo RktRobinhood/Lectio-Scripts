@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Change Radar
 // @namespace    https://github.com/RktRobinhood/Lectio-Scripts
-// @version      0.9.0
+// @version      0.9.1
 // @description  Watches Lectio for the changes you choose to track - timetable, assignments, absence, documents - and keeps a compact recent-change HUD.
 // @author       RktRobinhood
 // @match        https://www.lectio.dk/lectio/*
@@ -20,7 +20,7 @@
     id: 'change-radar',
     aliases: ['schedule-change-radar', 'lectio-change-radar', 'change-log'],
     name: 'Lectio Change Radar',
-    version: '0.9.0',
+    version: '0.9.1',
     channel: 'unstable'
   });
 
@@ -2070,7 +2070,7 @@
     button.type = 'button';
     button.setAttribute('aria-expanded', String(expanded));
     button.setAttribute('aria-label', status.ariaLabel);
-    button.title = status.tooltip;
+    button.title = pickRadarText(status.tooltip);
     button.innerHTML = radarSvg() + (status.unseen > 0
       ? `<span class="lcr-count-badge">${status.unseen > 9 ? '9+' : status.unseen}</span>`
       : '');
@@ -2101,7 +2101,10 @@
         itemId: 'radar',
         type: 'panel',
         icon: 'radar',
-        label: 'Lectio Change Radar',
+        // Both values go over as { en, da }; the Manager picks the active
+        // language when it renders and repaints them when that changes, so
+        // this module needs no language listener of its own.
+        label: { en: 'Lectio Change Radar', da: 'Lectio Ændringsradar' },
         tooltip: status.tooltip,
         badge: status.unseen || null,
         state,
@@ -2316,13 +2319,39 @@
     return host;
   }
 
+  /*
+   * ADR-0013's reading order: the Manager's published choice, then the page's
+   * own lang (English Mode sets that), then Danish, because Lectio is Danish
+   * and a module running without the Manager should stay Danish.
+   */
+  function radarLanguage() {
+    const published = document.documentElement?.dataset?.lectioLanguage;
+    if (published === 'en' || published === 'da') return published;
+    return (document.documentElement?.lang || '').toLowerCase().startsWith('en') ? 'en' : 'da';
+  }
+
+  /*
+   * A dock tooltip is handed to the Manager as { en, da } and resolved there at
+   * render time, so switching language repaints it without this module doing
+   * anything. This resolver is for the floating HUD, which the module draws
+   * itself and which is the only surface left when no Manager is installed.
+   */
+  function pickRadarText(value) {
+    if (typeof value === 'string') return value;
+    const language = radarLanguage();
+    return value?.[language] || value?.en || value?.da || '';
+  }
+
   function getRadarState(history, lastViewed) {
     if (runtime.lastError) {
       return {
         level: 'error', unseen: 0, urgentUnseen: 0,
         heading: 'Radar check problem',
         subheading: runtime.lastError,
-        tooltip: `Change Radar: ${runtime.lastError}`,
+        tooltip: {
+          en: `Change Radar: ${runtime.lastError}`,
+          da: `Ændringsradar: ${runtime.lastError}`
+        },
         ariaLabel: `Lectio Change Radar. Check problem: ${runtime.lastError}`
       };
     }
@@ -2342,7 +2371,10 @@
         urgentUnseen: urgentItems.length,
         heading: 'Urgent change',
         subheading: `${urgentItems.length} unseen change${urgentItems.length === 1 ? '' : 's'} coming up soon`,
-        tooltip: `Urgent: ${urgentItems.length} unseen upcoming Lectio change${urgentItems.length === 1 ? '' : 's'}.`,
+        tooltip: {
+          en: `Urgent: ${urgentItems.length} unseen upcoming Lectio change${urgentItems.length === 1 ? '' : 's'}.`,
+          da: `Haster: ${urgentItems.length} ${urgentItems.length === 1 ? 'uset kommende Lectio-ændring' : 'usete kommende Lectio-ændringer'}.`
+        },
         ariaLabel: `Lectio Change Radar. Red alert. ${urgentItems.length} urgent unseen change${urgentItems.length === 1 ? '' : 's'}.`
       };
     }
@@ -2360,7 +2392,12 @@
         urgentUnseen: 0,
         heading: unseenItems.length ? 'Changes to review' : 'Recent change',
         subheading,
-        tooltip: unseenItems.length ? `${unseenItems.length} unseen Lectio change${unseenItems.length === 1 ? '' : 's'}.` : 'Recent Lectio changes have been reviewed.',
+        tooltip: unseenItems.length
+          ? {
+            en: `${unseenItems.length} unseen Lectio change${unseenItems.length === 1 ? '' : 's'}.`,
+            da: `${unseenItems.length} ${unseenItems.length === 1 ? 'uset Lectio-ændring' : 'usete Lectio-ændringer'}.`
+          }
+          : { en: 'Recent Lectio changes have been reviewed.', da: 'Nylige Lectio-ændringer er gennemset.' },
         ariaLabel: `Lectio Change Radar. Amber. ${subheading}.`
       };
     }
@@ -2369,7 +2406,7 @@
       level: 'green', unseen: 0, urgentUnseen: 0,
       heading: 'All clear',
       subheading: runtime.inFlight ? 'Checking Lectio...' : 'No recent changes need attention',
-      tooltip: 'Change Radar: all clear.',
+      tooltip: { en: 'Change Radar: all clear.', da: 'Ændringsradar: alt er roligt.' },
       ariaLabel: 'Lectio Change Radar. Green. All clear.'
     };
   }

@@ -30,6 +30,16 @@ test('manager dock supports lifecycle, activation, panels, ordering, and placeme
     await runFixture('manager-dock.html', 'lectio-manager-dock-');
 });
 
+// A dock tooltip used to close itself a moment after it appeared, because every
+// renderDock() hid it blindly - so one module's poll dismissed the tooltip of
+// whatever item the pointer was resting on, for every item in the dock. The
+// pointer never fires a second pointerenter, so nothing brought it back
+// (issue #48). The same fixture covers the keyboard path, what reaches a screen
+// reader, and both languages, because they are the same few functions.
+test('a dock tooltip survives another module rendering, answers the keyboard, and follows the language', async () => {
+    await runFixture('manager-dock-tooltip.html', 'lectio-manager-dock-tooltip-', '', ['--virtual-time-budget=6000']);
+});
+
 // Tampermonkey runs the Manager at document-idle, so init() is reached before
 // the rest of the file has been evaluated. Loading it with a plain script tag,
 // as every other fixture does, hides anything init needs that is declared below

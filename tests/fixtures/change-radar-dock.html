@@ -119,6 +119,33 @@
                 assert(!document.getElementById('lectio-change-radar'), 'Automatic mode left the floating radar behind');
                 assert(document.querySelector('[data-dock-key="change-radar:radar"]'), 'Automatic mode did not return the radar to the dock');
 
+                /*
+                 * The radar's dock text is bilingual, and it follows the
+                 * Manager's language without the module listening for the
+                 * change: both values go over as { en, da } and the Manager
+                 * resolves them when it renders. It was English-only, which is
+                 * half of issue #48.
+                 */
+                const radarTile = () => document.querySelector('[data-dock-key="change-radar:radar"]');
+                const radarTip = () => document.getElementById(radarTile().getAttribute('aria-describedby'))?.textContent;
+
+                assert(document.documentElement.dataset.lectioLanguage === 'en',
+                    'Test setup: the Manager did not start in English');
+                assert(radarTile().getAttribute('aria-label').startsWith('Lectio Change Radar'),
+                    `The radar's dock label was not English: ${radarTile().getAttribute('aria-label')}`);
+                const englishTip = radarTip();
+                assert(englishTip, 'The radar dock item carried no accessible description at all');
+
+                document.querySelector('#lectio-manager-toggle').click();
+                const languageSelect = document.querySelector('.lectio-manager-language-select');
+                languageSelect.value = 'da';
+                languageSelect.dispatchEvent(new Event('change', { bubbles: true }));
+
+                assert(radarTile().getAttribute('aria-label').startsWith('Lectio Ændringsradar'),
+                    `The radar's dock label stayed English in Danish: ${radarTile().getAttribute('aria-label')}`);
+                assert(radarTip() && radarTip() !== englishTip,
+                    `The radar's dock tooltip stayed English in Danish: ${radarTip()}`);
+
                 result.dataset.testResult = 'pass';
                 result.textContent = 'PASS';
             } catch (error) {

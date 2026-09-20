@@ -30,6 +30,25 @@ Stable identifiers are required. `moduleId` and `itemId` must start with a lette
 
 The Manager owns icon size, badge rendering, tooltip placement, item order, adaptive overflow, screen position, z-index, and flyout chrome. Do not include positioning data or raw button HTML in a registration.
 
+### `label` and `tooltip` may be translated
+
+Either field may be a plain string, or the same `{ en, da }` object a catalogue entry's `i18n` block uses:
+
+```javascript
+label: { en: 'Lectio Change Radar', da: 'Lectio Ændringsradar' },
+tooltip: { en: '3 unseen Lectio changes.', da: '3 usete Lectio-ændringer.' }
+```
+
+A plain string is shown as written, in whatever language it was written in — that is what every module registering one today already gets, and it does not need to change. Only the languages in [ADR-0013](./adr/0013-one-script-per-module-both-languages-inline.md) are read; any other key in the object is ignored, and an object with no usable text is treated as absent.
+
+**The Manager resolves the value at render time, not at registration time.** So a module registers once with both languages and never listens for `lectio-manager:language`: when the person switches, the Manager repaints its own dock, and the tooltip and label already on screen change with it. A module that would rather re-register on a language change may still do so — registration is idempotent — but it does not have to.
+
+Only the module's own prose travels this way. The Manager never translates a module string; it picks between the ones the module supplied. The chrome the Manager wraps around a label — the badge's "3 notifications" in the accessible name — is the Manager's own text and is translated by the Manager.
+
+### What reaches a screen reader
+
+The Manager builds the accessible name from `label` (with the badge count appended when there is one) and the accessible description from `tooltip`, both on the button itself. The visual tooltip is a separate, decorative surface: it appears on `pointerenter` **and on keyboard focus**, stays up for as long as the pointer or focus rests on the item, and is dismissed by leaving, by clicking the item, by opening a flyout, by starting a drag, and by <kbd>Esc</kbd>. Another module registering or updating its own item does not dismiss it. A module supplies the text and nothing else; it must not add a `title` attribute or a tooltip of its own to a dock item.
+
 ## React to activation
 
 Listen for `lectio-manager:dock:activate` and filter by both identifiers:

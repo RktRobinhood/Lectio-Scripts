@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.29.0
+// @version      1.30.0
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules, including their settings and shared dock controls.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
@@ -58,6 +58,10 @@
             closePanel: 'Close panel',
             dockToolbar: 'Lectio tools',
             dockPanel: 'Dock panel',
+            // The item's own label is the module's prose and is passed through
+            // as given; only the count the Manager adds around it is translated.
+            dockItemWithBadge: (label, badge) => `${label}, ${badge} notifications`,
+            dockBadge: (badge) => `${badge} notifications`,
             language: 'Language',
             languageInfo: 'What does this change?',
             languageHelp: 'This sets the language of the Manager itself, and tells any module that supports it which language you prefer. Lectio is Danish, so a module on its own stays Danish until you choose otherwise.',
@@ -201,6 +205,8 @@
             closePanel: 'Luk panelet',
             dockToolbar: 'Lectio-værktøjer',
             dockPanel: 'Dokpanel',
+            dockItemWithBadge: (label, badge) => `${label}, ${badge} notifikationer`,
+            dockBadge: (badge) => `${badge} notifikationer`,
             language: 'Sprog',
             languageInfo: 'Hvad ændrer det?',
             languageHelp: 'Dette vælger sproget i selve Manageren og fortæller de moduler, der understøtter det, hvilket sprog du foretrækker. Lectio er dansk, så et modul, der kører alene, bliver på dansk, indtil du vælger andet.',
@@ -386,7 +392,7 @@
     // Kept in step with the @version header by scripts/check-versions.mjs. The
     // header is metadata Tampermonkey reads; this is the only copy the running
     // script can see, and it is what the self-update notice compares.
-    const MANAGER_VERSION = '1.29.0';
+    const MANAGER_VERSION = '1.30.0';
 
     const STABLE_CATALOGUE_URL =
         'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/catalogue/modules.json';
@@ -672,6 +678,18 @@
     let dockRenderDeferredByDrag = false;
     let suppressDockClickKey = null;
     let openDockPanelKey = null;
+    /*
+     * Which item's tooltip is on screen, or null when none is. A key, not an
+     * element, so it survives the tile being rebuilt under the pointer.
+     *
+     * This is what tells a render "put it back" from "leave it down": every
+     * renderDock() used to hide the tooltip blindly through
+     * applyDockPreferences(), so one module's poll closed the tooltip of
+     * whatever item the pointer was resting on, for every item in the dock
+     * (issue #48). Dismissal - a click, a flyout, a drag, Escape, the pointer
+     * leaving - clears this, and a render only restores what was still up.
+     */
+    let dockTooltipKey = null;
     // The plan a reviewed settings file produced, held between the Check click
     // that built it and the Apply click that carries it out. Nothing from the
     // file itself is kept here - only module ids, control keys and values that
@@ -3429,12 +3447,52 @@
         return `${moduleId}:${itemId}`;
     }
 
+    /*
+     * A dock label or tooltip is prose belonging to the module, so it may
+     * arrive as a plain string or as the same { en, da } shape a catalogue
+     * entry's i18n block and a Storage Declaration's label already use. The
+     * value is stored as given rather than resolved here, because a
+     * registration happens once and the language can change afterwards - see
+     * dockText.
+     */
+    function normalizeDockText(value) {
+        if (isNonEmptyString(value)) return value.trim();
+
+        if (value && typeof value === 'object') {
+            const picked = {};
+            for (const code of LANGUAGES) {
+                if (isNonEmptyString(value[code])) picked[code] = value[code].trim();
+            }
+            if (Object.keys(picked).length) return picked;
+        }
+
+        return '';
+    }
+
+    /*
+     * Resolved at render time, not at registration time, so the renderDock()
+     * that setLanguage() already performs repaints every tooltip and label for
+     * free and no module needs its own language listener. An untranslated
+     * string shows as written, which is what already happens to a module
+     * description.
+     */
+    function dockText(value) {
+        if (typeof value === 'string') return value;
+        if (value && typeof value === 'object') return value[language] || value.en || value.da || '';
+        return '';
+    }
+
+    function dockTooltipText(key) {
+        const item = dockItems.get(key);
+        return item ? dockText(item.tooltip) : '';
+    }
+
     function normalizeDockItem(detail, existing = {}) {
         if (!detail || typeof detail !== 'object') return null;
 
         const moduleId = String(detail.moduleId || '').trim();
         const itemId = String(detail.itemId || '').trim();
-        const label = String(detail.label || existing.label || '').trim();
+        const label = normalizeDockText(detail.label) || normalizeDockText(existing.label);
 
         const validIdentifier = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
         if (!validIdentifier.test(moduleId) || !validIdentifier.test(itemId) || !label) return null;
@@ -3453,7 +3511,7 @@
             type,
             icon: String(detail.icon || existing.icon || 'default'),
             label,
-            tooltip: String(detail.tooltip || existing.tooltip || label),
+            tooltip: normalizeDockText(detail.tooltip) || normalizeDockText(existing.tooltip) || label,
             badge: detail.badge === undefined ? existing.badge : detail.badge,
             state,
             enabled: detail.enabled === undefined ? existing.enabled !== false : detail.enabled !== false,
@@ -3524,7 +3582,7 @@
             <div class="lectio-manager-dock-shell">
                 <div class="lectio-manager-dock-items" role="toolbar" aria-label="Lectio tools"></div>
             </div>
-            <div id="lectio-manager-dock-tooltip" class="lectio-manager-dock-tooltip" role="tooltip" hidden></div>
+            <div id="lectio-manager-dock-tooltip" class="lectio-manager-dock-tooltip" role="tooltip" aria-hidden="true" hidden></div>
             <section class="lectio-manager-dock-flyout" aria-label="Dock panel" hidden>
                 <button type="button" class="lectio-manager-dock-flyout-close" aria-label="Close panel">${closeSvg()}</button>
                 <div class="lectio-manager-dock-flyout-content"></div>
@@ -3570,9 +3628,16 @@
      */
     function dockItemSignature(item) {
         return JSON.stringify([
-            item.type, item.icon, item.label, item.tooltip,
+            // The resolved strings, not the registered values: two languages of
+            // the same label are the same registration and a different tile, so
+            // comparing the raw value would reuse a button still showing the
+            // language the person just switched away from. The language itself
+            // is in here too, because the Manager's own chrome around the label
+            // - the badge's "N notifications" - is translated even when the
+            // module's label is a plain string that did not change.
+            item.type, item.icon, dockText(item.label), dockText(item.tooltip),
             item.badge === undefined ? null : item.badge,
-            item.state, item.enabled, item.value
+            item.state, item.enabled, item.value, language
         ]);
     }
 
@@ -3615,8 +3680,32 @@
             && buttons.every((button, index) => button === children[index]);
 
         if (!unchanged) {
-            hideDockTooltip();
+            /*
+             * A tile that genuinely changed is replaced, and replacing the one
+             * that holds focus sends focus to the body - which is a keyboard
+             * user losing their place because some other module's badge moved.
+             * The key survives the rebuild, so focus is put back on the tile
+             * that took the old one's place.
+             */
+            const focusedKey = document.activeElement?.closest?.('.lectio-manager-dock-item')?.dataset.dockKey;
+            const tooltipKey = dockTooltipKey;
+
             dockElements.items.replaceChildren(...buttons);
+
+            if (focusedKey) {
+                dockElements.items
+                    .querySelector(`[data-dock-key="${CSS.escape(focusedKey)}"]`)
+                    ?.focus({ preventScroll: true });
+            }
+
+            /*
+             * Putting focus back fires the new tile's own focus handler, which
+             * would re-open a tooltip the person had just dismissed with
+             * Escape. A render is not a fresh arrival: whatever was showing
+             * before it is what shows after it, and nothing else.
+             */
+            dockTooltipKey = tooltipKey;
+            if (!tooltipKey) hideDockTooltip();
         }
 
         const hasItems = entries.length > 0;
@@ -3644,9 +3733,10 @@
         button.dataset.type = item.type;
         button.classList.toggle('is-active', openDockPanelKey === key);
         button.disabled = !item.enabled || item.state === 'disabled';
+        const labelText = dockText(item.label);
+        const tooltipText = dockText(item.tooltip);
         const hasBadge = item.badge !== undefined && item.badge !== null && item.badge !== '' && item.badge !== false;
-        button.setAttribute('aria-label', hasBadge ? `${item.label}, ${item.badge} notifications` : item.label);
-        button.setAttribute('aria-describedby', 'lectio-manager-dock-tooltip');
+        button.setAttribute('aria-label', hasBadge ? t('dockItemWithBadge', labelText, item.badge) : labelText);
 
         if (item.type === 'toggle') {
             button.setAttribute('aria-pressed', String(item.value));
@@ -3660,15 +3750,36 @@
         icon.innerHTML = dockIconSvg(item.icon);
         button.appendChild(icon);
 
+        /*
+         * The description goes on the control, not only in the tooltip. The
+         * tooltip is one shared, visually-positioned div that is hidden
+         * whenever nothing is hovered, so pointing every button's
+         * aria-describedby at it described whichever tooltip happened to be on
+         * screen - usually none. A span of the button's own means a screen
+         * reader reads the item's tooltip text on focus whether or not the
+         * visual tooltip is up. It is skipped when it would only repeat the
+         * accessible name.
+         */
+        if (tooltipText && tooltipText !== labelText) {
+            const description = document.createElement('span');
+            description.className = 'lectio-manager-dock-item-description';
+            description.id = `lectio-manager-dock-desc-${key}`;
+            description.textContent = tooltipText;
+            button.appendChild(description);
+            button.setAttribute('aria-describedby', description.id);
+        }
+
         if (hasBadge) {
             const badge = document.createElement('span');
             badge.className = 'lectio-manager-dock-badge';
             badge.textContent = formatDockBadge(item.badge);
-            badge.setAttribute('aria-label', `${item.badge} notifications`);
+            badge.setAttribute('aria-label', t('dockBadge', item.badge));
             button.appendChild(badge);
         }
 
         button.addEventListener('click', () => {
+            // A click is an answer; the tooltip has said what it had to say.
+            hideDockTooltip();
             if (suppressDockClickKey === key) {
                 suppressDockClickKey = null;
                 return;
@@ -3676,15 +3787,15 @@
             activateDockItem(key);
         });
         button.addEventListener('pointerenter', () => {
-            showDockTooltip(button, item.tooltip);
+            showDockTooltip(button, dockTooltipText(key));
             nudgeDockItem(button);
         });
-        button.addEventListener('pointerleave', hideDockTooltip);
+        button.addEventListener('pointerleave', () => hideDockTooltipFrom(button));
         button.addEventListener('focus', () => {
-            showDockTooltip(button, item.tooltip);
+            showDockTooltip(button, dockTooltipText(key));
             nudgeDockItem(button);
         });
-        button.addEventListener('blur', hideDockTooltip);
+        button.addEventListener('blur', () => hideDockTooltipFrom(button));
         button.addEventListener('keydown', (event) => {
             // Both axes are accepted whatever the edge, so the shortcut still
             // works when someone's muscle memory does not match the orientation.
@@ -3726,6 +3837,7 @@
     function showDockTooltip(button, text) {
         if (!dockElements || !text || openDockPanelKey) return;
 
+        dockTooltipKey = button.dataset.dockKey || null;
         dockElements.tooltip.textContent = text;
         dockElements.tooltip.hidden = false;
         const rootRect = dockElements.root.getBoundingClientRect();
@@ -3745,8 +3857,45 @@
 
     function hideDockTooltip() {
         if (!dockElements) return;
+        dockTooltipKey = null;
         dockElements.tooltip.hidden = true;
         dockElements.tooltip.textContent = '';
+    }
+
+    /*
+     * Only the tile that is actually in the dock may close the tooltip.
+     * Replacing a tile the pointer is on makes the browser recompute its hover
+     * state, and the boundary event it fires comes from the node that was
+     * removed - after the render has already put the tooltip back against the
+     * new one. Without this, the blind hide would simply have moved from
+     * applyDockPreferences() into a pointerleave nobody dispatched.
+     */
+    function hideDockTooltipFrom(button) {
+        if (!button.isConnected) return;
+        hideDockTooltip();
+    }
+
+    /*
+     * Run after every render. A tooltip that was up stays up, against whatever
+     * tile now carries its key - so a re-register or a badge change somewhere
+     * else in the dock no longer closes it, and a language switch repaints it
+     * in place. A tooltip that was already down stays down, which is what
+     * keeps a click, a flyout, a drag and Escape dismissing it for good until
+     * the pointer arrives again.
+     */
+    function refreshDockTooltip() {
+        if (!dockElements || !dockTooltipKey) return;
+
+        const key = dockTooltipKey;
+        const button = dockElements.items.querySelector(`[data-dock-key="${CSS.escape(key)}"]`);
+        const text = dockTooltipText(key);
+
+        if (!button || !text) {
+            hideDockTooltip();
+            return;
+        }
+
+        showDockTooltip(button, text);
     }
 
     function beginPointerDockDrag(event, key, button) {
@@ -4020,7 +4169,11 @@
             clampDockOpacity(dockPreferences.shellOpacity, DOCK_SHELL_OPACITY_DEFAULT),
             clampDockOpacity(dockPreferences.itemOpacity, DOCK_ITEM_OPACITY_DEFAULT)
         );
-        hideDockTooltip();
+        // Not a blind hide. This runs at the end of every renderDock(), and
+        // closing the tooltip here is what made one module's poll dismiss the
+        // tooltip of whatever item the pointer was on (issue #48). An edge or
+        // size change still lands, because a re-show measures the tile again.
+        refreshDockTooltip();
         syncDockPreferenceControls();
         updateDockFit();
     }
@@ -4269,6 +4422,15 @@
             if (event.key !== 'Escape') {
                 return;
             }
+
+            /*
+             * Escape dismisses a dock tooltip, and does not consume the key to
+             * do it: the tooltip is transient decoration over whatever the
+             * person is actually working in, so everything below still gets
+             * its turn. It stays down until the pointer or focus arrives
+             * again, because nothing re-shows what a dismissal cleared.
+             */
+            hideDockTooltip();
 
             if (openDockPanelKey) {
                 closeDockPanel();
@@ -8485,6 +8647,21 @@
                 line-height: 12px;
                 text-align: center;
                 text-overflow: clip;
+                white-space: nowrap;
+            }
+
+            /* The accessible description of a tile. Read by a screen reader on
+               focus, never painted - the tooltip above is the sighted half of
+               the same information. */
+            .lectio-manager-dock-item-description {
+                position: absolute;
+                width: 1px;
+                height: 1px;
+                margin: -1px;
+                padding: 0;
+                border: 0;
+                overflow: hidden;
+                clip-path: inset(50%);
                 white-space: nowrap;
             }
 
