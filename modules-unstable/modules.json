@@ -86,6 +86,26 @@
           "description": "Viser et mærke med ulæste beskeder ved siden af Beskeder. Virker på alle Lectio-skoler og læser skolens id fra sidens adresse."
         }
       }
+    },
+    {
+      "id": "subject-colours",
+      "name": "Subject Colours",
+      "description": "Learns which classes are really yours from your own timetable and gives each one its own colour, with a separate muted spectrum for one-off activities like assemblies and meetings. An optional per-class shape marker helps when colour alone is not enough.",
+      "category": "Timetable",
+      "audience": [
+        "student",
+        "teacher"
+      ],
+      "status": "unstable",
+      "version": "0.8.4",
+      "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Subject-Colours.user.js",
+      "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
+      "i18n": {
+        "da": {
+          "name": "Fagfarver",
+          "description": "Lærer ud fra dit eget skema, hvilke hold der rent faktisk er dine, og giver hvert af dem sin egen farve, med et separat dæmpet farvespektrum til enkeltstående aktiviteter som morgensamlinger og møder. En valgfri figurmarkør pr. hold hjælper, når farve alene ikke er nok."
+        }
+      }
     }
   ]
 }

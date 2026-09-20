@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio Subject Colours week-scan safety fixture</title>
+    <script>
+        /* The module reads its school off the path and only scans a page that
+           actually shows lesson blocks, so this fixture is served from
+           /lectio/223/ by the test's own server rather than opened off disk.
+
+           Lectio itself is stubbed at window.fetch rather than served, because
+           what has to be reproduced here is a request that never answers -
+           a captive portal, a wedged Lectio, a dead wifi - and the only way
+           one of those ever settles is the module aborting it. A module
+           without the safety net simply hangs, and every assertion below
+           times out. */
+        window.pageStartedAt = Date.now();
+        window.fetchLog = [];
+        window.maxConcurrentFetches = 0;
+        /* Flipped by the assertions below between 'hang' and 'timetable'. Read
+           at call time, so a request already hanging goes on hanging. */
+        window.nextResponse = 'hang';
+
+        /* A different hold from the one rendered on the page, so a class that
+           turns up in the store can only have come from a fetched week. */
+        window.WEEK_HTML = '<!DOCTYPE html><html><body><table id="s_m_Content_Content_SkemaNy_skematabel">'
+            + '<tr class="s2dayHeader"><th>Uge</th></tr>'
+            + '<tr><td data-date="2026-09-08">'
+            + '<a class="s2skemabrik s2brik s2normal" data-tooltip="8/9-2026 09:40 til 10:50&#10;Hold: 2x Mat A">'
+            + '<span data-lectiocontextcard="HE222">2x Mat A</span></a>'
+            + '</td></tr></table></body></html>';
+
+        let concurrentFetches = 0;
+
+        window.fetch = (url, init) => {
+            const record = {
+                url: String(url),
+                credentials: init && init.credentials,
+                hasSignal: Boolean(init && init.signal),
+                mode: window.nextResponse,
+                startedAt: Date.now(),
+                answered: false,
+                aborted: false,
+                abortedAfterMs: -1
+            };
+
+            window.fetchLog.push(record);
+
+            concurrentFetches += 1;
+            window.maxConcurrentFetches = Math.max(window.maxConcurrentFetches, concurrentFetches);
+
+            if (record.mode === 'timetable') {
+                return Promise.resolve({
+                    ok: true,
+                    text: () => {
+                        concurrentFetches -= 1;
+                        record.answered = true;
+                        return Promise.resolve(window.WEEK_HTML);
+                    }
+                });
+            }
+
+            return new Promise((_, reject) => {
+                const signal = init && init.signal;
+
+                if (!signal) return;
+
+                signal.addEventListener('abort', () => {
+                    record.aborted = true;
+                    record.abortedAfterMs = Date.now() - record.startedAt;
+                    concurrentFetches -= 1;
+                    reject(new DOMException('The user aborted a request.', 'AbortError'));
+                });
+            });
+        };
+
+        localStorage.clear();
+        localStorage.setItem('lectioSubjectColours.settings.v1', JSON.stringify({
+            schema: 2,
+            enabled: true,
+            style: 'fill',
+            intensity: 100,
+            regularity: 'balanced',
+            scanWeeks: 8,
+            colourOther: true,
+            showLegend: false,
+            overrides: {}
+        }));
+    </script>
+</head>
+<body>
+    <table>
+        <tr class="s2dayHeader"><th>Fixture week</th></tr>
+        <tr>
+            <td data-date="2026-09-15">
+                <a class="s2skemabrik s2brik s2normal" data-tooltip="15/9-2026 09:40 til 10:50&#10;Hold: 1i Psyc HL">
+                    <span data-lectiocontextcard="HE111">1i Psyc HL</span>
+                </a>
+            </td>
+        </tr>
+    </table>
+
+    <script src="/modules-unstable/Lectio-Subject-Colours.user.js"></script>
+
+    <script>
+        const STORE_KEY = 'lectioSubjectColours.schedule.v1.223';
+        const BACKOFF_KEY = 'lectioSubjectColours.scanBackoff.v1';
+
+        const failures = [];
+        const assert = (condition, message) => {
+            if (!condition) failures.push(message);
+        };
+
+        const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+        const waitFor = async (predicate, label) => {
+            for (let attempt = 0; attempt < 400; attempt += 1) {
+                if (predicate()) return true;
+                await wait(50);
+            }
+            failures.push('timed out waiting for ' + label);
+            return false;
+        };
+
+        const log = window.fetchLog;
+        const storedStore = () => {
+            try {
+                return JSON.parse(localStorage.getItem(STORE_KEY) || 'null');
+            } catch (_) {
+                return null;
+            }
+        };
+        const storedBackoff = () => {
+            try {
+                return JSON.parse(localStorage.getItem(BACKOFF_KEY) || 'null');
+            } catch (_) {
+                return null;
+            }
+        };
+        const pageBlock = () => document.querySelector('a.s2skemabrik[data-tooltip]');
+        const pageColour = () => {
+            const block = pageBlock();
+            return block ? block.getAttribute('data-lectio-subject') : null;
+        };
+
+        /* A colour that has already been painted must never be taken away by
+           anything this issue adds. Sampling at the end would miss a block
+           that lost its colour and got it back, so every mutation is watched
+           for the whole run. */
+        const uncolouredSightings = [];
+
+        const persisted = (type) => {
+            try {
+                return new PageTransitionEvent(type, { persisted: true });
+            } catch (_) {
+                const event = new Event(type);
+                Object.defineProperty(event, 'persisted', { value: true });
+                return event;
+            }
+        };
+
+        /* The module's own "Rescan" control, which is a real scan trigger -
+           used below both to prove a scan in flight is never joined and,
+           at the end, to prove that same nudge does start a request, so the
+           never-stack and backoff assertions are not vacuous. */
+        const nudge = () => window.dispatchEvent(new CustomEvent('lectio-manager:set-setting', {
+            detail: { id: 'subject-colours', key: 'rescan' }
+        }));
+
+        (async () => {
+            /* --- The page's own blocks are coloured before any fetch ------- */
+
+            await waitFor(() => pageColour(), 'the page block to be coloured from what is already known');
+
+            const block = pageBlock();
+
+            if (block) {
+                new MutationObserver(() => {
+                    if (!block.getAttribute('data-lectio-subject')) {
+                        uncolouredSightings.push('at ' + (Date.now() - window.pageStartedAt) + 'ms');
+                    }
+                }).observe(block, { attributes: true });
+            }
+
+            /* --- The first scan is jittered -------------------------------- */
+
+            await waitFor(() => log.length >= 1, 'the first week request to start');
+
+            if (log.length >= 1) {
+                const startedAfter = log[0].startedAt - window.pageStartedAt;
+
+                assert(
+                    startedAfter >= 1800,
+                    'the first scan started before the module\'s own start delay, after ' + startedAfter + 'ms'
+                );
+                assert(
+                    startedAfter <= 6500,
+                    'the first scan started far later than the delay plus its jitter, after ' + startedAfter + 'ms'
+                );
+                assert(
+                    /\/SkemaNy\.aspx\?week=\d+$/.test(log[0].url),
+                    'the first request was not a week of SkemaNy: ' + log[0].url
+                );
+                assert(log[0].hasSignal, 'the week request carried no abort signal');
+                assert(
+                    log[0].credentials === 'include',
+                    'the week request stopped sending the Lectio session cookie'
+                );
+            }
+
+            /* --- Never stack ----------------------------------------------- */
+
+            for (let attempt = 0; attempt < 5; attempt += 1) {
+                nudge();
+                await wait(20);
+            }
+
+            assert(
+                log.length === 1,
+                'a scan started while one was already running, got ' + log.length + ' requests'
+            );
+            assert(
+                log.length >= 1 && !log[0].aborted,
+                'the first request ended before the never-stack nudges were done'
+            );
+
+            /* --- Hard timeout ----------------------------------------------- */
+
+            /* Set before the wait, not after it: the request already in flight
+               keeps hanging, and the next one gets a real timetable. */
+            window.nextResponse = 'timetable';
+
+            await waitFor(() => log[0] && log[0].aborted, 'the hung week request to be timed out');
+
+            if (log[0]) {
+                assert(
+                    log[0].abortedAfterMs >= 6000 && log[0].abortedAfterMs <= 15000,
+                    'the hung request should have been timed out near ten seconds, was ' +
+                        log[0].abortedAfterMs + 'ms'
+                );
+            }
+
+            /* --- One good week, so the scan has something to lose ----------- */
+
+            await waitFor(() => log.length >= 2 && log[1].answered, 'the second week to be answered');
+            window.nextResponse = 'hang';
+
+            /* --- pagehide aborts what is in flight -------------------------- */
+
+            await waitFor(() => log.length >= 3, 'a third week request to start');
+            await wait(50);
+
+            window.dispatchEvent(persisted('pagehide'));
+
+            await waitFor(() => log[2] && log[2].aborted, 'pagehide to abort the in-flight week request');
+
+            if (log[2]) {
+                assert(
+                    log[2].abortedAfterMs <= 3000,
+                    'pagehide should have aborted the in-flight request at once, took ' +
+                        log[2].abortedAfterMs + 'ms'
+                );
+            }
+
+            /* --- A partial scan keeps the colours it already learned --------- */
+
+            await wait(200);
+
+            const afterAbort = storedStore();
+
+            assert(
+                Boolean(afterAbort && afterAbort.entries && afterAbort.entries['h:HE222']),
+                'a scan cut short threw away the class it had already learned'
+            );
+            assert(
+                Boolean(afterAbort && afterAbort.weeks && Object.keys(afterAbort.weeks).length > 0),
+                'a scan cut short recorded none of the weeks it had finished'
+            );
+            assert(
+                Boolean(afterAbort && afterAbort.entries && afterAbort.entries['h:HE111']),
+                'a scan cut short threw away what the page itself had taught the module'
+            );
+            assert(Boolean(pageColour()), 'the page block lost its colour when the scan was cut short');
+
+            const beforeRestore = log.length;
+
+            /* --- A page restored from the bfcache goes back to work ---------- */
+
+            window.dispatchEvent(persisted('pageshow'));
+
+            await waitFor(
+                () => log.length > beforeRestore,
+                'a scan to resume after the page came back from the bfcache'
+            );
+
+            /* --- Repeated failures back off ---------------------------------- */
+
+            /* Two consecutive hung weeks now, each ended by the timeout. */
+            await waitFor(() => log.length >= beforeRestore + 2, 'the resumed scan to fail twice');
+            await waitFor(
+                () => log[log.length - 1] && log[log.length - 1].aborted,
+                'the second failure of the resumed scan'
+            );
+            await wait(200);
+
+            const backoff = storedBackoff();
+
+            assert(
+                Boolean(backoff) && backoff.failures >= 2,
+                'two consecutive failures were not counted: ' + JSON.stringify(backoff)
+            );
+            assert(
+                Boolean(backoff) && backoff.until > Date.now(),
+                'two consecutive failures did not back the scan off: ' + JSON.stringify(backoff)
+            );
+
+            /* --- A backed-off scan is skipped, not run ------------------------ */
+
+            const beforeBackedOff = log.length;
+
+            window.dispatchEvent(persisted('pageshow'));
+            /* Longer than the start delay plus the whole of its jitter. */
+            await wait(8000);
+
+            assert(
+                log.length === beforeBackedOff,
+                'a background scan ran while backed off (' + beforeBackedOff + ' -> ' + log.length + ')'
+            );
+
+            /* --- ...and the module is not merely dead ------------------------- */
+
+            /* The same nudge that started nothing during the scan, and the same
+               module that skipped the backed-off tick, still answers an
+               explicit Rescan. Without this every assertion above would pass
+               against a module that had simply stopped. */
+            nudge();
+            await waitFor(
+                () => log.length > beforeBackedOff,
+                'an explicit rescan to start a request after the backoff'
+            );
+
+            /* --- Over the whole run -------------------------------------------- */
+
+            assert(
+                window.maxConcurrentFetches === 1,
+                'week requests overlapped (peak ' + window.maxConcurrentFetches + ' at once)'
+            );
+            assert(
+                uncolouredSightings.length === 0,
+                'the page block lost its colour during the run: ' + uncolouredSightings.join(' ; ')
+            );
+
+            const output = document.createElement('pre');
+            output.id = 'test-result';
+            output.textContent = failures.length ? failures.join(' | ') : 'pass';
+            document.body.dataset.testResult = failures.length ? 'fail' : 'pass';
+            document.body.appendChild(output);
+        })();
+    </script>
+</body>
+</html>
