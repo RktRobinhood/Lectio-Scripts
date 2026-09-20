@@ -40,6 +40,10 @@ _Avoid_: config, preferences, options panel (these describe the rendered result,
 The optional list a module adds to its Registration saying which browser-storage keys are its own, whether each is a cache, a setting or state, and which of them are safe to throw away. The Manager measures sizes for itself and takes everything else from here, so it can show what is using the page's ~5 MB without knowing what any of it means; a key no running module claims is listed as unclaimed and cannot be cleared from the Manager at all. Pruning is a request (`lectio-manager:prune-storage`) that the owning module carries out — the Manager never deletes a module's data itself. The contract is [`docs/manager-storage-api.md`](./docs/manager-storage-api.md).
 _Avoid_: storage manifest, quota list (neither is a description of who decides).
 
+**Settings File**:
+The JSON file the Manager writes from, and reads back into, the settings it already renders: its own preferences, and the values of every control each running module declares in its Settings Schema. It is stamped with a format version and keyed by module id, it is shown before it is saved and described before it is applied, and importing one replays values through the same `lectio-manager:set-setting` event a hand-turned control uses — so no module has code for it and the Manager still knows what nothing means. It cannot carry a cache, a learned palette, the problem log or Theming's background picture. The format is [`docs/manager-settings-file.md`](./docs/manager-settings-file.md).
+_Avoid_: backup (it restores settings, not a browser), profile, preset (reserved for a theme's own).
+
 **School**:
 A single Lectio installation/tenant, identified by the numeric id in its URL path (e.g. `/lectio/223/`). Modules and cached data are frequently scoped per School.
 _Avoid_: institution, tenant, organization.

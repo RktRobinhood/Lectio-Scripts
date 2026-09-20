@@ -91,6 +91,16 @@ test('manager measures storage generically and prunes only what a module declare
     await runFixture('manager-storage.html', 'lectio-manager-storage-', '', ['--virtual-time-budget=6000']);
 });
 
+// A settings file leaves this browser and comes back into an authenticated
+// Lectio session, so both directions are checked: that a file carries the
+// declared settings and nothing else - no learned data, no caches, no problem
+// log - and that a file arriving from anywhere cannot apply a value the
+// running module has not said it will take, be rendered as markup, or be
+// applied at all when the file itself does not add up.
+test('manager exports only declared settings and imports nothing it cannot validate', async () => {
+    await runFixture('manager-settings-file.html', 'lectio-manager-settings-file-', '', ['--virtual-time-budget=6000']);
+});
+
 // Nothing else can tell the Manager it is stale, so it reads its own catalogue
 // entry. The notice must appear only for a genuinely newer version behind an
 // install link on this repository's raw host.

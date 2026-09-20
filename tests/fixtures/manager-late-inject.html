@@ -50,7 +50,21 @@
                 }]
             })],
             ['lectioManager.lastRefresh.v1', Date.now()],
-            ['lectioManager.updateTipDismissed.v1', true]
+            ['lectioManager.updateTipDismissed.v1', true],
+            /*
+             * A dock the user has moved and faded. init() reads this, and the
+             * lists it is checked against sat two thousand lines lower in the
+             * file - so the read threw into loadDockPreferences' own catch and
+             * every page load silently handed the user the defaults back, then
+             * wrote them over their real ones on the next save. The fixture had
+             * no stored dock at all, which is why it never saw it: without one,
+             * loadDockPreferences returns before it reaches anything.
+             */
+            ['lectioManager.dock.v1', JSON.stringify({
+                version: 2, order: ['late-module:action'], edge: 'right', align: 'end',
+                sizeMode: 'large', autoFit: false, autoHide: false,
+                shellOpacity: 70, itemOpacity: 20
+            })]
         ]);
 
         window.GM_getValue = (key, fallback) => storage.has(key) ? storage.get(key) : fallback;
@@ -127,8 +141,17 @@
                         }
                     }));
                     assert(!dock.hidden, 'A dock built after load never became visible');
-                    assert(dock.style.getPropertyValue('--lectio-dock-shell-fill') === '30%',
-                        'Dock preferences were not applied when the Manager booted after load');
+
+                    // The stored dock, not the defaults. Anything init() reads
+                    // has to be declared above the boot block, and this is the
+                    // assertion that says so for dock preferences.
+                    const discardedDock = window.bootWarnings.filter((line) => /dock preferences/i.test(line));
+                    assert(discardedDock.length === 0,
+                        `The Manager threw away the stored dock while booting late: ${discardedDock.join(' | ')}`);
+                    assert(dock.style.getPropertyValue('--lectio-dock-shell-fill') === '70%',
+                        'A stored dock fill was replaced by the default when the Manager booted after load');
+                    assert(dock.dataset.edge === 'right',
+                        `A stored dock edge was lost when the Manager booted after load: ${dock.dataset.edge}`);
 
                     document.documentElement.dataset.testResult = 'pass';
                 } catch (error) {

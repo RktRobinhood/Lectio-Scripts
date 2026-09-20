@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.26.0
+// @version      1.27.0
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules, including their settings and shared dock controls.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
@@ -158,7 +158,38 @@
             storageClear: 'Clear',
             storageClearConfirm: 'Clear it — sure?',
             storageClearLabel: (what) => `Clear ${what}`,
-            storageRecheck: 'Recheck'
+            storageRecheck: 'Recheck',
+            settingsFile: 'Backup and sharing',
+            settingsFileHelp: 'A settings file holds the choices you have made: your Manager preferences, and the settings of every module running on this page. It holds no passwords and nothing from Lectio itself, but it can name your school and the colours and options you picked, so read it before you send it to anyone. It cannot carry a Theming background picture, a problem log, or anything a module has learned or cached.',
+            settingsFileExport: 'Save a settings file',
+            settingsFileCopy: 'Copy',
+            settingsFileCopied: 'Copied',
+            settingsFilePreview: 'This is exactly what was saved',
+            settingsFileSaved: (count) => `${count} setting${count === 1 ? '' : 's'} saved, plus your Manager preferences. A Theming background picture is never included.`,
+            settingsFileImport: 'Choose a settings file…',
+            settingsFilePasteLabel: 'Or paste a settings file here',
+            settingsFileReview: 'Check this file',
+            settingsFileApply: 'Apply these settings',
+            settingsFileFrom: (version, when) => `Written by Manager ${version} on ${when}.`,
+            settingsFileFromUnknown: 'This file does not say which Manager wrote it.',
+            settingsFileOtherVersion: (version) => `You are on ${version}. Anything this Manager or a module no longer offers is skipped rather than guessed at.`,
+            settingsFileWillApply: (count) => `${count} setting${count === 1 ? '' : 's'} will be applied.`,
+            settingsFileWillSkip: (count) => `${count} value${count === 1 ? '' : 's'} will be skipped.`,
+            settingsFileModuleLine: (apply, skipped) => skipped
+                ? `${apply} to apply, ${skipped} skipped`
+                : `${apply} to apply`,
+            settingsFileNotInstalled: 'not running here — skipped',
+            settingsFilePrefs: 'Manager preferences',
+            settingsFileNothing: 'There is nothing in this file that this browser can apply.',
+            settingsFileApplied: (applied, total) => applied === total
+                ? `${applied} setting${applied === 1 ? '' : 's'} applied.`
+                : `${applied} of ${total} settings applied. The rest were not taken by the module that owns them.`,
+            settingsFileErrorRead: 'That file could not be read.',
+            settingsFileErrorParse: 'That is not something the Manager can read. A settings file is the text the Save button writes.',
+            settingsFileErrorFormat: 'That file was not written by the Lectio Manager.',
+            settingsFileErrorNewer: (version) => `That file was written for a newer Manager (file format ${version}). Update the Manager and try again.`,
+            settingsFileErrorTooBig: 'That file is far too large to be a settings file.',
+            settingsFileDanger: 'Applying a file replaces the settings it names, and that cannot be undone. Save your own file first if you want a way back.'
         },
         da: {
             appTitle: 'Lectio Tools',
@@ -270,7 +301,38 @@
             storageClear: 'Ryd',
             storageClearConfirm: 'Ryd det — er du sikker?',
             storageClearLabel: (what) => `Ryd ${what}`,
-            storageRecheck: 'Tjek igen'
+            storageRecheck: 'Tjek igen',
+            settingsFile: 'Sikkerhedskopi og deling',
+            settingsFileHelp: 'En indstillingsfil indeholder de valg, du har truffet: dine Manager-indstillinger og indstillingerne for hvert modul, der kører på denne side. Den indeholder ingen adgangskoder og intet fra Lectio selv, men den kan nævne din skole og de farver og valg, du har foretaget, så læs den, før du sender den til nogen. Den kan ikke indeholde et baggrundsbillede fra Theming, en fejllog eller noget, et modul har lært eller gemt i cache.',
+            settingsFileExport: 'Gem en indstillingsfil',
+            settingsFileCopy: 'Kopiér',
+            settingsFileCopied: 'Kopieret',
+            settingsFilePreview: 'Det her er præcis det, der blev gemt',
+            settingsFileSaved: (count) => `${count} indstilling${count === 1 ? '' : 'er'} gemt sammen med dine Manager-indstillinger. Et baggrundsbillede fra Theming kommer aldrig med.`,
+            settingsFileImport: 'Vælg en indstillingsfil…',
+            settingsFilePasteLabel: 'Eller indsæt en indstillingsfil her',
+            settingsFileReview: 'Gennemse filen',
+            settingsFileApply: 'Anvend disse indstillinger',
+            settingsFileFrom: (version, when) => `Skrevet af Manager ${version} den ${when}.`,
+            settingsFileFromUnknown: 'Filen fortæller ikke, hvilken Manager der har skrevet den.',
+            settingsFileOtherVersion: (version) => `Du kører ${version}. Alt, som denne Manager eller et modul ikke længere tilbyder, springes over i stedet for at blive gættet.`,
+            settingsFileWillApply: (count) => `${count} indstilling${count === 1 ? '' : 'er'} bliver anvendt.`,
+            settingsFileWillSkip: (count) => `${count} værdi${count === 1 ? '' : 'er'} bliver sprunget over.`,
+            settingsFileModuleLine: (apply, skipped) => skipped
+                ? `${apply} anvendes, ${skipped} springes over`
+                : `${apply} anvendes`,
+            settingsFileNotInstalled: 'kører ikke her — springes over',
+            settingsFilePrefs: 'Manager-indstillinger',
+            settingsFileNothing: 'Der er intet i denne fil, som denne browser kan anvende.',
+            settingsFileApplied: (applied, total) => applied === total
+                ? `${applied} indstilling${applied === 1 ? '' : 'er'} anvendt.`
+                : `${applied} af ${total} indstillinger anvendt. Resten blev ikke taget imod af det modul, der ejer dem.`,
+            settingsFileErrorRead: 'Filen kunne ikke læses.',
+            settingsFileErrorParse: 'Det er ikke noget, Manageren kan læse. En indstillingsfil er den tekst, Gem-knappen skriver.',
+            settingsFileErrorFormat: 'Filen er ikke skrevet af Lectio Manager.',
+            settingsFileErrorNewer: (version) => `Filen er skrevet til en nyere Manager (filformat ${version}). Opdater Manageren, og prøv igen.`,
+            settingsFileErrorTooBig: 'Filen er alt for stor til at være en indstillingsfil.',
+            settingsFileDanger: 'At anvende en fil erstatter de indstillinger, den nævner, og det kan ikke fortrydes. Gem din egen fil først, hvis du vil kunne komme tilbage.'
         }
     };
 
@@ -324,7 +386,7 @@
     // Kept in step with the @version header by scripts/check-versions.mjs. The
     // header is metadata Tampermonkey reads; this is the only copy the running
     // script can see, and it is what the self-update notice compares.
-    const MANAGER_VERSION = '1.26.0';
+    const MANAGER_VERSION = '1.27.0';
 
     const STABLE_CATALOGUE_URL =
         'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/catalogue/modules.json';
@@ -432,6 +494,26 @@
     const DOCK_ITEM_OPACITY_DEFAULT = 60;
 
     /*
+     * Placement is two independent choices: which screen edge the dock hugs,
+     * and where along that edge it sits. The edge also decides the dock's
+     * orientation, so a left/right dock is a column and a top/bottom dock a
+     * row. v1 stored a single vertical `position` and always hugged the left.
+     *
+     * These three sat with the rest of the dock code, two thousand lines below
+     * the boot block, and init() reads dock preferences - so on a real install,
+     * injected at document-idle, they were still a temporal dead zone when
+     * loadDockPreferences reached them. The ReferenceError landed in that
+     * function's own catch, so a user with a stored dock got "Discarding
+     * invalid dock preferences" and the defaults, on every single page load:
+     * edge, alignment, size, order and both opacities back to stock, and
+     * written over their real ones by the next save. Same shape as 1.21.0 and
+     * 1.25.0, third home. Anything init() can reach belongs up here.
+     */
+    const DOCK_EDGES = ['left', 'right', 'top', 'bottom'];
+    const DOCK_ALIGNMENTS = ['start', 'center', 'end'];
+    const LEGACY_DOCK_POSITIONS = { top: 'start', center: 'center', bottom: 'end' };
+
+    /*
      * STORAGE READOUT
      * ---------------
      * A browser gives one origin roughly 5 MB of localStorage, and every module
@@ -453,6 +535,43 @@
     const STORAGE_KEY_NAME_LIMIT = 160;
     const STORAGE_KINDS = ['cache', 'setting', 'state'];
     const STORAGE_AREAS = ['page', 'script'];
+
+    /*
+     * SETTINGS FILE
+     * -------------
+     * Export and import are the same seam as everything else here: the Manager
+     * moves values it already renders and already writes, and understands none
+     * of them. It reads what a module reported at Registration, keeps only what
+     * that module's own Settings Schema declares as a control, and puts every
+     * value back through the one event a hand-turned control uses. No module
+     * needs a line of new code, and nothing in here knows what any setting is.
+     *
+     * What a file carries: this Manager's own preferences (language, channel,
+     * list view, sort, dock) and, per module id, the values of its declared
+     * controls. Nothing else is reachable from here by construction - the
+     * problem log, the catalogue caches, the installed registry and the storage
+     * readout are Manager state rather than settings, a module's learned data
+     * and caches were never reported at Registration in the first place, and
+     * Theming's background picture is a data URL in localStorage rather than a
+     * setting, so it cannot travel either. The export says so rather than
+     * quietly restoring a setup that looks wrong.
+     *
+     * An imported file is untrusted input that arrives inside an authenticated
+     * Lectio session, whoever handed it over. It is JSON.parse'd and then read
+     * field by field against the live schema: a module that is not running, a
+     * control that no longer exists, a value of the wrong type or outside the
+     * control's own range is skipped and counted. Nothing from the file is ever
+     * evaluated, and nothing from it reaches the panel as markup - the review
+     * below is built node by node with textContent.
+     */
+    const SETTINGS_FILE_FORMAT = 'lectio-manager-settings';
+    const SETTINGS_FILE_VERSION = 1;
+    // A settings file is a few kilobytes. Anything of this order is not one,
+    // and refusing early keeps a hostile file from being parsed at all.
+    const SETTINGS_FILE_MAX_CHARS = 512 * 1024;
+    const SETTINGS_FILE_MODULE_LIMIT = 60;
+    const SETTINGS_FILE_KEY_LIMIT = 400;
+    const SETTINGS_TEXT_LIMIT = 2048;
 
     const ISSUES_URL = 'https://github.com/RktRobinhood/Lectio-Scripts/issues/new/choose';
 
@@ -493,6 +612,7 @@
     // wanted, which can be long before there is a panel to render anything in.
     let updatesSeenSignature = null;
     let logCopiedTimer = null;
+    let settingsFileCopiedTimer = null;
     let updatedLabelTimer = null;
     let currentView = 'installed';
     let sortMode = 'category';
@@ -507,6 +627,11 @@
     let dockRenderDeferredByDrag = false;
     let suppressDockClickKey = null;
     let openDockPanelKey = null;
+    // The plan a reviewed settings file produced, held between the Check click
+    // that built it and the Apply click that carries it out. Nothing from the
+    // file itself is kept here - only module ids, control keys and values that
+    // a live Settings Schema has already accepted.
+    let pendingSettingsImport = null;
 
     const dockItems = new Map();
 
@@ -1078,6 +1203,16 @@
         set('.lectio-manager-storage-section > summary', t('storage'));
         set('.lectio-manager-storage-recheck', t('storageRecheck'));
         set('.lectio-manager-storage-help', t('storageHelp'));
+
+        set('.lectio-manager-settings-file-section > summary', t('settingsFile'));
+        set('.lectio-manager-settings-file-export', t('settingsFileExport'));
+        set('.lectio-manager-settings-file-copy', t('settingsFileCopy'));
+        set('.lectio-manager-settings-file-preview-label', t('settingsFilePreview'));
+        set('.lectio-manager-settings-file-paste-label', t('settingsFilePasteLabel'));
+        set('.lectio-manager-settings-file-pick', t('settingsFileImport'));
+        set('.lectio-manager-settings-file-check', t('settingsFileReview'));
+        set('.lectio-manager-settings-file-apply', t('settingsFileApply'));
+        set('.lectio-manager-settings-file-help', t('settingsFileHelp'));
 
         // Sizes and labels are written in the chosen language, so a language
         // change while the section is open redraws it rather than leaving half
@@ -2362,17 +2497,634 @@
     }
 
     // ============================================================
-    // SHARED DOCK
+    // SETTINGS FILE: EXPORT AND IMPORT
     // ============================================================
 
-    // Placement is two independent choices: which screen edge the dock hugs, and
-    // where along that edge it sits. The edge also decides the dock's
-    // orientation, so a left/right dock is a column and a top/bottom dock a row.
-    const DOCK_EDGES = ['left', 'right', 'top', 'bottom'];
-    const DOCK_ALIGNMENTS = ['start', 'center', 'end'];
+    /*
+     * One reader for both directions, and that is the point of it: a value is
+     * written to a file only if this same function would accept it back. A
+     * file therefore cannot hold anything import would refuse, and nothing
+     * that is not a plain declared value - an object, a learned cache a module
+     * happened to put in currentValues, a colour that is not a colour - can
+     * get into one in the first place.
+     *
+     * Every branch checks the value against the control the *running* module
+     * declared, never against anything the file says about it. `button` is an
+     * action rather than a value and is never carried; a control type this
+     * Manager has never heard of is one it cannot range-check, so it is not
+     * carried either.
+     */
+    function settingsFileValue(control, raw) {
+        if (raw === undefined || raw === null) return null;
 
-    // v1 stored a single vertical `position` and always hugged the left edge.
-    const LEGACY_DOCK_POSITIONS = { top: 'start', center: 'center', bottom: 'end' };
+        switch (control.type) {
+            case 'toggle':
+                return typeof raw === 'boolean' ? { value: raw } : null;
+
+            case 'select': {
+                if (typeof raw !== 'string' && typeof raw !== 'number') return null;
+
+                const wanted = String(raw);
+
+                for (const option of Array.isArray(control.options) ? control.options : []) {
+                    const optionValue = (option && typeof option === 'object') ? option.value : option;
+
+                    if (optionValue === undefined || optionValue === null) continue;
+                    if (String(optionValue) === wanted) return { value: wanted };
+                }
+
+                // An option the module no longer offers, or a select that
+                // declares none at all. Either way there is nothing to match
+                // against, and a select is exactly the control where guessing
+                // would put a module into a state it does not have.
+                return null;
+            }
+
+            case 'range': {
+                const number = typeof raw === 'number'
+                    ? raw
+                    : (typeof raw === 'string' && raw.trim() !== '' ? Number(raw) : NaN);
+
+                if (!Number.isFinite(number)) return null;
+
+                const min = Number.isFinite(Number(control.min)) ? Number(control.min) : 0;
+                const max = Number.isFinite(Number(control.max)) ? Number(control.max) : 100;
+
+                if (number < Math.min(min, max) || number > Math.max(min, max)) return null;
+
+                return { value: number };
+            }
+
+            case 'text':
+                return typeof raw === 'string' && raw.length <= SETTINGS_TEXT_LIMIT
+                    ? { value: raw }
+                    : null;
+
+            case 'color':
+                return typeof raw === 'string' && /^#[0-9a-f]{6}$/i.test(raw)
+                    ? { value: raw.toLowerCase() }
+                    : null;
+
+            default:
+                return null;
+        }
+    }
+
+    function findSettingsControl(schema, key) {
+        if (!Array.isArray(schema)) return null;
+
+        for (const control of schema) {
+            if (!control || typeof control !== 'object') continue;
+            if (!isNonEmptyString(control.type)) continue;
+            if (control.key === key) return control;
+        }
+
+        return null;
+    }
+
+    // Only what the module declared a control for, in the module's own order.
+    // A value sitting in currentValues with no control behind it is not a
+    // setting the Manager renders, so it is not a setting the Manager carries.
+    function exportableValues(registration) {
+        const values = {};
+
+        for (const control of Array.isArray(registration.settingsSchema) ? registration.settingsSchema : []) {
+            if (!control || typeof control !== 'object') continue;
+            if (!isNonEmptyString(control.key) || !isNonEmptyString(control.type)) continue;
+
+            const accepted = settingsFileValue(control, registration.currentValues?.[control.key]);
+            if (!accepted) continue;
+
+            values[control.key] = accepted.value;
+        }
+
+        return values;
+    }
+
+    /*
+     * Modules that registered on THIS page load, because a module reports its
+     * values only where its own @match lets it run. The alternative would be
+     * for the Manager to keep its own copy of every module's settings, which
+     * is the one thing this seam exists to avoid.
+     */
+    function buildSettingsFile() {
+        const modules = {};
+        let count = 0;
+
+        for (const moduleId of [...detected.keys()].sort()) {
+            const registration = detected.get(moduleId);
+            const values = exportableValues(registration);
+            const keys = Object.keys(values);
+
+            if (!keys.length) continue;
+
+            // `name` and `version` are for the person reading the file. Import
+            // reads neither: the module id is the only thing it matches on, and
+            // the running module's own schema is the only authority.
+            modules[moduleId] = {
+                name: registration.name,
+                version: registration.version,
+                values
+            };
+
+            count += keys.length;
+        }
+
+        return {
+            file: {
+                format: SETTINGS_FILE_FORMAT,
+                formatVersion: SETTINGS_FILE_VERSION,
+                exportedAt: new Date().toISOString(),
+                managerVersion: MANAGER_VERSION,
+                manager: {
+                    language,
+                    releaseChannel,
+                    view: currentView,
+                    sortMode,
+                    dock: { ...dockPreferences }
+                },
+                modules
+            },
+            count
+        };
+    }
+
+    /*
+     * The file is shown before it is saved, for the same reason the problem log
+     * is shown before it is copied: these get sent to colleagues, and nobody
+     * should share what they have not read. The textarea is also the paste
+     * route out - a config can travel in a message without ever being a file.
+     */
+    function exportSettingsFile() {
+        if (!elements?.settingsFileText) return;
+
+        const { file, count } = buildSettingsFile();
+        const text = JSON.stringify(file, null, 2);
+
+        elements.settingsFileText.value = text;
+        setSettingsFileStatus(t('settingsFileSaved', count));
+
+        try {
+            const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+            const link = document.createElement('a');
+
+            link.href = url;
+            link.rel = 'noopener';
+            link.download = `lectio-settings-${new Date().toISOString().slice(0, 10)}.json`;
+
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+
+            // One timer, fired once, holding nothing but the URL it releases.
+            window.setTimeout(() => URL.revokeObjectURL(url), 0);
+        } catch (error) {
+            // A browser that will not hand out a download still leaves the text
+            // above, which is a complete settings file the person can copy.
+            console.warn(LOG, 'Could not offer the settings file as a download:', error);
+        }
+    }
+
+    function copySettingsFileText() {
+        if (!elements?.settingsFileText?.value) return;
+
+        const done = () => {
+            elements.settingsFileCopy.textContent = t('settingsFileCopied');
+            window.clearTimeout(settingsFileCopiedTimer);
+            settingsFileCopiedTimer = window.setTimeout(() => {
+                if (elements?.settingsFileCopy) {
+                    elements.settingsFileCopy.textContent = t('settingsFileCopy');
+                }
+            }, 1500);
+        };
+
+        try {
+            navigator.clipboard.writeText(elements.settingsFileText.value).then(done, () => {
+                elements.settingsFileText.select();
+                done();
+            });
+        } catch (_) {
+            elements.settingsFileText.select();
+            done();
+        }
+    }
+
+    /*
+     * The same shape as Theming's image picker: an input that never enters the
+     * document, and one-shot listeners, so a dismissed dialog leaves nothing
+     * behind.
+     */
+    function pickSettingsFile() {
+        const input = document.createElement('input');
+
+        input.type = 'file';
+        input.accept = 'application/json,.json,text/plain';
+
+        input.addEventListener('change', () => {
+            const file = input.files?.[0];
+            if (file) readSettingsFile(file);
+        }, { once: true });
+
+        input.addEventListener('cancel', () => {}, { once: true });
+        input.click();
+    }
+
+    function readSettingsFile(file) {
+        if (!elements?.settingsFileInput) return;
+
+        if (Number(file.size) > SETTINGS_FILE_MAX_CHARS) {
+            setSettingsFileStatus(t('settingsFileErrorTooBig'));
+            return;
+        }
+
+        file.text().then((text) => {
+            // Into a textarea as text, and nowhere else. The file is now in
+            // front of the person who chose it, which is where an untrusted
+            // file should be before anything is done with it.
+            elements.settingsFileInput.value = String(text).slice(0, SETTINGS_FILE_MAX_CHARS);
+            reviewSettingsFile();
+        }, () => setSettingsFileStatus(t('settingsFileErrorRead')));
+    }
+
+    /*
+     * Reading a file never changes anything. It produces a plan - the values
+     * that would be applied, and a count of everything that would not - and the
+     * plan is what the Apply button carries out. So a file that is malformed
+     * anywhere is refused whole, before a single setting moves, and a file that
+     * is accepted cannot be half-applied by a value further down it turning out
+     * to be nonsense.
+     */
+    function reviewSettingsFile() {
+        if (!elements?.settingsFileInput) return;
+
+        pendingSettingsImport = null;
+        elements.settingsFileApply.hidden = true;
+        elements.settingsFileReview.textContent = '';
+
+        const text = elements.settingsFileInput.value;
+
+        if (typeof text !== 'string' || !text.trim()) {
+            setSettingsFileStatus(t('settingsFileErrorParse'));
+            return;
+        }
+
+        if (text.length > SETTINGS_FILE_MAX_CHARS) {
+            setSettingsFileStatus(t('settingsFileErrorTooBig'));
+            return;
+        }
+
+        let parsed;
+
+        try {
+            parsed = JSON.parse(text);
+        } catch (_) {
+            setSettingsFileStatus(t('settingsFileErrorParse'));
+            return;
+        }
+
+        const plan = planSettingsImport(parsed);
+
+        if (plan.error) {
+            setSettingsFileStatus(plan.error);
+            return;
+        }
+
+        setSettingsFileStatus('');
+        renderSettingsImportReview(plan);
+
+        if (plan.applyCount || plan.preferences) {
+            pendingSettingsImport = plan;
+            elements.settingsFileApply.hidden = false;
+        }
+    }
+
+    function planSettingsImport(parsed) {
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            return { error: t('settingsFileErrorParse') };
+        }
+
+        if (parsed.format !== SETTINGS_FILE_FORMAT) {
+            return { error: t('settingsFileErrorFormat') };
+        }
+
+        /*
+         * Version skew is the normal case, not the edge case, so a file says
+         * two different things about where it came from and they do different
+         * jobs. `formatVersion` is the shape of the file, and it is the only
+         * one that can refuse it: a newer one may mean fields this Manager
+         * would read wrongly, so it stops here rather than being half
+         * understood. `managerVersion` is provenance - shown to the person,
+         * never branched on. Skew in what the *modules* offer needs no version
+         * at all, because every value is checked against the live schema on the
+         * way in.
+         */
+        const formatVersion = Number(parsed.formatVersion);
+
+        if (!Number.isInteger(formatVersion) || formatVersion < 1) {
+            return { error: t('settingsFileErrorFormat') };
+        }
+
+        if (formatVersion > SETTINGS_FILE_VERSION) {
+            return { error: t('settingsFileErrorNewer', formatVersion) };
+        }
+
+        const blocks = (parsed.modules && typeof parsed.modules === 'object' && !Array.isArray(parsed.modules))
+            ? Object.entries(parsed.modules)
+            : null;
+
+        if (!blocks) {
+            return { error: t('settingsFileErrorFormat') };
+        }
+
+        const plan = {
+            managerVersion: safeIdentifier(parsed.managerVersion, 24),
+            exportedAt: settingsFileDate(parsed.exportedAt),
+            preferences: readSettingsFilePreferences(parsed.manager),
+            modules: [],
+            applyCount: 0,
+            skipCount: 0
+        };
+
+        for (const [moduleId, block] of blocks.slice(0, SETTINGS_FILE_MODULE_LIMIT)) {
+            if (!isNonEmptyString(moduleId)) continue;
+
+            const values = (block && typeof block === 'object' && !Array.isArray(block) &&
+                block.values && typeof block.values === 'object' && !Array.isArray(block.values))
+                ? Object.entries(block.values).slice(0, SETTINGS_FILE_KEY_LIMIT)
+                : [];
+
+            const registration = detected.get(moduleId);
+
+            if (!registration) {
+                // A module this browser does not have, or one that does not run
+                // on this page. Listed by the id the file used, as text, and
+                // skipped - never installed, never guessed at.
+                plan.modules.push({
+                    id: moduleId,
+                    name: moduleId.slice(0, STORAGE_KEY_NAME_LIMIT),
+                    installed: false,
+                    apply: [],
+                    skipped: values.length
+                });
+                plan.skipCount += values.length;
+                continue;
+            }
+
+            const apply = [];
+            let skipped = 0;
+
+            for (const [key, raw] of values) {
+                const control = typeof key === 'string'
+                    ? findSettingsControl(registration.settingsSchema, key)
+                    : null;
+                const accepted = control ? settingsFileValue(control, raw) : null;
+
+                // A control that has gone, one that has changed type since the
+                // file was written, a value outside the range the module now
+                // offers: one thing from here, which is "not something this
+                // module has said it will take".
+                if (!accepted) {
+                    skipped += 1;
+                    continue;
+                }
+
+                apply.push({ key, value: accepted.value });
+            }
+
+            plan.modules.push({
+                id: moduleId,
+                name: moduleDisplayName(moduleId, registration),
+                installed: true,
+                apply,
+                skipped
+            });
+
+            plan.applyCount += apply.length;
+            plan.skipCount += skipped;
+        }
+
+        return plan;
+    }
+
+    function settingsFileDate(value) {
+        if (!isNonEmptyString(value)) return '';
+
+        const when = new Date(value);
+
+        if (Number.isNaN(when.getTime())) return '';
+
+        try {
+            return when.toLocaleDateString(language === 'da' ? 'da-DK' : 'en-GB');
+        } catch (_) {
+            return when.toISOString().slice(0, 10);
+        }
+    }
+
+    // The Manager's own preferences, each one through the same normalizer as
+    // the control behind it - and taken only where the file's value survives
+    // that unchanged, so a nonsense value is skipped rather than quietly
+    // resetting a preference to its default.
+    function readSettingsFilePreferences(raw) {
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+
+        const preferences = {};
+
+        if (LANGUAGES.includes(raw.language)) preferences.language = raw.language;
+
+        if (raw.releaseChannel === 'stable' || raw.releaseChannel === 'unstable') {
+            preferences.releaseChannel = raw.releaseChannel;
+        }
+
+        if (isNonEmptyString(raw.view) && normalizeView(raw.view) === raw.view) preferences.view = raw.view;
+        if (normalizeSortMode(raw.sortMode) === raw.sortMode) preferences.sortMode = raw.sortMode;
+
+        if (raw.dock && typeof raw.dock === 'object' && !Array.isArray(raw.dock)) {
+            preferences.dock = normalizeDockPreferences(raw.dock);
+        }
+
+        return Object.keys(preferences).length ? preferences : null;
+    }
+
+    function settingsFilePreferenceLabels(preferences) {
+        const labels = [];
+
+        if (preferences.language) labels.push(t('language'));
+
+        if (preferences.releaseChannel) {
+            labels.push(`${t('releaseChannel')}: ${t(preferences.releaseChannel === 'unstable' ? 'unstable' : 'stable')}`);
+        }
+
+        if (preferences.dock) labels.push(t('dock'));
+        if (preferences.view || preferences.sortMode) labels.push(t('modules'));
+
+        return labels;
+    }
+
+    /*
+     * Built node by node, and every string that came out of the file - a module
+     * id nothing claims, most of all - goes in as textContent. Nothing from a
+     * settings file is ever parsed as markup, and nothing in it is ever
+     * evaluated.
+     */
+    function renderSettingsImportReview(plan) {
+        const review = elements.settingsFileReview;
+
+        review.textContent = '';
+
+        const line = (text, className) => {
+            if (!text) return;
+
+            const node = document.createElement('div');
+            node.className = className || 'lectio-manager-settings-file-line';
+            node.textContent = text;
+            review.appendChild(node);
+        };
+
+        const row = (title, detailText, skippedRow) => {
+            const node = document.createElement('div');
+            node.className = 'lectio-manager-settings-file-row';
+            if (skippedRow) node.classList.add('is-skipped');
+
+            const name = document.createElement('strong');
+            name.textContent = title;
+            node.appendChild(name);
+
+            const detail = document.createElement('span');
+            detail.textContent = detailText;
+            node.appendChild(detail);
+
+            review.appendChild(node);
+        };
+
+        line(plan.managerVersion && plan.exportedAt
+            ? t('settingsFileFrom', plan.managerVersion, plan.exportedAt)
+            : t('settingsFileFromUnknown'));
+
+        if (plan.managerVersion && plan.managerVersion !== MANAGER_VERSION) {
+            line(t('settingsFileOtherVersion', MANAGER_VERSION));
+        }
+
+        if (plan.preferences) {
+            row(t('settingsFilePrefs'), settingsFilePreferenceLabels(plan.preferences).join(', '), false);
+        }
+
+        for (const block of plan.modules) {
+            row(
+                block.name,
+                block.installed
+                    ? t('settingsFileModuleLine', block.apply.length, block.skipped)
+                    : t('settingsFileNotInstalled'),
+                !block.installed
+            );
+        }
+
+        if (!plan.applyCount && !plan.preferences) {
+            line(t('settingsFileNothing'));
+            return;
+        }
+
+        line(t('settingsFileWillApply', plan.applyCount));
+        if (plan.skipCount) line(t('settingsFileWillSkip', plan.skipCount));
+        line(t('settingsFileDanger'), 'lectio-manager-settings-file-warning');
+    }
+
+    /*
+     * Nothing is validated here, because it was all validated to build the
+     * plan. This replays accepted values through the one event a hand-turned
+     * control uses, which is what keeps the Manager out of the business of
+     * knowing what any of them mean.
+     *
+     * A dispatch cannot report failure - a listener that throws is reported to
+     * the window, not to whoever dispatched - so success is not claimed from
+     * having sent one. Discovery is asked again afterwards, and what the
+     * outcome line reports is what the modules then say they hold.
+     */
+    function applySettingsImport() {
+        if (!pendingSettingsImport || !elements?.settingsFileReview) return;
+
+        const plan = pendingSettingsImport;
+
+        pendingSettingsImport = null;
+        elements.settingsFileApply.hidden = true;
+
+        for (const block of plan.modules) {
+            for (const item of block.apply) {
+                try {
+                    emitSettingChange(block.id, item.key, item.value);
+                } catch (error) {
+                    console.warn(LOG, 'A setting could not be sent to its module:', error);
+                }
+            }
+        }
+
+        applySettingsFilePreferences(plan.preferences);
+        requestDiscovery();
+
+        // One shot. Modules answer Discovery on their own terms, so the count is
+        // taken a tick later from what they reported, not from what was sent.
+        window.setTimeout(() => reportSettingsImport(plan), 0);
+    }
+
+    function applySettingsFilePreferences(preferences) {
+        if (!preferences) return;
+
+        if (preferences.dock) {
+            dockPreferences = preferences.dock;
+            saveDockPreferences();
+            applyDockPreferences();
+            renderDock();
+            syncDockPreferenceControls();
+        }
+
+        if (preferences.view) {
+            currentView = preferences.view;
+            GM_setValue(STORAGE_VIEW, currentView);
+        }
+
+        if (preferences.sortMode) {
+            sortMode = preferences.sortMode;
+            GM_setValue(STORAGE_SORT_MODE, sortMode);
+        }
+
+        // These two re-render the panel themselves, so they go last.
+        if (preferences.language) setLanguage(preferences.language);
+        if (preferences.releaseChannel) setReleaseChannel(preferences.releaseChannel);
+    }
+
+    function reportSettingsImport(plan) {
+        let applied = 0;
+
+        for (const block of plan.modules) {
+            const registration = detected.get(block.id);
+
+            for (const item of block.apply) {
+                const control = registration
+                    ? findSettingsControl(registration.settingsSchema, item.key)
+                    : null;
+                const now = control
+                    ? settingsFileValue(control, registration.currentValues?.[item.key])
+                    : null;
+
+                if (now && String(now.value) === String(item.value)) applied += 1;
+            }
+        }
+
+        renderModuleList();
+
+        if (!elements?.settingsFileReview) return;
+
+        elements.settingsFileReview.textContent = '';
+        setSettingsFileStatus(t('settingsFileApplied', applied, plan.applyCount));
+    }
+
+    function setSettingsFileStatus(text) {
+        if (!elements?.settingsFileStatus) return;
+        elements.settingsFileStatus.textContent = text;
+    }
+
+    // ============================================================
+    // SHARED DOCK
+    // ============================================================
 
     function defaultDockPreferences() {
         return {
@@ -2399,38 +3151,55 @@
     }
 
     function loadDockPreferences() {
-        const defaults = defaultDockPreferences();
-
         try {
             const raw = GM_getValue(STORAGE_DOCK, '');
-            if (!raw) return defaults;
+            if (!raw) return defaultDockPreferences();
 
-            const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
-            if (!parsed || typeof parsed !== 'object') return defaults;
-
-            const migratedAlign = LEGACY_DOCK_POSITIONS[parsed.position];
-
-            return {
-                ...defaults,
-                order: Array.isArray(parsed.order)
-                    ? [...new Set(parsed.order.filter((key) => typeof key === 'string'))]
-                    : [],
-                edge: DOCK_EDGES.includes(parsed.edge) ? parsed.edge : defaults.edge,
-                align: DOCK_ALIGNMENTS.includes(parsed.align)
-                    ? parsed.align
-                    : (migratedAlign || defaults.align),
-                sizeMode: ['auto', 'small', 'normal', 'large'].includes(parsed.sizeMode)
-                    ? parsed.sizeMode
-                    : defaults.sizeMode,
-                autoFit: parsed.autoFit !== false,
-                autoHide: parsed.autoHide === true,
-                shellOpacity: clampDockOpacity(parsed.shellOpacity, defaults.shellOpacity),
-                itemOpacity: clampDockOpacity(parsed.itemOpacity, defaults.itemOpacity)
-            };
+            return normalizeDockPreferences(typeof raw === 'string' ? JSON.parse(raw) : raw);
         } catch (error) {
             console.warn(LOG, 'Discarding invalid dock preferences:', error);
-            return defaults;
+            return defaultDockPreferences();
         }
+    }
+
+    /*
+     * Split out of loadDockPreferences so a settings file goes through exactly
+     * the same reading as this browser's own stored copy - which matters more
+     * for the file, since it arrives from somewhere far less trusted. Every
+     * field is checked against the values the control behind it offers, and an
+     * unknown one falls back to the default rather than being carried through.
+     */
+    function normalizeDockPreferences(parsed) {
+        // A dock holds a handful of icons, so an order longer than this was
+        // not written by a Manager. The cap lives inside the function, not
+        // beside DOCK_EDGES above: init() reads dock preferences from above
+        // this point in the file, where a module-scope const is still a
+        // temporal dead zone. That shape has shipped twice (1.21.0, 1.25.0).
+        const orderLimit = 60;
+        const defaults = defaultDockPreferences();
+
+        if (!parsed || typeof parsed !== 'object') return defaults;
+
+        const migratedAlign = LEGACY_DOCK_POSITIONS[parsed.position];
+
+        return {
+            ...defaults,
+            order: Array.isArray(parsed.order)
+                ? [...new Set(parsed.order.filter((key) => typeof key === 'string'))]
+                    .slice(0, orderLimit)
+                : [],
+            edge: DOCK_EDGES.includes(parsed.edge) ? parsed.edge : defaults.edge,
+            align: DOCK_ALIGNMENTS.includes(parsed.align)
+                ? parsed.align
+                : (migratedAlign || defaults.align),
+            sizeMode: ['auto', 'small', 'normal', 'large'].includes(parsed.sizeMode)
+                ? parsed.sizeMode
+                : defaults.sizeMode,
+            autoFit: parsed.autoFit !== false,
+            autoHide: parsed.autoHide === true,
+            shellOpacity: clampDockOpacity(parsed.shellOpacity, defaults.shellOpacity),
+            itemOpacity: clampDockOpacity(parsed.itemOpacity, defaults.itemOpacity)
+        };
     }
 
     function saveDockPreferences() {
@@ -3439,6 +4208,25 @@
                         </div>
                         <small class="lectio-manager-prefs-warning lectio-manager-storage-help"></small>
                     </details>
+                    <details class="lectio-manager-prefs-section lectio-manager-settings-file-section">
+                        <summary>Backup and sharing</summary>
+                        <div class="lectio-manager-settings-file-actions">
+                            <button type="button" class="lectio-manager-settings-file-export">Save a settings file</button>
+                            <button type="button" class="lectio-manager-settings-file-copy">Copy</button>
+                        </div>
+                        <label class="lectio-manager-settings-file-preview-label" for="lectio-manager-settings-file-text"></label>
+                        <textarea id="lectio-manager-settings-file-text" class="lectio-manager-settings-file-text" rows="6" readonly></textarea>
+                        <label class="lectio-manager-settings-file-paste-label" for="lectio-manager-settings-file-input"></label>
+                        <textarea id="lectio-manager-settings-file-input" class="lectio-manager-settings-file-input" rows="4" spellcheck="false"></textarea>
+                        <div class="lectio-manager-settings-file-actions">
+                            <button type="button" class="lectio-manager-settings-file-pick">Choose a settings file</button>
+                            <button type="button" class="lectio-manager-settings-file-check">Check this file</button>
+                        </div>
+                        <div class="lectio-manager-settings-file-status" role="status"></div>
+                        <div class="lectio-manager-settings-file-review"></div>
+                        <button type="button" class="lectio-manager-settings-file-apply" hidden>Apply these settings</button>
+                        <small class="lectio-manager-prefs-warning lectio-manager-settings-file-help"></small>
+                    </details>
                 </div>
                 <div class="lectio-manager-help-panel" hidden>
                     The Manager shows available module updates and opens Tampermonkey's normal confirmation page. To disable, manually check, or remove a script, click the Tampermonkey icon in your browser toolbar and choose <strong>Dashboard</strong>.
@@ -3644,6 +4432,22 @@
         root.querySelector('.lectio-manager-storage-recheck')
             .addEventListener('click', renderStorageReadout);
 
+        // Four buttons, and only the last of them changes anything. Saving
+        // shows the file it wrote; choosing or pasting one only fills a box;
+        // checking only describes what would happen. Apply stays hidden until
+        // a file has been read and found to contain something this browser can
+        // actually carry out.
+        root.querySelector('.lectio-manager-settings-file-export')
+            .addEventListener('click', exportSettingsFile);
+        root.querySelector('.lectio-manager-settings-file-copy')
+            .addEventListener('click', copySettingsFileText);
+        root.querySelector('.lectio-manager-settings-file-pick')
+            .addEventListener('click', pickSettingsFile);
+        root.querySelector('.lectio-manager-settings-file-check')
+            .addEventListener('click', reviewSettingsFile);
+        root.querySelector('.lectio-manager-settings-file-apply')
+            .addEventListener('click', applySettingsImport);
+
         if (!GM_getValue(STORAGE_UPDATE_TIP_DISMISSED, false)) {
             tipBanner.hidden = false;
         }
@@ -3723,6 +4527,12 @@
             storageSection,
             storageList: root.querySelector('.lectio-manager-storage-list'),
             storageTotal: root.querySelector('.lectio-manager-storage-total'),
+            settingsFileText: root.querySelector('.lectio-manager-settings-file-text'),
+            settingsFileCopy: root.querySelector('.lectio-manager-settings-file-copy'),
+            settingsFileInput: root.querySelector('.lectio-manager-settings-file-input'),
+            settingsFileStatus: root.querySelector('.lectio-manager-settings-file-status'),
+            settingsFileReview: root.querySelector('.lectio-manager-settings-file-review'),
+            settingsFileApply: root.querySelector('.lectio-manager-settings-file-apply'),
             logList: root.querySelector('.lectio-manager-log-list'),
             logReport: root.querySelector('.lectio-manager-log-report'),
             logCopy: root.querySelector('.lectio-manager-log-copy'),
@@ -6044,6 +6854,105 @@
                 padding: 4px 8px;
                 font: inherit;
                 font-size: 10px;
+                cursor: pointer;
+            }
+
+            /* Same furniture as the problem log's preview, for the same
+               reason: this is a block of text a person is expected to read
+               before it leaves their browser. */
+            .lectio-manager-settings-file-text,
+            .lectio-manager-settings-file-input {
+                display: block;
+                width: 100%;
+                box-sizing: border-box;
+                margin-top: 3px;
+                border: 1px solid var(--lectio-theme-muted, #cbd7d9);
+                border-radius: 6px;
+                background: var(--lectio-theme-surface, #ffffff);
+                color: var(--lectio-theme-text, #10201e);
+                padding: 5px 6px;
+                font-family: ui-monospace, Consolas, monospace;
+                font-size: 10px;
+                line-height: 1.4;
+                resize: vertical;
+            }
+
+            .lectio-manager-settings-file-preview-label,
+            .lectio-manager-settings-file-paste-label {
+                display: block;
+                margin-top: 8px;
+                color: var(--lectio-theme-muted, #5e6870);
+                font-size: 10px;
+            }
+
+            .lectio-manager-settings-file-actions {
+                display: flex;
+                gap: 6px;
+                margin-top: 7px;
+            }
+
+            .lectio-manager-settings-file-actions button {
+                border: 1px solid var(--lectio-theme-accent, #0f6f6f);
+                border-radius: 6px;
+                background: var(--lectio-theme-surface, #ffffff);
+                color: var(--lectio-theme-accent, #0f6f6f);
+                padding: 4px 8px;
+                font: inherit;
+                font-size: 10px;
+                cursor: pointer;
+            }
+
+            .lectio-manager-settings-file-status {
+                margin-top: 7px;
+                color: var(--lectio-theme-text, #10201e);
+                font-size: 10px;
+            }
+
+            .lectio-manager-settings-file-line {
+                margin-top: 4px;
+                color: var(--lectio-theme-muted, #5e6870);
+                font-size: 10px;
+                line-height: 1.35;
+            }
+
+            .lectio-manager-settings-file-row {
+                display: flex;
+                align-items: baseline;
+                gap: 6px;
+                padding: 2px 0;
+                color: var(--lectio-theme-text, #2a4250);
+                font-size: 10px;
+            }
+
+            .lectio-manager-settings-file-row strong {
+                flex: 1 1 auto;
+                min-width: 0;
+                word-break: break-word;
+            }
+
+            .lectio-manager-settings-file-row.is-skipped {
+                color: var(--lectio-theme-muted, #5e6870);
+            }
+
+            /* The one control here that changes anything, and it cannot be
+               undone, so it is drawn as the deliberate act it is. */
+            .lectio-manager-settings-file-warning {
+                margin-top: 6px;
+                color: var(--lectio-theme-danger, #b42318);
+                font-size: 10px;
+                line-height: 1.35;
+            }
+
+            .lectio-manager-settings-file-apply {
+                margin-top: 8px;
+                border: 1px solid var(--lectio-theme-accent, #0f6f6f);
+                border-radius: 6px;
+                background: var(--lectio-theme-accent, #0f6f6f);
+                color: #ffffff;
+                padding: 4px 8px;
+                font: inherit;
+                font-size: 10px;
+                font-weight: 700;
                 cursor: pointer;
             }
 

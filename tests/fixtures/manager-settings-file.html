@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio Manager settings-file fixture</title>
+</head>
+<body>
+    <script>
+        /*
+         * Export and import (issue #30).
+         *
+         * The seam under test is the same one the settings panel already
+         * stands on: the Manager moves values it renders and never
+         * understands. So what is checked here is mostly what does NOT
+         * happen - a value with no control behind it is not carried, a file
+         * from somewhere else cannot put a module into a state it does not
+         * offer, and nothing that arrives in a file is ever evaluated or
+         * rendered as markup.
+         *
+         * The hostile file is the important one. It is a plausible settings
+         * file for the module that is actually running, carrying values that
+         * module really would accept - and it is refused whole because its
+         * format stamp is wrong. Remove either gate in planSettingsImport and
+         * this fixture fails on the assertion that nothing was applied.
+         */
+        const catalogue = {
+            schemaVersion: 1,
+            generatedAt: '2026-09-20T00:00:00.000Z',
+            manager: {
+                version: '0.0.1',
+                installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/manager/Lectio-Manager.user.js'
+            },
+            modules: [
+                {
+                    id: 'probe',
+                    name: 'Probe Module',
+                    description: 'Declares one control of every kind the Manager renders.',
+                    category: 'Interface',
+                    audience: ['student'],
+                    status: 'stable',
+                    version: '1.0.0',
+                    installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Probe.user.js'
+                }
+            ]
+        };
+
+        const gmStorage = new Map([
+            ['lectioManager.catalogue.v1', JSON.stringify(catalogue)],
+            ['lectioManager.lastRefresh.v1', Date.now()],
+            ['lectioManager.updateTipDismissed.v1', true]
+        ]);
+
+        window.GM_getValue = (key, fallback) => gmStorage.has(key) ? gmStorage.get(key) : fallback;
+        window.GM_setValue = (key, value) => gmStorage.set(key, value);
+        window.GM_xmlhttpRequest = (options) => { setTimeout(() => options.onerror(), 0); };
+
+        // A learned cache in this browser's storage. It is not a setting, it
+        // was never reported at Registration, and it must not turn up in a
+        // file someone is about to send to a colleague.
+        localStorage.clear();
+        localStorage.setItem('lectioProbe.learned.v1', 'CACHE-DO-NOT-EXPORT');
+
+        window.pageErrors = [];
+        window.addEventListener('error', (event) => window.pageErrors.push(String(event.message)));
+
+        /*
+         * The module. One control of every type the Manager renders, plus two
+         * things in currentValues that no control declares - which is exactly
+         * how a learned palette or a private token would leak into a shared
+         * file if export read currentValues rather than the schema.
+         */
+        const SCHEMA = [
+            { key: 'enabled', type: 'toggle', label: 'Enabled' },
+            {
+                key: 'style', type: 'select', label: 'Style',
+                options: [{ value: 'bright', label: 'Bright' }, { value: 'muted', label: 'Muted' }]
+            },
+            { key: 'intensity', type: 'range', label: 'Intensity', min: 0, max: 100, step: 5 },
+            { key: 'note', type: 'text', label: 'Note' },
+            { key: 'colour', type: 'color', label: 'Colour' },
+            { key: 'reset', type: 'button', label: 'Reset', buttonLabel: 'Reset' }
+        ];
+
+        const ORIGINAL = {
+            enabled: true,
+            style: 'muted',
+            intensity: 35,
+            note: 'my own note',
+            colour: '#123456'
+        };
+
+        window.probeValues = { ...ORIGINAL };
+        window.probeApplied = [];
+
+        function registerProbe() {
+            window.dispatchEvent(new CustomEvent('lectio-module:register', {
+                detail: {
+                    id: 'probe',
+                    name: 'Probe Module',
+                    version: '1.0.0',
+                    settingsSchema: SCHEMA,
+                    currentValues: {
+                        ...window.probeValues,
+                        // Neither of these has a control. Neither may travel.
+                        secretToken: 'SECRET-DO-NOT-EXPORT',
+                        learned: { HE1: '#ff0000', HE2: '#00ff00' }
+                    },
+                    storage: [
+                        { key: 'lectioProbe.learned.v1', kind: 'cache', prunable: true, label: 'Learned data' }
+                    ]
+                }
+            }));
+        }
+
+        window.addEventListener('lectio-manager:discover', registerProbe);
+
+        window.addEventListener('lectio-manager:set-setting', (event) => {
+            const detail = event.detail || {};
+            if (detail.id !== 'probe') return;
+
+            window.probeApplied.push(`${detail.key}=${JSON.stringify(detail.value)}`);
+
+            // A button is an action, and this module treats it as one: it
+            // never becomes a value, so it can never be replayed from a file.
+            if (detail.key === 'reset') return;
+
+            window.probeValues[detail.key] = detail.key === 'intensity'
+                ? Number(detail.value)
+                : detail.value;
+
+            registerProbe();
+        });
+    </script>
+    <script src="../../manager/Lectio-Manager.user.js"></script>
+    <script>
+        function assert(condition, message) {
+            if (!condition) throw new Error(message);
+        }
+
+        function section() {
+            return document.querySelector('.lectio-manager-settings-file-section');
+        }
+
+        function control(selector) {
+            return document.querySelector(`.lectio-manager-settings-file-${selector}`);
+        }
+
+        function reviewText() {
+            return control('review').textContent;
+        }
+
+        function statusText() {
+            return control('status').textContent;
+        }
+
+        async function check(text) {
+            control('input').value = text;
+            control('check').click();
+            await new Promise((done) => setTimeout(done, 0));
+        }
+
+        window.addEventListener('load', async () => {
+            try {
+                await new Promise((done) => setTimeout(done, 50));
+
+                // 1. Nothing here exists before the first gear click, and
+                //    nothing that ran on the way here needed it to.
+                assert(!section(), 'The settings-file section was built without a gear click');
+                window.dispatchEvent(new CustomEvent('lectio-manager:discover'));
+                await new Promise((done) => setTimeout(done, 0));
+                assert(window.pageErrors.length === 0,
+                    `The Manager threw before its panel existed: ${window.pageErrors.join(' | ')}`);
+
+                // Something in the problem log, so the export can be checked
+                // for carrying it.
+                window.dispatchEvent(new CustomEvent('lectio-module:report', {
+                    detail: { id: 'probe', kind: 'drift', code: 'probe-selector-missing' }
+                }));
+
+                document.querySelector('#lectio-manager-toggle').click();
+                assert(section(), 'The panel opened without a settings-file section');
+
+                section().open = true;
+                await new Promise((done) => setTimeout(done, 0));
+
+                // 2. Export. What comes out is shown before it is saved.
+                control('export').click();
+                const exported = control('text').value;
+                assert(exported, 'Export produced nothing');
+
+                const file = JSON.parse(exported);
+                assert(file.format === 'lectio-manager-settings',
+                    `The file is not stamped with a format: ${file.format}`);
+                assert(file.formatVersion === 1, `The file is not stamped with a version: ${file.formatVersion}`);
+                assert(/^\d+\.\d+\.\d+$/.test(file.managerVersion || ''),
+                    `The file does not say which Manager wrote it: ${file.managerVersion}`);
+                assert(file.manager && file.manager.language === 'en' &&
+                    file.manager.releaseChannel === 'stable' &&
+                    file.manager.dock && file.manager.dock.edge === 'left',
+                    `Manager preferences are missing from the file: ${JSON.stringify(file.manager)}`);
+
+                // 3. Exactly the declared controls that hold a value. A button
+                //    is an action, not a value; anything currentValues carries
+                //    without a control behind it is not a setting at all.
+                const exportedKeys = Object.keys(file.modules.probe.values).sort().join(',');
+                assert(exportedKeys === 'colour,enabled,intensity,note,style',
+                    `The file carries the wrong set of values: ${exportedKeys}`);
+
+                // 4. Nothing that is not a setting. This is the assertion that
+                //    matters when the file is sent to someone else.
+                assert(!exported.includes('SECRET-DO-NOT-EXPORT'),
+                    'A value with no control behind it was exported');
+                assert(!exported.includes('HE1') && !exported.includes('#ff0000'),
+                    'A module\'s learned data was exported');
+                assert(!exported.includes('CACHE-DO-NOT-EXPORT') && !exported.includes('lectioProbe.learned'),
+                    'Browser storage the Manager measured was exported');
+                assert(!exported.includes('probe-selector-missing') && !/problem/i.test(exported),
+                    'The problem log was exported');
+                assert(!exported.includes('lectioManager.catalogue') && !exported.includes('installUrl'),
+                    'The Manager\'s own caches were exported');
+
+                // 5. The limit the issue asks to be stated plainly: a Theming
+                //    background picture cannot travel in a settings file.
+                assert(/background picture/i.test(section().textContent),
+                    'The section does not say the background picture is not included');
+
+                /*
+                 * 6. A hostile file. Everything in it would be accepted on its
+                 *    own - the module is running, the keys are real, the values
+                 *    are in range, the preferences are valid - and none of it
+                 *    may be applied, because the file is not stamped as one of
+                 *    ours. Its version stamp is deliberately the one this
+                 *    Manager reads, so the format gate is the only thing
+                 *    standing in the way and removing it applies all five
+                 *    values and switches the language and the channel.
+                 */
+                const before = JSON.stringify(window.probeValues);
+                window.probeApplied.length = 0;
+
+                await check(JSON.stringify({
+                    format: 'not-the-lectio-manager',
+                    formatVersion: 1,
+                    managerVersion: '9.9.9',
+                    manager: { language: 'da', releaseChannel: 'unstable' },
+                    modules: {
+                        probe: {
+                            values: {
+                                enabled: false, style: 'bright', intensity: 100,
+                                note: 'pwned', colour: '#ff0000'
+                            }
+                        }
+                    }
+                }));
+
+                // Clicked anyway, hidden or not: a refused file must leave
+                // nothing behind for Apply to carry out.
+                control('apply').click();
+                await new Promise((done) => setTimeout(done, 10));
+
+                assert(window.probeApplied.length === 0,
+                    `A file that is not a settings file applied settings: ${window.probeApplied.join(', ')}`);
+                assert(JSON.stringify(window.probeValues) === before,
+                    'A file that is not a settings file changed the module');
+                assert(control('apply').hidden, 'A rejected file offered an Apply button');
+                assert(statusText().length > 0, 'A rejected file said nothing about why');
+                assert(document.documentElement.dataset.lectioLanguage === 'en',
+                    'A rejected file changed the Manager\'s language');
+
+                // 7. The same file, correctly stamped except for a format
+                //    version from a newer Manager. Refused, and said so.
+                await check(JSON.stringify({
+                    format: 'lectio-manager-settings', formatVersion: 2,
+                    modules: { probe: { values: { enabled: false } } }
+                }));
+                assert(window.probeApplied.length === 0, 'A newer file format was applied anyway');
+                assert(control('apply').hidden, 'A newer file format offered an Apply button');
+
+                // 8. Not JSON at all, and JSON that is not an object. Neither
+                //    throws, neither applies anything.
+                await check('<script>window.xss = 1<\/script>');
+                await check('[1, 2, 3]');
+                await check('{"format":"lectio-manager-settings","formatVersion":1,"modules":"everything"}');
+                assert(!window.xss, 'A file was executed rather than read');
+                assert(window.probeApplied.length === 0, 'A malformed file applied something');
+
+                /*
+                 * 9. A valid file whose every value is wrong for the control
+                 *    it names: wrong type, out of range, an option that is not
+                 *    offered, a colour that is not one, a control that no
+                 *    longer exists, and a button. All skipped, nothing applied,
+                 *    nothing thrown - which is what version skew looks like
+                 *    from here.
+                 */
+                await check(JSON.stringify({
+                    format: 'lectio-manager-settings', formatVersion: 1,
+                    managerVersion: '1.0.0', exportedAt: '2026-01-01T00:00:00.000Z',
+                    modules: {
+                        probe: {
+                            values: {
+                                enabled: 'yes', intensity: 999, style: 'neon',
+                                colour: 'red', note: 42, gone: true, reset: true
+                            }
+                        }
+                    }
+                }));
+
+                assert(window.probeApplied.length === 0,
+                    `Wrongly typed values were applied: ${window.probeApplied.join(', ')}`);
+                assert(control('apply').hidden,
+                    'A file with nothing applicable in it still offered Apply');
+                assert(/7/.test(reviewText()), `The review did not count what it would skip: ${reviewText()}`);
+
+                /*
+                 * 10. A module this browser does not have, and a module id
+                 *     that is trying to be markup. Listed as text, skipped,
+                 *     and never built as a node.
+                 */
+                await check(JSON.stringify({
+                    format: 'lectio-manager-settings', formatVersion: 1,
+                    modules: {
+                        'ghost-module': { values: { anything: true } },
+                        '<img src=x onerror="window.xss = 1">': { values: { anything: true } }
+                    }
+                }));
+
+                await new Promise((done) => setTimeout(done, 10));
+                assert(!window.xss, 'A module id from a file was rendered as markup');
+                assert(!control('review').querySelector('img'),
+                    'A module id from a file became an element');
+                assert(reviewText().includes('ghost-module'),
+                    `A module that is not installed was not listed: ${reviewText()}`);
+                assert(reviewText().includes('<img src=x'),
+                    'A hostile module id was not shown to the person as text');
+                assert(window.probeApplied.length === 0, 'A file naming no installed module applied something');
+
+                /*
+                 * 11. The round trip. Change everything the file covers - the
+                 *     module's five settings and three Manager preferences -
+                 *     then import the file saved at the start and check every
+                 *     one of them is back.
+                 */
+                window.probeValues = {
+                    enabled: false, style: 'bright', intensity: 100,
+                    note: 'changed', colour: '#abcdef'
+                };
+                registerProbe();
+
+                const languageSelect = document.querySelector('.lectio-manager-language-select');
+                languageSelect.value = 'da';
+                languageSelect.dispatchEvent(new Event('change', { bubbles: true }));
+
+                const edgeSelect = document.querySelector('.lectio-manager-dock-edge');
+                edgeSelect.value = 'right';
+                edgeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+
+                document.querySelector('[data-sort="name"]').click();
+
+                assert(document.documentElement.dataset.lectioLanguage === 'da',
+                    'The fixture failed to change the language before importing');
+
+                section().open = true;
+                await check(exported);
+
+                assert(!control('apply').hidden, 'A good file did not offer to be applied');
+                assert(reviewText().includes('Probe Module'),
+                    `The review did not name the module: ${reviewText()}`);
+                assert(/5/.test(reviewText()), `The review did not say what it would apply: ${reviewText()}`);
+
+                control('apply').click();
+                await new Promise((done) => setTimeout(done, 20));
+
+                assert(JSON.stringify(window.probeValues) === JSON.stringify(ORIGINAL),
+                    `The round trip did not restore the module: ${JSON.stringify(window.probeValues)}`);
+                assert(!window.probeApplied.includes('reset=true'),
+                    'A button control was replayed as a value');
+                assert(document.documentElement.dataset.lectioLanguage === 'en',
+                    'The round trip did not restore the language');
+                assert(JSON.parse(gmStorage.get('lectioManager.dock.v1')).edge === 'left',
+                    'The round trip did not restore the dock');
+                assert(gmStorage.get('lectioManager.sortMode.v1') === 'category',
+                    'The round trip did not restore the module list');
+                assert(/5/.test(statusText()), `The outcome was not reported: ${statusText()}`);
+
+                assert(window.pageErrors.length === 0,
+                    `The settings file threw: ${window.pageErrors.join(' | ')}`);
+
+                document.documentElement.dataset.testResult = 'pass';
+            } catch (error) {
+                document.documentElement.dataset.testResult = `fail: ${error.message}`;
+            }
+        });
+    </script>
+</body>
+</html>
