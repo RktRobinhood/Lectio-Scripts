@@ -46,6 +46,15 @@ const SHIPPED_MANAGERS = [
     { version: '1.20.1', commit: '64245bf' }
 ];
 
+/*
+ * 1.21.0 (146d29f) is deliberately absent. It reached origin/main and was
+ * replaced by 1.21.1 within the hour: it referenced a const declared below its
+ * own boot block, so at document-idle it threw before building anything. A
+ * Manager that never boots lists no modules whatever the catalogue says, so
+ * running it here would prove nothing and would fail forever. The version
+ * number itself stays used and is never reissued.
+ */
+
 const FIXTURE = `<!doctype html>
 <html lang="da"><head><meta charset="utf-8"><title>catalogue compat</title>
 <script>

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.21.0
+// @version      1.21.1
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules, including their settings and shared dock controls.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
@@ -260,7 +260,7 @@
     // Kept in step with the @version header by scripts/check-versions.mjs. The
     // header is metadata Tampermonkey reads; this is the only copy the running
     // script can see, and it is what the self-update notice compares.
-    const MANAGER_VERSION = '1.21.0';
+    const MANAGER_VERSION = '1.21.1';
 
     const STABLE_CATALOGUE_URL =
         'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/catalogue/modules.json';
@@ -309,6 +309,16 @@
     const STORAGE_UPDATE_TIP_DISMISSED = 'lectioManager.updateTipDismissed.v1';
     const STORAGE_INSTALLED = 'lectioManager.installed.v1';
     const STORAGE_DOCK = 'lectioManager.dock.v1';
+
+    /*
+     * The two fills are deliberately low. The dock is glass: most of what makes
+     * it readable is the blur and the saturation boost behind it, not the fill,
+     * so a thin fill still reads as a panel while the page keeps showing
+     * through. The icons are drawn in currentColor and are never faded - only
+     * what sits behind them moves with these numbers.
+     */
+    const DOCK_SHELL_OPACITY_DEFAULT = 30;
+    const DOCK_ITEM_OPACITY_DEFAULT = 60;
 
     const ISSUES_URL = 'https://github.com/RktRobinhood/Lectio-Scripts/issues/new/choose';
 
@@ -1119,16 +1129,6 @@
 
     // v1 stored a single vertical `position` and always hugged the left edge.
     const LEGACY_DOCK_POSITIONS = { top: 'start', center: 'center', bottom: 'end' };
-
-    /*
-     * The two fills are deliberately low. The dock is glass: most of what makes
-     * it readable is the blur and the saturation boost behind it, not the fill,
-     * so a thin fill still reads as a panel while the page keeps showing
-     * through. The icons are drawn in currentColor and are never faded - only
-     * what sits behind them moves with these numbers.
-     */
-    const DOCK_SHELL_OPACITY_DEFAULT = 30;
-    const DOCK_ITEM_OPACITY_DEFAULT = 60;
 
     function defaultDockPreferences() {
         return {

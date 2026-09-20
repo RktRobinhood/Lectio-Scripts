@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio Manager late-injection fixture</title>
+</head>
+<body>
+    <script>
+        /*
+         * The Manager runs at document-idle, so Tampermonkey hands it a page
+         * that has already finished loading: init() is called straight from the
+         * boot block, before the rest of the file below it has been evaluated.
+         * Anything init reaches must therefore be declared above that block.
+         * A const declared below it parses fine, passes a syntax check, and
+         * works in any fixture that loads the Manager with a plain <script> tag
+         * during parse - and then throws a ReferenceError for every real user.
+         * This fixture is the only one that reproduces how the Manager is
+         * actually injected.
+         */
+        const storage = new Map([
+            ['lectioManager.catalogue.v1', JSON.stringify({
+                schemaVersion: 1,
+                generatedAt: '2026-09-20T00:00:00.000Z',
+                modules: []
+            })],
+            ['lectioManager.lastRefresh.v1', Date.now()],
+            ['lectioManager.updateTipDismissed.v1', true]
+        ]);
+
+        window.GM_getValue = (key, fallback) => storage.has(key) ? storage.get(key) : fallback;
+        window.GM_setValue = (key, value) => storage.set(key, value);
+        window.GM_xmlhttpRequest = () => {};
+
+        window.bootErrors = [];
+        window.addEventListener('error', (event) => window.bootErrors.push(String(event.message)));
+
+        function assert(condition, message) {
+            if (!condition) throw new Error(message);
+        }
+
+        window.addEventListener('load', () => {
+            assert(document.readyState !== 'loading', 'Test setup injected the Manager too early');
+
+            const script = document.createElement('script');
+            script.src = '../../manager/Lectio-Manager.user.js';
+            script.onload = () => setTimeout(() => {
+                try {
+                    assert(window.bootErrors.length === 0, `Manager threw while booting: ${window.bootErrors.join(' | ')}`);
+                    assert(document.querySelector('#lectio-manager-toggle'), 'Manager never built its button');
+
+                    const dock = document.querySelector('#lectio-manager-dock-root');
+                    assert(dock, 'Manager never built its dock');
+
+                    window.dispatchEvent(new CustomEvent('lectio-manager:dock:register', {
+                        detail: {
+                            moduleId: 'late-module', itemId: 'action', type: 'action',
+                            icon: 'info', label: 'Late item'
+                        }
+                    }));
+                    assert(!dock.hidden, 'A dock built after load never became visible');
+                    assert(dock.style.getPropertyValue('--lectio-dock-shell-fill') === '30%',
+                        'Dock preferences were not applied when the Manager booted after load');
+
+                    document.documentElement.dataset.testResult = 'pass';
+                } catch (error) {
+                    document.documentElement.dataset.testResult = `fail: ${error.message}`;
+                }
+            }, 300);
+
+            document.head.appendChild(script);
+        });
+    </script>
+</body>
+</html>
