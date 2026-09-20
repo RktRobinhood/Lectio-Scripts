@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.25.1
+// @version      1.26.0
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules, including their settings and shared dock controls.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
@@ -143,7 +143,22 @@
             logDrift: (code, found) => `looked for ${code}, found ${found}`,
             logRepeated: (count) => `×${count}`,
             logManager: 'Lectio Manager',
-            logPage: 'This page'
+            logPage: 'This page',
+            storage: 'Storage',
+            storageHelp: 'This site gets about 5 MB of browser storage, shared by every module. A module that cannot write carries on without saving, so a full allowance shows up as settings that quietly stop sticking. Only the module that owns something can say whether it is safe to clear, so anything without a Clear button has not offered one.',
+            storageEmpty: 'Nothing is stored for this site in this browser.',
+            storageBlocked: 'This browser will not let the Manager read the site’s storage.',
+            storageTotal: (used, share) => `${used} in use — roughly ${share}% of what this site gets.`,
+            storageUnclaimed: 'Not claimed by a running module',
+            storageUnclaimedHelp: 'Either the module that owns these is not running on this page, or it does not say what it stores. Nothing here can be cleared from the Manager.',
+            storageOutsideBudget: 'Kept by the userscript itself, outside this site’s 5 MB. The Manager cannot see or measure it.',
+            storageKindCache: 'cache',
+            storageKindSetting: 'setting',
+            storageKindState: 'state',
+            storageClear: 'Clear',
+            storageClearConfirm: 'Clear it — sure?',
+            storageClearLabel: (what) => `Clear ${what}`,
+            storageRecheck: 'Recheck'
         },
         da: {
             appTitle: 'Lectio Tools',
@@ -240,7 +255,22 @@
             logDrift: (code, found) => `ledte efter ${code}, fandt ${found}`,
             logRepeated: (count) => `×${count}`,
             logManager: 'Lectio Manager',
-            logPage: 'Denne side'
+            logPage: 'Denne side',
+            storage: 'Lagerplads',
+            storageHelp: 'Siden har omkring 5 MB lagerplads i browseren, som alle moduler deles om. Et modul, der ikke kan skrive, kører videre uden at gemme, så en fyldt plads viser sig som indstillinger, der stille holder op med at blive husket. Kun det modul, der ejer noget, kan sige, om det er sikkert at rydde, så det uden en Ryd-knap har ikke tilbudt det.',
+            storageEmpty: 'Der er ikke gemt noget for denne side i denne browser.',
+            storageBlocked: 'Denne browser lader ikke Manageren læse sidens lagerplads.',
+            storageTotal: (used, share) => `${used} i brug — omkring ${share}% af sidens plads.`,
+            storageUnclaimed: 'Ikke meldt af et kørende modul',
+            storageUnclaimedHelp: 'Enten kører modulet, der ejer det her, ikke på denne side, eller også fortæller det ikke, hvad det gemmer. Intet her kan ryddes fra Manageren.',
+            storageOutsideBudget: 'Gemmes af selve brugerscriptet, uden for sidens 5 MB. Manageren kan hverken se eller måle det.',
+            storageKindCache: 'cache',
+            storageKindSetting: 'indstilling',
+            storageKindState: 'tilstand',
+            storageClear: 'Ryd',
+            storageClearConfirm: 'Ryd det — er du sikker?',
+            storageClearLabel: (what) => `Ryd ${what}`,
+            storageRecheck: 'Tjek igen'
         }
     };
 
@@ -294,7 +324,7 @@
     // Kept in step with the @version header by scripts/check-versions.mjs. The
     // header is metadata Tampermonkey reads; this is the only copy the running
     // script can see, and it is what the self-update notice compares.
-    const MANAGER_VERSION = '1.25.1';
+    const MANAGER_VERSION = '1.26.0';
 
     const STABLE_CATALOGUE_URL =
         'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/catalogue/modules.json';
@@ -329,6 +359,14 @@
     // wrong or that a selector it depends on matched nothing. Nothing answers,
     // so a module firing this with no Manager installed simply does nothing.
     const REPORT_EVENT = 'lectio-module:report';
+    /*
+     * The Manager never deletes a module's stored data. It asks, and the module
+     * that owns the key does the deleting - the same shape as set-setting, and
+     * for a stronger reason: a key name tells you nothing about whether it holds
+     * a throwaway cache or the only copy of a learned palette, and guessing
+     * wrong loses the user's work. See docs/manager-storage-api.md.
+     */
+    const PRUNE_STORAGE_EVENT = 'lectio-manager:prune-storage';
 
     // Keep the original stable cache keys so existing users do not lose their
     // last-known-good production catalogue during this upgrade.
@@ -392,6 +430,29 @@
      */
     const DOCK_SHELL_OPACITY_DEFAULT = 30;
     const DOCK_ITEM_OPACITY_DEFAULT = 60;
+
+    /*
+     * STORAGE READOUT
+     * ---------------
+     * A browser gives one origin roughly 5 MB of localStorage, and every module
+     * on lectio.dk shares that one allowance. A module that cannot write catches
+     * and carries on in memory, which is the right behaviour and is also why a
+     * full quota is invisible: the symptom is "my settings keep resetting", and
+     * the cause is usually a different module entirely.
+     *
+     * What the Manager may do here is measurement, and only measurement. It can
+     * enumerate localStorage and add up key and value lengths, because that is
+     * true of any origin and needs no idea what anything means. What it must not
+     * do is decide, from a key's name, whose it is or whether losing it matters.
+     * That comes from the owning module as a Storage Declaration on its
+     * Registration, which the Manager renders without understanding - the same
+     * contract shape as the Settings Schema and the dock.
+     */
+    const STORAGE_BUDGET_BYTES = 5 * 1024 * 1024;
+    const STORAGE_DECLARATION_LIMIT = 40;
+    const STORAGE_KEY_NAME_LIMIT = 160;
+    const STORAGE_KINDS = ['cache', 'setting', 'state'];
+    const STORAGE_AREAS = ['page', 'script'];
 
     const ISSUES_URL = 'https://github.com/RktRobinhood/Lectio-Scripts/issues/new/choose';
 
@@ -1014,6 +1075,15 @@
         set('.lectio-manager-log-clear', t('problemLogClear'));
         set('.lectio-manager-log-help', t('problemLogHelp'));
 
+        set('.lectio-manager-storage-section > summary', t('storage'));
+        set('.lectio-manager-storage-recheck', t('storageRecheck'));
+        set('.lectio-manager-storage-help', t('storageHelp'));
+
+        // Sizes and labels are written in the chosen language, so a language
+        // change while the section is open redraws it rather than leaving half
+        // of it in the old one. A closed section has nothing to redraw.
+        if (elements?.storageSection?.open) renderStorageReadout();
+
         const edgeSelect = root.querySelector('.lectio-manager-dock-edge');
         if (edgeSelect) {
             const edges = { left: 'edgeLeft', right: 'edgeRight', top: 'edgeTop', bottom: 'edgeBottom' };
@@ -1302,6 +1372,10 @@
             currentValues: (detail.currentValues && typeof detail.currentValues === 'object')
                 ? detail.currentValues
                 : {},
+            // Never persisted to the installed registry. A declaration is only
+            // meaningful while the module that made it is running, because it is
+            // that module - not the Manager - that would carry out a prune.
+            storage: normalizeStorageDeclaration(detail.storage),
             seenAt: Date.now()
         });
 
@@ -1324,6 +1398,25 @@
     function clearSettingPreview(moduleId, key) {
         window.dispatchEvent(new CustomEvent(CLEAR_SETTING_PREVIEW_EVENT, {
             detail: { id: moduleId, key }
+        }));
+    }
+
+    /*
+     * The one destructive path in the storage readout, and the Manager is not
+     * the thing that destroys anything. It echoes back exactly the entry the
+     * module declared - one of `key` or `prefix`, the same string, unmodified -
+     * and the module decides what that means and removes it itself.
+     *
+     * There is deliberately no fallback. If nothing answers, nothing is
+     * deleted: a Manager that removed the key itself when a module did not
+     * reply would be a Manager guessing at module data, which is the exact
+     * thing ADR-0001 exists to prevent.
+     */
+    function emitStoragePrune(moduleId, entry) {
+        window.dispatchEvent(new CustomEvent(PRUNE_STORAGE_EVENT, {
+            detail: entry.prefix
+                ? { id: moduleId, prefix: entry.prefix }
+                : { id: moduleId, key: entry.key }
         }));
     }
 
@@ -1892,6 +1985,380 @@
         } catch (_) {
             // The preview is still on screen and still selectable by hand.
         }
+    }
+
+    // ============================================================
+    // STORAGE READOUT
+    // ============================================================
+
+    /*
+     * The seam, stated once.
+     *
+     * The Manager measures. It enumerates localStorage for this origin and adds
+     * up key and value lengths, and that is the whole of what it works out for
+     * itself - true of any web page, no module knowledge anywhere in it.
+     *
+     * Everything else is declared. Which keys belong to which module, whether a
+     * key is a cache or the only copy of something, and whether losing it is
+     * survivable: all of that arrives on a module's Registration as a Storage
+     * Declaration and is rendered as given. The Manager has no table of keys,
+     * no prefix it recognises, and no rule that a name containing "cache" may
+     * be deleted. A key nobody claims is shown as unclaimed and cannot be
+     * cleared from here at all.
+     *
+     * Contract and reasoning: docs/manager-storage-api.md.
+     */
+    function normalizeStorageDeclaration(value) {
+        if (!Array.isArray(value)) return [];
+
+        const entries = [];
+        const seen = new Set();
+
+        for (const raw of value.slice(0, STORAGE_DECLARATION_LIMIT)) {
+            if (!raw || typeof raw !== 'object') continue;
+
+            // Exactly one of the two. A declaration carrying both is ambiguous
+            // about what a prune would remove, which is not a thing to guess at.
+            const key = isNonEmptyString(raw.key) ? raw.key.trim() : '';
+            const prefix = isNonEmptyString(raw.prefix) ? raw.prefix.trim() : '';
+
+            if ((key && prefix) || (!key && !prefix)) continue;
+            if ((key || prefix).length > STORAGE_KEY_NAME_LIMIT) continue;
+
+            const identity = key ? `k:${key}` : `p:${prefix}`;
+            if (seen.has(identity)) continue;
+            seen.add(identity);
+
+            entries.push({
+                key,
+                prefix,
+                area: STORAGE_AREAS.includes(raw.area) ? raw.area : 'page',
+                kind: STORAGE_KINDS.includes(raw.kind) ? raw.kind : '',
+                prunable: raw.prunable === true,
+                label: storageEntryLabel(raw.label)
+            });
+        }
+
+        return entries;
+    }
+
+    // A label is prose belonging to the module, so it may arrive as a plain
+    // string or as the same { en, da } shape a catalogue entry's i18n block
+    // uses. An untranslated one shows as written, which is what already happens
+    // to a module description.
+    function storageEntryLabel(value) {
+        if (isNonEmptyString(value)) return value.trim().slice(0, STORAGE_KEY_NAME_LIMIT);
+
+        if (value && typeof value === 'object') {
+            const picked = value[language] || value.en || value.da;
+            if (isNonEmptyString(picked)) return picked.trim().slice(0, STORAGE_KEY_NAME_LIMIT);
+        }
+
+        return '';
+    }
+
+    /*
+     * What a browser actually charges against the quota is the UTF-16 length of
+     * the key plus the value, so that is what is counted rather than a JSON
+     * round trip or a byte encoding. It is an estimate and is presented as one.
+     *
+     * localStorage itself can throw - a browser configured to block site data
+     * throws on the property access, not on the call - so the whole read is
+     * guarded and reports as blocked rather than as empty.
+     */
+    function measurePageStorage() {
+        const sizes = new Map();
+
+        try {
+            const store = window.localStorage;
+
+            for (let index = 0; index < store.length; index += 1) {
+                const key = store.key(index);
+                if (typeof key !== 'string') continue;
+
+                const value = store.getItem(key);
+                sizes.set(key, (key.length + (typeof value === 'string' ? value.length : 0)) * 2);
+            }
+        } catch (_) {
+            return null;
+        }
+
+        return sizes;
+    }
+
+    function storageEntryMatches(entry, key) {
+        return entry.prefix ? key.startsWith(entry.prefix) : key === entry.key;
+    }
+
+    /*
+     * Groups, in the order they are shown: every running module that declared
+     * something, largest first, then whatever nobody claimed.
+     *
+     * A key is attributed to the first module whose declaration matches it,
+     * walking modules in id order so two overlapping declarations resolve the
+     * same way on every render. The Manager does not arbitrate beyond that -
+     * two modules claiming one key is a bug in one of them, and inventing a
+     * winner from key names is exactly the knowledge this must not have.
+     */
+    function buildStorageReadout() {
+        const sizes = measurePageStorage();
+
+        if (!sizes) return null;
+
+        const claimed = new Set();
+        const groups = [];
+        const moduleIds = [...detected.keys()].sort();
+
+        for (const moduleId of moduleIds) {
+            const registration = detected.get(moduleId);
+            const declaration = registration?.storage || [];
+
+            if (!declaration.length) continue;
+
+            const rows = [];
+
+            for (const entry of declaration) {
+                if (entry.area === 'script') {
+                    // Userscript storage is per-script and cannot be enumerated
+                    // from another script, so there is no size to show. Saying
+                    // so is more honest than leaving it out and letting its
+                    // absence read as a module that stores nothing.
+                    rows.push({ entry, keys: [], bytes: null, offBudget: true });
+                    continue;
+                }
+
+                const keys = [];
+                let bytes = 0;
+
+                for (const [key, size] of sizes) {
+                    if (claimed.has(key) || !storageEntryMatches(entry, key)) continue;
+                    claimed.add(key);
+                    keys.push(key);
+                    bytes += size;
+                }
+
+                // Declared but not currently written: nothing to show and
+                // nothing to clear.
+                if (!keys.length) continue;
+
+                rows.push({ entry, keys: keys.sort(), bytes, offBudget: false });
+            }
+
+            if (!rows.length) continue;
+
+            groups.push({
+                moduleId,
+                name: moduleDisplayName(moduleId, registration),
+                rows,
+                bytes: rows.reduce((total, row) => total + (row.bytes || 0), 0)
+            });
+        }
+
+        groups.sort((left, right) => right.bytes - left.bytes || left.name.localeCompare(right.name));
+
+        const unclaimed = [...sizes.entries()]
+            .filter(([key]) => !claimed.has(key))
+            .map(([key, bytes]) => ({ key, bytes }))
+            .sort((left, right) => right.bytes - left.bytes || left.key.localeCompare(right.key));
+
+        let total = 0;
+        for (const size of sizes.values()) total += size;
+
+        return { groups, unclaimed, total };
+    }
+
+    // The catalogue's name when there is one, because that is the name the rest
+    // of the panel uses; otherwise whatever the module called itself.
+    function moduleDisplayName(moduleId, registration) {
+        const module = catalogue?.modules?.find((candidate) => candidate.id === moduleId);
+
+        if (module) return localizedField(module, 'name');
+
+        return isNonEmptyString(registration?.name) ? registration.name : moduleId;
+    }
+
+    function storageKindLabel(kind) {
+        if (kind === 'cache') return t('storageKindCache');
+        if (kind === 'setting') return t('storageKindSetting');
+        if (kind === 'state') return t('storageKindState');
+        return '';
+    }
+
+    // Locale-independent on purpose: this sits next to raw key names, and a
+    // thousands separator that changes with the language is noise here.
+    function formatStorageSize(bytes) {
+        if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+        if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+        return `${bytes} B`;
+    }
+
+    function storageRowTitle(row) {
+        if (row.entry.label) return row.entry.label;
+
+        // No label offered: the key is what there is, and a key name is the one
+        // thing the Manager is allowed to show without understanding it.
+        return row.keys.length === 1 ? row.keys[0] : (row.entry.prefix || row.entry.key);
+    }
+
+    function renderStorageReadout() {
+        // Safe before the first gear click, and safe on a page whose panel was
+        // never built: there is simply nowhere to draw, so nothing happens.
+        if (!elements?.storageList) return;
+
+        const readout = buildStorageReadout();
+
+        elements.storageList.textContent = '';
+
+        if (!readout) {
+            elements.storageTotal.textContent = t('storageBlocked');
+            return;
+        }
+
+        elements.storageTotal.textContent = readout.total > 0
+            ? t(
+                'storageTotal',
+                formatStorageSize(readout.total),
+                Math.max(1, Math.round((readout.total / STORAGE_BUDGET_BYTES) * 100))
+            )
+            : t('storageEmpty');
+
+        for (const group of readout.groups) {
+            elements.storageList.appendChild(buildStorageGroup(group));
+        }
+
+        if (readout.unclaimed.length) {
+            elements.storageList.appendChild(buildUnclaimedStorageGroup(readout.unclaimed));
+        }
+    }
+
+    function buildStorageGroup(group) {
+        const block = document.createElement('div');
+        block.className = 'lectio-manager-storage-group';
+        block.dataset.moduleId = group.moduleId;
+
+        const head = document.createElement('div');
+        head.className = 'lectio-manager-storage-group-head';
+
+        const name = document.createElement('strong');
+        name.textContent = group.name;
+        head.appendChild(name);
+
+        const size = document.createElement('span');
+        size.className = 'lectio-manager-storage-size';
+        size.textContent = formatStorageSize(group.bytes);
+        head.appendChild(size);
+
+        block.appendChild(head);
+
+        for (const row of group.rows) {
+            block.appendChild(buildStorageRow(group, row));
+        }
+
+        return block;
+    }
+
+    function buildStorageRow(group, row) {
+        const line = document.createElement('div');
+        line.className = 'lectio-manager-storage-row';
+
+        const label = document.createElement('span');
+        label.className = 'lectio-manager-storage-row-label';
+        label.textContent = storageRowTitle(row);
+        line.appendChild(label);
+
+        const kind = storageKindLabel(row.entry.kind);
+
+        if (kind) {
+            const tag = document.createElement('span');
+            tag.className = 'lectio-manager-storage-kind';
+            tag.textContent = kind;
+            line.appendChild(tag);
+        }
+
+        const size = document.createElement('span');
+        size.className = 'lectio-manager-storage-size';
+        size.textContent = row.offBudget ? '—' : formatStorageSize(row.bytes);
+        if (row.offBudget) size.title = t('storageOutsideBudget');
+        line.appendChild(size);
+
+        if (row.entry.prunable) {
+            line.appendChild(buildStoragePruneButton(group, row));
+        }
+
+        return line;
+    }
+
+    /*
+     * Destructive, so it takes two clicks and says what it is about to do in
+     * between. The confirmation lives on the button rather than behind a timer:
+     * nothing to clear up, and re-rendering the section resets it by
+     * construction.
+     */
+    function buildStoragePruneButton(group, row) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'lectio-manager-storage-clear';
+        button.textContent = t('storageClear');
+        button.title = t('storageClearLabel', storageRowTitle(row));
+        button.setAttribute('aria-label', button.title);
+
+        button.addEventListener('click', () => {
+            if (button.dataset.confirming !== 'true') {
+                button.dataset.confirming = 'true';
+                button.textContent = t('storageClearConfirm');
+                return;
+            }
+
+            emitStoragePrune(group.moduleId, row.entry);
+
+            // One shot, never rescheduled: the module removes what it owns
+            // synchronously or in its own microtask, and the next frame shows
+            // whatever it actually did - including doing nothing.
+            window.setTimeout(renderStorageReadout, 0);
+        });
+
+        return button;
+    }
+
+    function buildUnclaimedStorageGroup(unclaimed) {
+        const block = document.createElement('div');
+        block.className = 'lectio-manager-storage-group is-unclaimed';
+
+        const head = document.createElement('div');
+        head.className = 'lectio-manager-storage-group-head';
+
+        const name = document.createElement('strong');
+        name.textContent = t('storageUnclaimed');
+        name.title = t('storageUnclaimedHelp');
+        head.appendChild(name);
+
+        const size = document.createElement('span');
+        size.className = 'lectio-manager-storage-size';
+        size.textContent = formatStorageSize(unclaimed.reduce((total, row) => total + row.bytes, 0));
+        head.appendChild(size);
+
+        block.appendChild(head);
+
+        for (const row of unclaimed) {
+            const line = document.createElement('div');
+            line.className = 'lectio-manager-storage-row';
+
+            const label = document.createElement('span');
+            label.className = 'lectio-manager-storage-row-label';
+            // The key name, and nothing that was stored under it. Nothing in
+            // this readout parses, decodes or shows a stored value.
+            label.textContent = row.key;
+            line.appendChild(label);
+
+            const bytes = document.createElement('span');
+            bytes.className = 'lectio-manager-storage-size';
+            bytes.textContent = formatStorageSize(row.bytes);
+            line.appendChild(bytes);
+
+            block.appendChild(line);
+        }
+
+        return block;
     }
 
     // ============================================================
@@ -2963,6 +3430,15 @@
                         </div>
                         <small class="lectio-manager-prefs-warning lectio-manager-log-help"></small>
                     </details>
+                    <details class="lectio-manager-prefs-section lectio-manager-storage-section">
+                        <summary>Storage</summary>
+                        <div class="lectio-manager-storage-total" role="status"></div>
+                        <div class="lectio-manager-storage-list"></div>
+                        <div class="lectio-manager-storage-actions">
+                            <button type="button" class="lectio-manager-storage-recheck">Recheck</button>
+                        </div>
+                        <small class="lectio-manager-prefs-warning lectio-manager-storage-help"></small>
+                    </details>
                 </div>
                 <div class="lectio-manager-help-panel" hidden>
                     The Manager shows available module updates and opens Tampermonkey's normal confirmation page. To disable, manually check, or remove a script, click the Tampermonkey icon in your browser toolbar and choose <strong>Dashboard</strong>.
@@ -3156,6 +3632,18 @@
         root.querySelector('.lectio-manager-log-copy').addEventListener('click', copyProblemReport);
         root.querySelector('.lectio-manager-log-clear').addEventListener('click', clearProblemLog);
 
+        // Measured when it is looked at, not on a timer: reading every value in
+        // localStorage to length it is cheap once and pointless on a page
+        // nobody has this section open on.
+        const storageSection = root.querySelector('.lectio-manager-storage-section');
+
+        storageSection.addEventListener('toggle', () => {
+            if (storageSection.open) renderStorageReadout();
+        });
+
+        root.querySelector('.lectio-manager-storage-recheck')
+            .addEventListener('click', renderStorageReadout);
+
         if (!GM_getValue(STORAGE_UPDATE_TIP_DISMISSED, false)) {
             tipBanner.hidden = false;
         }
@@ -3232,6 +3720,9 @@
             viewHeading: root.querySelector('.lectio-manager-view-heading'),
             errorBox: root.querySelector('.lectio-manager-error'),
             logSection,
+            storageSection,
+            storageList: root.querySelector('.lectio-manager-storage-list'),
+            storageTotal: root.querySelector('.lectio-manager-storage-total'),
             logList: root.querySelector('.lectio-manager-log-list'),
             logReport: root.querySelector('.lectio-manager-log-report'),
             logCopy: root.querySelector('.lectio-manager-log-copy'),
@@ -5437,6 +5928,115 @@
             }
 
             .lectio-manager-log-actions button {
+                border: 1px solid var(--lectio-theme-accent, #0f6f6f);
+                border-radius: 6px;
+                background: var(--lectio-theme-surface, #ffffff);
+                color: var(--lectio-theme-accent, #0f6f6f);
+                padding: 4px 8px;
+                font: inherit;
+                font-size: 10px;
+                cursor: pointer;
+            }
+
+            .lectio-manager-storage-total {
+                margin-bottom: 6px;
+                color: var(--lectio-theme-text, #10201e);
+                font-size: 10px;
+                font-variant-numeric: tabular-nums;
+            }
+
+            .lectio-manager-storage-list {
+                max-height: 190px;
+                overflow: auto;
+                border: 1px solid var(--lectio-theme-muted, #e2e9ed);
+                border-radius: 6px;
+                background: var(--lectio-theme-surface-alt, #f7fafb);
+                padding: 4px;
+            }
+
+            .lectio-manager-storage-group + .lectio-manager-storage-group {
+                margin-top: 7px;
+                border-top: 1px solid var(--lectio-theme-muted, #e2e9ed);
+                padding-top: 6px;
+            }
+
+            .lectio-manager-storage-group-head {
+                display: flex;
+                align-items: baseline;
+                gap: 6px;
+                color: var(--lectio-theme-text, #2a4250);
+                font-size: 10px;
+            }
+
+            .lectio-manager-storage-group.is-unclaimed .lectio-manager-storage-group-head strong {
+                color: var(--lectio-theme-muted, #5e6870);
+                font-weight: 600;
+            }
+
+            .lectio-manager-storage-row {
+                display: flex;
+                align-items: baseline;
+                gap: 6px;
+                padding: 2px 0 2px 8px;
+                color: var(--lectio-theme-muted, #5e6870);
+                font-size: 10px;
+                line-height: 1.35;
+            }
+
+            /* The key name is the long part and the size is the part being
+               compared, so the name takes the slack and the size stays put. */
+            .lectio-manager-storage-row-label {
+                flex: 1 1 auto;
+                min-width: 0;
+                word-break: break-all;
+            }
+
+            .lectio-manager-storage-group-head strong {
+                flex: 1 1 auto;
+                min-width: 0;
+                word-break: break-word;
+            }
+
+            .lectio-manager-storage-kind {
+                flex: 0 0 auto;
+                border: 1px solid var(--lectio-theme-muted, #cbd7d9);
+                border-radius: 999px;
+                padding: 0 5px;
+                font-size: 9px;
+            }
+
+            .lectio-manager-storage-size {
+                flex: 0 0 auto;
+                font-variant-numeric: tabular-nums;
+            }
+
+            /* Destructive, and the only control here that is, so it is the one
+               thing in the readout drawn in the danger colour. */
+            .lectio-manager-storage-clear {
+                flex: 0 0 auto;
+                border: 1px solid var(--lectio-theme-danger, #b42318);
+                border-radius: 6px;
+                background: var(--lectio-theme-surface, #ffffff);
+                color: var(--lectio-theme-danger, #b42318);
+                padding: 1px 6px;
+                font: inherit;
+                font-size: 9px;
+                cursor: pointer;
+            }
+
+            .lectio-manager-storage-clear[data-confirming='true'] {
+                background: var(--lectio-theme-danger, #b42318);
+                color: #ffffff;
+                font-weight: 700;
+            }
+
+            .lectio-manager-storage-actions {
+                display: flex;
+                gap: 6px;
+                margin-top: 7px;
+            }
+
+            .lectio-manager-storage-actions button {
                 border: 1px solid var(--lectio-theme-accent, #0f6f6f);
                 border-radius: 6px;
                 background: var(--lectio-theme-surface, #ffffff);

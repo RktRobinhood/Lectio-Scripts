@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio Manager storage-readout fixture</title>
+</head>
+<body>
+    <script>
+        /*
+         * The storage readout is the one place the Manager looks at data it
+         * does not own, and the one place it can destroy any. Both halves are
+         * checked here.
+         *
+         * The seam under test: the Manager measures localStorage and nothing
+         * else. Which keys belong to whom, and which of them are safe to
+         * throw away, arrives only as a Storage Declaration on a module's
+         * Registration - so a key nobody claims is listed and not clearable,
+         * a module that declares nothing simply contributes nothing, and a
+         * prune is carried out by the owning module rather than by the
+         * Manager.
+         */
+        const catalogue = {
+            schemaVersion: 1,
+            generatedAt: '2026-09-20T00:00:00.000Z',
+            manager: {
+                version: '0.0.1',
+                installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/manager/Lectio-Manager.user.js'
+            },
+            modules: [
+                {
+                    id: 'tidy',
+                    name: 'Tidy Module',
+                    description: 'Declares what it stores.',
+                    category: 'Interface',
+                    audience: ['student'],
+                    status: 'stable',
+                    version: '1.0.0',
+                    installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Tidy.user.js'
+                },
+                {
+                    id: 'quiet',
+                    name: 'Quiet Module',
+                    description: 'Declares nothing at all.',
+                    category: 'Interface',
+                    audience: ['student'],
+                    status: 'stable',
+                    version: '1.0.0',
+                    installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Quiet.user.js'
+                }
+            ]
+        };
+
+        const gmStorage = new Map([
+            ['lectioManager.catalogue.v1', JSON.stringify(catalogue)],
+            ['lectioManager.lastRefresh.v1', Date.now()],
+            ['lectioManager.updateTipDismissed.v1', true]
+        ]);
+
+        window.GM_getValue = (key, fallback) => gmStorage.has(key) ? gmStorage.get(key) : fallback;
+        window.GM_setValue = (key, value) => gmStorage.set(key, value);
+        window.GM_xmlhttpRequest = (options) => { setTimeout(() => options.onerror(), 0); };
+
+        /*
+         * Six keys, deliberately of four different kinds:
+         *  - two that Tidy declares as one prunable cache, under a prefix;
+         *  - one that Tidy declares as a setting and does not offer to clear;
+         *  - one belonging to a module that declares nothing;
+         *  - one belonging to nothing at all;
+         *  - one that looks like the Manager's own, to prove a prune cannot
+         *    reach it. (The Manager really keeps its state in GM storage, so
+         *    this is a decoy, which is exactly what makes it a good test.)
+         */
+        const SEEDED = {
+            'lectioTidy.settings.v1': JSON.stringify({ secretValue: 'do-not-show-me' }),
+            'lectioTidy.cache.v1.223': 'x'.repeat(400),
+            'lectioTidy.cache.v1.999': 'y'.repeat(600),
+            'lectioTidy.stubborn.v1': 'q'.repeat(200),
+            'lectioQuiet.data.v1': 'z'.repeat(100),
+            'somethingElse.v1': 'w'.repeat(50),
+            'lectioManager.pretend.v1': 'm'.repeat(30)
+        };
+
+        localStorage.clear();
+        for (const [key, value] of Object.entries(SEEDED)) localStorage.setItem(key, value);
+
+        window.pageErrors = [];
+        window.addEventListener('error', (event) => window.pageErrors.push(String(event.message)));
+
+        // What the owning module actually deleted, so the test can tell a
+        // Manager that asked from a Manager that helped itself.
+        window.pruneRequests = [];
+
+        window.addEventListener('lectio-manager:discover', () => {
+            window.dispatchEvent(new CustomEvent('lectio-module:register', {
+                detail: {
+                    id: 'tidy',
+                    name: 'Tidy Module',
+                    version: '1.0.0',
+                    settingsSchema: [],
+                    currentValues: {},
+                    storage: [
+                        { key: 'lectioTidy.settings.v1', kind: 'setting', label: { en: 'Settings', da: 'Indstillinger' } },
+                        { prefix: 'lectioTidy.cache.v1.', kind: 'cache', prunable: true, label: 'Room cache' },
+                        // Declared prunable and deliberately not handled
+                        // below, so a Clear the module ignores proves the
+                        // Manager has no fallback of its own.
+                        { key: 'lectioTidy.stubborn.v1', kind: 'cache', prunable: true, label: 'Stubborn cache' },
+                        { key: 'lectioTidy.library.v1', area: 'script', kind: 'cache', prunable: true, label: 'Learned library' },
+                        // Malformed on purpose: both identifiers, and neither.
+                        { key: 'lectioTidy.both.v1', prefix: 'lectioTidy.both.', kind: 'cache', prunable: true },
+                        { kind: 'cache', prunable: true }
+                    ]
+                }
+            }));
+
+            // No `storage` field at all. Must be handled without a murmur.
+            window.dispatchEvent(new CustomEvent('lectio-module:register', {
+                detail: { id: 'quiet', name: 'Quiet Module', version: '1.0.0' }
+            }));
+        });
+
+        /*
+         * Tidy's own prune handler, written the way the API document says:
+         * it matches on its own id and on exactly the entry it declared, and
+         * does the deleting itself.
+         */
+        window.addEventListener('lectio-manager:prune-storage', (event) => {
+            const detail = event.detail || {};
+            window.pruneRequests.push(JSON.stringify(detail));
+
+            if (detail.id !== 'tidy') return;
+
+            if (detail.prefix === 'lectioTidy.cache.v1.') {
+                for (const key of Object.keys(SEEDED)) {
+                    if (key.startsWith('lectioTidy.cache.v1.')) localStorage.removeItem(key);
+                }
+            }
+        });
+    </script>
+    <script src="../../manager/Lectio-Manager.user.js"></script>
+    <script>
+        function assert(condition, message) {
+            if (!condition) throw new Error(message);
+        }
+
+        function storageSection() {
+            return document.querySelector('.lectio-manager-storage-section');
+        }
+
+        function rowsFor(name) {
+            for (const group of document.querySelectorAll('.lectio-manager-storage-group')) {
+                if (group.querySelector('strong').textContent.trim() === name) {
+                    return [...group.querySelectorAll('.lectio-manager-storage-row')];
+                }
+            }
+            return [];
+        }
+
+        function rowText(row) {
+            return row.querySelector('.lectio-manager-storage-row-label').textContent.trim();
+        }
+
+        async function openStorageSection() {
+            const section = storageSection();
+            section.open = true;
+            // `toggle` is queued rather than dispatched synchronously.
+            await new Promise((done) => setTimeout(done, 0));
+        }
+
+        window.addEventListener('load', async () => {
+            try {
+                await new Promise((done) => setTimeout(done, 50));
+
+                // 1. Nothing belonging to the readout exists before the panel
+                //    does, and none of the paths that ran on the way here -
+                //    two registrations among them - needed it to.
+                assert(!storageSection(), 'The storage section was built without a gear click');
+                assert(!document.querySelector('.lectio-manager-storage-list'),
+                    'The storage list was rendered without a gear click');
+                window.dispatchEvent(new CustomEvent('lectio-manager:discover'));
+                await new Promise((done) => setTimeout(done, 0));
+                assert(window.pageErrors.length === 0,
+                    `The Manager threw before its panel existed: ${window.pageErrors.join(' | ')}`);
+
+                document.querySelector('#lectio-manager-toggle').click();
+                assert(storageSection(), 'The panel opened without a storage section');
+
+                // 2. A closed section measures nothing. It is only read when
+                //    it is looked at.
+                assert(document.querySelectorAll('.lectio-manager-storage-group').length === 0,
+                    'The storage section measured before it was opened');
+
+                await openStorageSection();
+
+                // 3. The total, and the share of the ~5 MB budget.
+                const total = document.querySelector('.lectio-manager-storage-total').textContent;
+                assert(/in use/.test(total) && /%/.test(total),
+                    `The total did not report usage against the budget: ${total}`);
+
+                // 4. A declaring module is grouped under its catalogue name,
+                //    with its declared rows - and the two malformed entries
+                //    are dropped rather than guessed at.
+                const tidyRows = rowsFor('Tidy Module').map(rowText);
+                assert(tidyRows.includes('Settings'), `Tidy's settings row is missing: ${tidyRows}`);
+                assert(tidyRows.includes('Room cache'), `Tidy's cache row is missing: ${tidyRows}`);
+                assert(tidyRows.includes('Learned library'), `Tidy's script-area row is missing: ${tidyRows}`);
+                assert(!tidyRows.some((row) => row.includes('both')),
+                    `An entry declaring both a key and a prefix was rendered: ${tidyRows}`);
+
+                // 5. A module that declares nothing is not a group, and its
+                //    key falls through to the unclaimed list rather than
+                //    being guessed at from its name.
+                assert(rowsFor('Quiet Module').length === 0,
+                    'A module that declared nothing was given a storage group');
+
+                const unclaimed = [...document.querySelectorAll('.lectio-manager-storage-group.is-unclaimed .lectio-manager-storage-row')]
+                    .map(rowText);
+                assert(unclaimed.includes('lectioQuiet.data.v1'),
+                    `An undeclared key was not listed as unclaimed: ${unclaimed}`);
+                assert(unclaimed.includes('somethingElse.v1'),
+                    `A key belonging to no module at all was dropped: ${unclaimed}`);
+                assert(unclaimed.includes('lectioManager.pretend.v1'),
+                    `A Manager-looking key was not listed as unclaimed: ${unclaimed}`);
+
+                // 6. Names and sizes only. Nothing stored is parsed or shown.
+                const sectionText = storageSection().textContent;
+                assert(!sectionText.includes('do-not-show-me'),
+                    'The readout showed the contents of a stored value');
+
+                // 7. Storage the Manager genuinely cannot see says so rather
+                //    than claiming a size.
+                const libraryRow = rowsFor('Tidy Module').find((row) => rowText(row) === 'Learned library');
+                assert(libraryRow.querySelector('.lectio-manager-storage-size').textContent === '—',
+                    'Userscript storage was given a size the Manager cannot know');
+
+                // 8. Only what was declared prunable is clearable. Nothing in
+                //    the unclaimed list is, and neither is a setting.
+                const clearable = rowsFor('Tidy Module')
+                    .filter((row) => row.querySelector('.lectio-manager-storage-clear'))
+                    .map(rowText)
+                    .sort();
+                assert(clearable.join('|') === 'Learned library|Room cache|Stubborn cache',
+                    `The wrong rows offered to clear: ${clearable}`);
+                assert(!document.querySelector('.lectio-manager-storage-group.is-unclaimed .lectio-manager-storage-clear'),
+                    'An unclaimed key was offered a Clear button');
+
+                // 9. Clearing takes two clicks, and the first one destroys
+                //    nothing.
+                const cacheRow = rowsFor('Tidy Module').find((row) => rowText(row) === 'Room cache');
+                const clearButton = cacheRow.querySelector('.lectio-manager-storage-clear');
+
+                clearButton.click();
+                assert(window.pruneRequests.length === 0,
+                    'The first click on Clear already asked for a prune');
+                assert(localStorage.getItem('lectioTidy.cache.v1.223'),
+                    'The first click on Clear already deleted something');
+
+                clearButton.click();
+                await new Promise((done) => setTimeout(done, 10));
+
+                // 10. Exactly what was declared prunable went, and nothing
+                //     else - not the module's own settings, not another
+                //     module's key, not the Manager-looking one.
+                assert(!localStorage.getItem('lectioTidy.cache.v1.223') &&
+                    !localStorage.getItem('lectioTidy.cache.v1.999'),
+                    'The declared cache survived a confirmed prune');
+                assert(localStorage.getItem('lectioTidy.settings.v1'),
+                    'A prune took the owning module\'s settings with it');
+                assert(localStorage.getItem('lectioQuiet.data.v1'),
+                    'A prune reached another module\'s key');
+                assert(localStorage.getItem('somethingElse.v1'),
+                    'A prune reached a key belonging to no module');
+                assert(localStorage.getItem('lectioManager.pretend.v1'),
+                    'A prune reached a Manager-looking key');
+
+                // 11. One request, echoing back exactly the entry that was
+                //     declared - and only ever a request. The Manager itself
+                //     never removes anything.
+                assert(window.pruneRequests.length === 1,
+                    `A confirmed clear sent ${window.pruneRequests.length} requests`);
+                assert(window.pruneRequests[0] === JSON.stringify({ id: 'tidy', prefix: 'lectioTidy.cache.v1.' }),
+                    `The prune request was not the declared entry: ${window.pruneRequests[0]}`);
+
+                // 12. The Manager has no fallback. Tidy declared the
+                //     stubborn key prunable and then ignores the request for
+                //     it, and the key must still be there afterwards - a
+                //     Manager that removed it itself would be a Manager
+                //     guessing at module data.
+                const stubbornRow = rowsFor('Tidy Module').find((row) => rowText(row) === 'Stubborn cache');
+                const stubbornButton = stubbornRow.querySelector('.lectio-manager-storage-clear');
+                stubbornButton.click();
+                stubbornButton.click();
+                await new Promise((done) => setTimeout(done, 10));
+                assert(localStorage.getItem('lectioTidy.stubborn.v1'),
+                    'The Manager deleted a key itself when the owning module did not');
+
+                // 12b. A module that ignores the request loses nothing. Tidy's
+                //     handler only answers to its own declared prefix, so a
+                //     request naming anything else is a no-op on both sides.
+                window.dispatchEvent(new CustomEvent('lectio-manager:prune-storage', {
+                    detail: { id: 'tidy', key: 'lectioQuiet.data.v1' }
+                }));
+                window.dispatchEvent(new CustomEvent('lectio-manager:prune-storage', {
+                    detail: { id: 'quiet', prefix: 'lectioTidy.settings.v1' }
+                }));
+                assert(localStorage.getItem('lectioQuiet.data.v1') && localStorage.getItem('lectioTidy.settings.v1'),
+                    'A prune request aimed at the wrong owner still deleted something');
+
+                // 13. The readout catches up, and the cleared rows are gone
+                //     because there is nothing left under them.
+                document.querySelector('.lectio-manager-storage-recheck').click();
+                assert(!rowsFor('Tidy Module').some((row) => rowText(row) === 'Room cache'),
+                    'A cleared cache is still listed with a size');
+
+                assert(window.pageErrors.length === 0,
+                    `The storage readout threw: ${window.pageErrors.join(' | ')}`);
+
+                document.documentElement.dataset.testResult = 'pass';
+            } catch (error) {
+                document.documentElement.dataset.testResult = `fail: ${error.message}`;
+            }
+        });
+    </script>
+</body>
+</html>

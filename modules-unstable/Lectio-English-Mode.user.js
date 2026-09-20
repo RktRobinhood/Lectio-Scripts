@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio English Mode
 // @namespace    lectio-english-mode
-// @version      1.10.0
+// @version      1.11.0
 // @description  Context-aware English layer for Lectio with instant core UI translation, persistent cache and Google fallback.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-start
@@ -27,6 +27,12 @@
         SWITCH_POSITION_FLOATING
     ];
     const STORAGE_SWITCH_POSITION = 'lectioEnglish.switchPosition';
+    /*
+     * Moved up here from beside the learned library below, because the
+     * Manager handshake runs during this file's own evaluation and would
+     * otherwise read it while it was still in its temporal dead zone.
+     */
+    const STORAGE_CACHE = 'lectioEnglish.learned.v5';
     const LOG = '[Lectio English Mode]';
 
     function readSwitchPosition() {
@@ -60,7 +66,7 @@
     (function registerWithLectioManager() {
         const MODULE_ID = 'english-mode';
         const MODULE_NAME = 'Lectio English Mode';
-        const MODULE_VERSION = '1.10.0';
+        const MODULE_VERSION = '1.11.0';
 
         function announce() {
             const storedMode = GM_getValue(STORAGE_MODE, MODE_DA);
@@ -95,9 +101,59 @@
                     currentValues: {
                         language: [MODE_DA, MODE_EN].includes(storedMode) ? storedMode : MODE_DA,
                         switchPosition
-                    }
+                    },
+                    /*
+                     * What this module keeps, and where (issue #29,
+                     * docs/manager-storage-api.md).
+                     *
+                     * All of it is `area: 'script'`. This is the one module
+                     * that holds GM_getValue storage rather than the page's
+                     * localStorage, so none of it counts against the site's
+                     * ~5 MB and none of it is visible to the Manager - GM
+                     * storage is per-script and cannot be enumerated from
+                     * another userscript. Declaring it anyway is the point:
+                     * the readout says so in as many words, instead of
+                     * leaving this module's absence to read as a bug.
+                     *
+                     * The learned library is prunable: every entry in it can
+                     * be translated again. The two settings are not.
+                     */
+                    storage: [
+                        {
+                            key: STORAGE_MODE,
+                            area: 'script',
+                            kind: 'setting',
+                            label: { en: 'Chosen language', da: 'Valgt sprog' }
+                        },
+                        {
+                            key: STORAGE_SWITCH_POSITION,
+                            area: 'script',
+                            kind: 'setting',
+                            label: { en: 'Switch position', da: 'Knappens placering' }
+                        },
+                        {
+                            key: STORAGE_CACHE,
+                            area: 'script',
+                            kind: 'cache',
+                            prunable: true,
+                            label: { en: 'Learned translations', da: 'Lærte oversættelser' }
+                        }
+                    ]
                 }
             }));
+        }
+
+        /*
+         * The Manager asks; this does the deleting, and only for the one key
+         * it declared prunable. The Manager could not do this itself even if
+         * it wanted to: GM storage belongs to this script alone.
+         */
+        function handlePrune(event) {
+            const detail = event?.detail;
+
+            if (detail?.id !== MODULE_ID || detail.key !== STORAGE_CACHE) return;
+
+            forgetLearnedTranslations();
         }
 
         function handleSetting(event) {
@@ -124,9 +180,44 @@
 
         window.addEventListener('lectio-manager:discover', announce);
         window.addEventListener('lectio-manager:set-setting', handleSetting);
+        window.addEventListener('lectio-manager:prune-storage', handlePrune);
         announce();
     })();
-    const STORAGE_CACHE = 'lectioEnglish.learned.v5';
+
+    /*
+     * OWN STORAGE: PRUNE AND REPORT (issue #29)
+     *
+     * There is no GM_deleteValue in this script's grants, so emptying the
+     * object is the delete: the next flush writes {} over what was there.
+     */
+    function forgetLearnedTranslations() {
+        cache = {};
+
+        try {
+            GM_setValue(STORAGE_CACHE, cache);
+        } catch (_) {
+            reportStorageWriteFailure();
+        }
+    }
+
+    /*
+     * A failed write is still caught and this module still translates from
+     * memory - unchanged. What is new is saying so once per page load, as a
+     * token with nothing from the page in it. The flag hangs off the function
+     * rather than sitting beside it as a module-scope binding, because a
+     * declaration hoists and this file runs its handshake part-way through
+     * its own evaluation.
+     */
+    function reportStorageWriteFailure() {
+        if (reportStorageWriteFailure.reported) return;
+        reportStorageWriteFailure.reported = true;
+
+        try {
+            reportToManager('error', 'storage-write', 0);
+        } catch (_) {
+            // Reporting a failure must never become a second failure.
+        }
+    }
 
     const CFG = {
         translateReadOnlyContent: true,
@@ -894,10 +985,17 @@
                 );
         }
 
-        GM_setValue(
-            STORAGE_CACHE,
-            cache
-        );
+        try {
+            GM_setValue(
+                STORAGE_CACHE,
+                cache
+            );
+        }
+
+        catch (_) {
+            // Carry on translating from memory, and say so once (issue #29).
+            reportStorageWriteFailure();
+        }
     }
 
     /*

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Change Radar
 // @namespace    https://github.com/RktRobinhood/Lectio-Scripts
-// @version      0.7.1
+// @version      0.8.0
 // @description  Watches Lectio for the changes you choose to track - timetable, assignments, absence, documents - and keeps a compact recent-change HUD.
 // @author       RktRobinhood
 // @match        https://www.lectio.dk/lectio/*
@@ -20,7 +20,7 @@
     id: 'change-radar',
     aliases: ['schedule-change-radar', 'lectio-change-radar', 'change-log'],
     name: 'Lectio Change Radar',
-    version: '0.7.1',
+    version: '0.8.0',
     channel: 'unstable'
   });
 
@@ -244,12 +244,17 @@
   const MANAGER_GRACE_MS = 2500;
   const loadedAt = Date.now();
 
+  // Before anything is read: a snapshot belonging to a login this browser has
+  // not used in two months is bytes nothing will ever look at again (#29).
+  pruneStaleStorage();
+
   runtime.settings = loadSettings();
   runtime.state = loadState();
 
   registerWithManager();
   window.addEventListener('lectio-manager:discover', handleDiscovery);
   window.addEventListener('lectio-manager:set-setting', handleManagerSettingsEvent);
+  window.addEventListener('lectio-manager:prune-storage', handlePruneStorage);
   window.addEventListener('lectio-manager:dock:render-panel', handleDockPanelRender);
   // Deliberately not { once: true }, and deliberately split in two. A page
   // frozen for the back/forward cache fires pagehide with persisted set and may
@@ -339,7 +344,39 @@
         settings: currentValues,
         setSetting: apply,
         applySetting: apply,
-        updateSettings: applyMany
+        updateSettings: applyMany,
+        /*
+         * What this module keeps in the browser, so the Manager can show it
+         * without knowing what any of it is (issue #29,
+         * docs/manager-storage-api.md). Only the snapshot-and-log entry is
+         * prunable: losing it costs one quiet poll while the radar re-reads
+         * the timetable it compares against. The settings blob is not, and
+         * neither is the "last seen" mark, which is the only record that
+         * something has already been read.
+         */
+        storage: [
+          {
+            key: STORAGE.settings,
+            kind: 'setting',
+            label: { en: 'Settings', da: 'Indstillinger' }
+          },
+          {
+            key: STORAGE.state,
+            kind: 'cache',
+            prunable: true,
+            label: { en: 'Timetable snapshot and change log', da: 'Skema-øjebliksbillede og ændringslog' }
+          },
+          {
+            key: STORAGE.lastPoll,
+            kind: 'state',
+            label: { en: 'Last check', da: 'Sidste tjek' }
+          },
+          {
+            key: STORAGE.lastViewed,
+            kind: 'state',
+            label: { en: 'Last seen', da: 'Sidst set' }
+          }
+        ]
       }
     }));
 
@@ -2341,7 +2378,131 @@
   }
 
   function saveSettings(settings) {
-    try { localStorage.setItem(STORAGE.settings, JSON.stringify(settings)); } catch (_) {}
+    try {
+      localStorage.setItem(STORAGE.settings, JSON.stringify(settings));
+    } catch (_) {
+      reportStorageWriteFailure();
+    }
+  }
+
+  // ---------------------------------------------------------------
+  // OWN STORAGE: BOUND, PRUNE AND REPORT (issue #29)
+  // ---------------------------------------------------------------
+
+  /*
+   * The change log was bounded by entry count and not by size. An entry's own
+   * fields are truncated, but a snapshot of a whole watched week sits in the
+   * same value, so the real bound on what this module writes is here: the
+   * serialised state is capped in characters, and the oldest log entries go
+   * until it fits. The state on screen is untouched - only what is written is
+   * trimmed - so nothing the user is looking at disappears under them.
+   *
+   * The cap lives inside the function on purpose. This file is evaluated top
+   * to bottom with init() called from a boot block hundreds of lines above
+   * here, so a module-scope `const` at this point in the file is still in its
+   * temporal dead zone when the first save runs - the shape that shipped as
+   * Manager 1.21.0 and again as 1.25.0. A declaration hoists; what is inside
+   * it is not evaluated until it is called.
+   */
+  function boundedStateForStorage(state) {
+    const maxChars = 192 * 1024;
+
+    let candidate = state;
+    let serialised = JSON.stringify(candidate);
+
+    if (serialised.length <= maxChars) return serialised;
+
+    const history = Array.isArray(state.history) ? [...state.history] : [];
+
+    while (history.length && serialised.length > maxChars) {
+      // Newest first in this list, so the oldest entry is the last one.
+      history.pop();
+      candidate = { ...state, history };
+      serialised = JSON.stringify(candidate);
+    }
+
+    return serialised;
+  }
+
+  // The flag hangs off the function rather than sitting beside it as a
+  // module-scope binding, so nothing here can be read before it exists.
+  function reportStorageWriteFailure() {
+    if (reportStorageWriteFailure.reported) return;
+    reportStorageWriteFailure.reported = true;
+
+    try {
+      reportToManager('error', 'storage-write', 0);
+    } catch (_) {
+      // Reporting a failure must never become a second failure.
+    }
+  }
+
+  function handlePruneStorage(event) {
+    const detail = event?.detail;
+
+    // Only the one entry this module declared prunable, matched exactly.
+    // Anything else - another module's key, or this module's own settings -
+    // removes nothing.
+    if (detail?.id !== MODULE.id || detail.key !== STORAGE.state) return;
+
+    try {
+      localStorage.removeItem(STORAGE.state);
+    } catch (_) {
+      return;
+    }
+
+    runtime.state = null;
+    renderHud();
+  }
+
+  /*
+   * Stale-cache pruning on load.
+   *
+   * Every key here is scoped to one identity, and an identity changes when
+   * Lectio issues a new student or teacher id - so a browser accumulates a
+   * full snapshot per identity it has ever seen at this school, and nothing
+   * ever went back for the old ones. One that has not been polled in
+   * two months is dropped whole.
+   *
+   * The threshold is inside the function for the same reason the state cap
+   * above is: this is called from the boot block far above this line.
+   */
+  function pruneStaleStorage() {
+    const identityStaleMs = 60 * 24 * 60 * 60 * 1000;
+    const schoolPrefix = `lectioChangeRadar.v1.${schoolId}.`;
+
+    try {
+      const bases = new Set();
+
+      for (let index = 0; index < localStorage.length; index += 1) {
+        const key = localStorage.key(index);
+        if (typeof key !== 'string' || !key.startsWith(schoolPrefix)) continue;
+
+        const cut = key.lastIndexOf('.');
+        if (cut > 0) bases.add(key.slice(0, cut));
+      }
+
+      const doomed = [];
+
+      for (const base of bases) {
+        if (base === storageBase) continue;
+
+        const lastPoll = Number(localStorage.getItem(`${base}.lastPoll`) || 0);
+        if (lastPoll && Date.now() - lastPoll < identityStaleMs) continue;
+
+        // No lastPoll at all is a half-written leftover, and an old one is a
+        // login this browser has not used in two months.
+        for (const suffix of ['state', 'lastPoll', 'lastViewed', 'settings']) {
+          doomed.push(`${base}.${suffix}`);
+        }
+      }
+
+      // Collected first: removing while enumerating renumbers the keys behind
+      // the cursor and skips every other one.
+      for (const key of doomed) localStorage.removeItem(key);
+    } catch (_) {
+      // Storage unreadable; there is nothing to prune.
+    }
   }
 
   function loadState() {
@@ -2356,7 +2517,11 @@
   }
 
   function saveState(state) {
-    try { localStorage.setItem(STORAGE.state, JSON.stringify(state)); } catch (_) {}
+    try {
+      localStorage.setItem(STORAGE.state, boundedStateForStorage(state));
+    } catch (_) {
+      reportStorageWriteFailure();
+    }
   }
 
   function readNumber(key) {
@@ -2364,7 +2529,7 @@
   }
 
   function writeNumber(key, value) {
-    try { localStorage.setItem(key, String(value)); } catch (_) {}
+    try { localStorage.setItem(key, String(value)); } catch (_) { reportStorageWriteFailure(); }
   }
 
   function getSchoolId() {

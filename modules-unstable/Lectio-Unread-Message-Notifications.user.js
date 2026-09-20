@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Unread Message Notifications
 // @namespace    https://www.lectio.dk/
-// @version      0.7.0
+// @version      0.8.0
 // @description  Shows one unread-message badge using Lectio's own unread count, at any Lectio school. Includes direct and group-addressed messages.
 // @match        https://www.lectio.dk/lectio/*
 // @grant        none
@@ -33,6 +33,15 @@
      * is scoped below.
      */
     const SETTINGS_KEY = 'lectioUnreadMessages.settings.v1';
+    /*
+     * Named here rather than beside CACHE_KEY further down, because the
+     * Manager handshake below runs during this file's own evaluation and would
+     * otherwise read a const that is still in its temporal dead zone. It
+     * covers every cache version and every school this browser has ever seen,
+     * which is exactly what the storage readout and the load-time prune both
+     * need to know about.
+     */
+    const CACHE_KEY_PREFIX = 'lectioUnreadMessages.cache.';
     const DEFAULT_SETTINGS = {
         pollMinutes: 10,
         showPreview: true,
@@ -52,7 +61,7 @@
     (function registerWithLectioManager() {
         const MODULE_ID = 'message-notifications';
         const MODULE_NAME = 'Lectio - Unread Message Notifications';
-        const MODULE_VERSION = '0.7.0';
+        const MODULE_VERSION = '0.8.0';
 
         function announce() {
             window.dispatchEvent(new CustomEvent('lectio-module:register', {
@@ -95,7 +104,30 @@
                         pollMinutes: String(settings.pollMinutes),
                         showPreview: settings.showPreview,
                         bubbleScale: settings.bubbleScale
-                    }
+                    },
+                    /*
+                     * What this module keeps in the browser, so the Manager
+                     * can show it without knowing what it is (issue #29,
+                     * docs/manager-storage-api.md). The cached count is
+                     * prunable - it expires in ten minutes anyway and is
+                     * re-read on the next check. The settings blob is not.
+                     */
+                    storage: [
+                        {
+                            key: SETTINGS_KEY,
+                            kind: 'setting',
+                            label: { en: 'Settings', da: 'Indstillinger' }
+                        },
+                        {
+                            prefix: CACHE_KEY_PREFIX,
+                            kind: 'cache',
+                            prunable: true,
+                            label: {
+                                en: 'Cached unread count',
+                                da: 'Gemt antal ulæste'
+                            }
+                        }
+                    ]
                 }
             }));
         }
@@ -126,10 +158,97 @@
             announce();
         }
 
+        /*
+         * The Manager asks; this does the deleting, and only for the prefix
+         * it declared prunable. A request naming anything else removes
+         * nothing at all.
+         */
+        function handlePrune(event) {
+            const detail = event?.detail;
+
+            if (detail?.id !== MODULE_ID || detail.prefix !== CACHE_KEY_PREFIX) return;
+
+            dropKeysWithPrefix(CACHE_KEY_PREFIX);
+        }
+
         window.addEventListener('lectio-manager:discover', announce);
         window.addEventListener('lectio-manager:set-setting', handleSetting);
+        window.addEventListener('lectio-manager:prune-storage', handlePrune);
         announce();
     })();
+
+    // ============================================================
+    // OWN STORAGE: PRUNE AND REPORT
+    // ============================================================
+
+    /*
+     * A failed write is still caught and the badge still works from memory -
+     * that rule is unchanged. What is new is that it says so once per page
+     * load, as a token with nothing from the page in it (issue #29). The flag
+     * hangs off the function rather than sitting beside it as a module-scope
+     * binding, because a declaration hoists and this file runs its Manager
+     * handshake part-way through its own evaluation.
+     */
+    function reportStorageWriteFailure() {
+        if (reportStorageWriteFailure.reported) return;
+        reportStorageWriteFailure.reported = true;
+
+        try {
+            reportToManager('error', 'storage-write', 0);
+        } catch (_) {
+            // Reporting a failure must never become a second failure.
+        }
+    }
+
+    function dropKeysWithPrefix(prefix) {
+        try {
+            const doomed = [];
+
+            for (let index = 0; index < localStorage.length; index += 1) {
+                const key = localStorage.key(index);
+                if (typeof key === 'string' && key.startsWith(prefix)) doomed.push(key);
+            }
+
+            // Collected first: removing while enumerating renumbers the keys
+            // behind the cursor and skips every other one.
+            for (const key of doomed) localStorage.removeItem(key);
+        } catch (_) {
+            // Nothing to drop if storage cannot be read at all.
+        }
+    }
+
+    /*
+     * Stale-cache pruning on load (issue #29). Two kinds of dead weight:
+     * cache keys written by an older version of this module - v3 and earlier
+     * were explicitly "left behind" and never collected - and a current-shape
+     * entry whose ten minutes are long gone.
+     */
+    function pruneStaleStorage() {
+        try {
+            const doomed = [];
+
+            for (let index = 0; index < localStorage.length; index += 1) {
+                const key = localStorage.key(index);
+                if (typeof key !== 'string' || !key.startsWith(CACHE_KEY_PREFIX)) continue;
+
+                if (key !== CACHE_KEY) {
+                    // Another cache version, or another school in the same
+                    // browser. Either way it is ten minutes' worth of count
+                    // that whichever page needs it will simply re-read.
+                    doomed.push(key);
+                    continue;
+                }
+
+                const cached = normalizeState(JSON.parse(localStorage.getItem(key) || 'null'));
+
+                if (!cached || Date.now() - cached.checkedAt > CACHE_MAX_AGE) doomed.push(key);
+            }
+
+            for (const key of doomed) localStorage.removeItem(key);
+        } catch (_) {
+            // Storage unreadable; there is nothing to prune.
+        }
+    }
 
     function loadSettings() {
         try {
@@ -154,7 +273,10 @@
         try {
             localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
         } catch (_) {
-            // Continue with in-memory settings when storage is unavailable.
+            // Continue with in-memory settings when storage is unavailable -
+            // and say so, because a setting that stops sticking is exactly
+            // the symptom nobody could previously explain (issue #29).
+            reportStorageWriteFailure();
         }
     }
 
@@ -237,7 +359,7 @@
      * cache expires after ten minutes anyway.
      */
     const CACHE_KEY =
-        `lectioUnreadMessages.cache.v4.${SCHOOL}`;
+        `${CACHE_KEY_PREFIX}v4.${SCHOOL}`;
 
     const RETURN_REFRESH_AGE =
         10 * 60 * 1000;
@@ -365,6 +487,10 @@
     // ============================================================
 
     function init() {
+        // Before the badge is drawn: a cache from an older version of this
+        // module, or from a school this browser has left, is dead weight that
+        // nothing else was ever going to collect (issue #29).
+        pruneStaleStorage();
         injectStyles();
         applySettingsToPage();
 
@@ -1981,7 +2107,8 @@
             );
 
         } catch (_) {
-            // Cache failure is non-fatal.
+            // Cache failure is non-fatal, and now visible.
+            reportStorageWriteFailure();
         }
     }
 

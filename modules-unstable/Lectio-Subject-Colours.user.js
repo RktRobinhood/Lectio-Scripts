@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Subject Colours
 // @namespace    https://www.lectio.dk/
-// @version      0.9.0
+// @version      0.10.0
 // @description  Learns which classes are actually yours from your own timetable and gives each one its own colour, with a separate muted spectrum for one-off activities like assemblies and meetings.
 // @match        https://www.lectio.dk/lectio/*
 // @grant        none
@@ -15,7 +15,7 @@
 
     const MODULE_ID = 'subject-colours';
     const MODULE_NAME = 'Lectio - Subject Colours';
-    const MODULE_VERSION = '0.9.0';
+    const MODULE_VERSION = '0.10.0';
     const LOG = '[Lectio Subject Colours]';
     const STYLE_ID = 'lectio-subject-colours-styles';
 
@@ -399,8 +399,106 @@
         try {
             localStorage.setItem(key, JSON.stringify(value));
         } catch (_) {
-            // Continue with in-memory state when storage is full or blocked.
+            // Continue with in-memory state when storage is full or blocked -
+            // and say so, once per page load, so "my colours keep resetting"
+            // has a cause on screen instead of being invisible (issue #29).
+            reportStorageWriteFailure();
         }
+    }
+
+    // ============================================================
+    // OWN STORAGE: PRUNE AND REPORT
+    // ============================================================
+
+    // The flag hangs off the function rather than sitting beside it as a
+    // module-scope binding: a declaration hoists, and this file runs its
+    // Manager handshake while parts of itself are still a dead zone.
+    function reportStorageWriteFailure() {
+        if (reportStorageWriteFailure.reported) return;
+        reportStorageWriteFailure.reported = true;
+
+        try {
+            reportToManager('error', 'storage-write', 0);
+        } catch (_) {
+            // Reporting a failure must never become a second failure.
+        }
+    }
+
+    function dropKeysWithPrefix(prefix) {
+        try {
+            const doomed = [];
+
+            for (let index = 0; index < localStorage.length; index += 1) {
+                const key = localStorage.key(index);
+                if (typeof key === 'string' && key.startsWith(prefix)) doomed.push(key);
+            }
+
+            // Collected first: removing while enumerating renumbers the keys
+            // behind the cursor and skips every other one.
+            for (const key of doomed) localStorage.removeItem(key);
+        } catch (_) {
+            // Nothing to drop if storage cannot be read at all.
+        }
+    }
+
+    /*
+     * Deliberately narrower than the "Forget what was learned" button, which
+     * also hands back every hand-picked colour. The storage readout offered to
+     * clear a cache, so a cache is all this clears: the chosen colours live in
+     * the settings blob, which is declared as a setting and has no Clear
+     * button at all.
+     */
+    function forgetLearnedSchedule() {
+        dropKeysWithPrefix(STORE_PREFIX);
+        store = emptyStore();
+        storeDirty = false;
+        invalidate();
+        blockElements(document).forEach(clearBlock);
+        applyAll();
+        announce();
+    }
+
+    /*
+     * Stale-cache pruning on load (issue #29).
+     *
+     * Everything here was already bounded, and every one of those bounds was
+     * only applied on a path that happened to run: pruneStore() inside a save,
+     * the lock inside a scan, the backoff inside a scan attempt. A browser
+     * that opens Lectio and learns nothing new never reached any of them, so
+     * the bounds held in theory and the bytes stayed.
+     */
+    function pruneStaleStorage() {
+        try {
+            const lockedAt = Number(localStorage.getItem(SCAN_LOCK_KEY) || 0);
+            if (lockedAt && Date.now() - lockedAt > SCAN_LOCK_MS) {
+                localStorage.removeItem(SCAN_LOCK_KEY);
+            }
+
+            const backoffUntil = Number(localStorage.getItem(SCAN_BACKOFF_KEY) || 0);
+            if (backoffUntil && backoffUntil < Date.now()) {
+                localStorage.removeItem(SCAN_BACKOFF_KEY);
+            }
+        } catch (_) {
+            // Storage unreadable; there is nothing to prune.
+        }
+
+        const before = JSON.stringify(store);
+
+        /*
+         * A week timestamp says when that week was last read. Once the store
+         * as a whole is older than STORE_FRESHNESS_MS every candidate week is
+         * re-read regardless of its own timestamp, so those entries are bytes
+         * nothing will ever consult again.
+         */
+        if (store.scannedAt && Date.now() - store.scannedAt > STORE_FRESHNESS_MS) {
+            store.weeks = {};
+        }
+
+        // The module's own cap, applied on load rather than only on the next
+        // save that happens to come along.
+        pruneStore();
+
+        if (JSON.stringify(store) !== before) writeJson(storeKey(), store);
     }
 
     // ============================================================
@@ -2266,10 +2364,57 @@
                 name: MODULE_NAME,
                 version: MODULE_VERSION,
                 settingsSchema: settingsSchema(),
-                currentValues: currentValues()
+                currentValues: currentValues(),
+                /*
+                 * What this module keeps in the browser, so the Manager can
+                 * show it without knowing what any of it means (issue #29,
+                 * docs/manager-storage-api.md).
+                 *
+                 * The learned schedule is prunable because the module already
+                 * offers "Forget what was learned" for exactly this data and
+                 * re-learns it from the timetable. The settings blob is not:
+                 * it carries every hand-picked class colour, and a key name
+                 * gives nobody any way to know that.
+                 */
+                storage: [
+                    {
+                        key: SETTINGS_KEY,
+                        kind: 'setting',
+                        label: { en: 'Settings and chosen colours', da: 'Indstillinger og valgte farver' }
+                    },
+                    {
+                        prefix: STORE_PREFIX,
+                        kind: 'cache',
+                        prunable: true,
+                        label: { en: 'Learned timetable', da: 'Lært skema' }
+                    },
+                    {
+                        key: SCAN_LOCK_KEY,
+                        kind: 'state',
+                        label: { en: 'Background scan lock', da: 'Lås for baggrundsscanning' }
+                    },
+                    {
+                        key: SCAN_BACKOFF_KEY,
+                        kind: 'state',
+                        label: { en: 'Background scan backoff', da: 'Pause for baggrundsscanning' }
+                    }
+                ]
             }
         }));
         renderLegend();
+    }
+
+    /*
+     * The Manager asks; this does the deleting, and only for the one entry it
+     * declared prunable. A request naming anything else - another module's
+     * key, or this module's own settings - removes nothing.
+     */
+    function handlePrune(event) {
+        const detail = event?.detail;
+
+        if (detail?.id !== MODULE_ID || detail.prefix !== STORE_PREFIX) return;
+
+        forgetLearnedSchedule();
     }
 
     /*
@@ -2410,6 +2555,7 @@
 
     function start() {
         addStyles();
+        pruneStaleStorage();
 
         const hasBlocks = blockElements(document).length > 0;
 
@@ -2450,6 +2596,7 @@
         renderLegend();
     }, { signal: lifecycle.signal });
     window.addEventListener('lectio-manager:set-setting', handleSetting, { signal: lifecycle.signal });
+    window.addEventListener('lectio-manager:prune-storage', handlePrune, { signal: lifecycle.signal });
     window.addEventListener('lectio-manager:preview-setting', handlePreview, { signal: lifecycle.signal });
     window.addEventListener('lectio-manager:clear-setting-preview', handleClearPreview, { signal: lifecycle.signal });
     window.addEventListener('lectio-manager:dock:render-panel', handleDockPanelRender, { signal: lifecycle.signal });

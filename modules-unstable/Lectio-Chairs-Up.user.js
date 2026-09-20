@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Chairs Up
 // @namespace    https://www.lectio.dk/
-// @version      1.2.1
+// @version      1.3.0
 // @description  Shows when a lesson is the final active booking of the day in its room. Universal Lectio version.
 // @match        https://www.lectio.dk/lectio/*
 // @grant        none
@@ -14,6 +14,24 @@
 
   const SETTINGS_KEY =
     'lectioChairsUp.settings.v1';
+
+
+  /*
+   * Everything this module keeps in localStorage, named here rather than
+   * further down beside the code that uses it, because the Manager handshake
+   * below runs during this file's own evaluation and would otherwise read a
+   * const that is still in its temporal dead zone.
+   *
+   * Both cache prefixes are deliberately school-independent. A key is
+   * per-school underneath, but a browser that has been used at two schools is
+   * carrying both, and a readout that only admitted to the current one would
+   * under-report exactly the case worth seeing.
+   */
+  const ROOM_MAP_KEY_PREFIX =
+    'lectioChairsUp.v102.';
+
+  const ROOM_WEEK_KEY_PREFIX =
+    'lectioChairsUp.v104.';
 
   const DEFAULT_SETTINGS = {
     markerStyle: 'badge',
@@ -35,7 +53,7 @@
   (function registerWithLectioManager() {
     const MODULE_ID = 'chairs-up';
     const MODULE_NAME = 'Lectio - Chairs Up';
-    const MODULE_VERSION = '1.2.1';
+    const MODULE_VERSION = '1.3.0';
 
     function announce() {
       window.dispatchEvent(new CustomEvent('lectio-module:register', {
@@ -62,9 +80,62 @@
               description: 'Show the large Chairs Up notice on activity pages.'
             }
           ],
-          currentValues: { ...settings }
+          currentValues: { ...settings },
+          /*
+           * What this module keeps in the browser, so the Manager can show it
+           * without knowing anything about it (issue #29,
+           * docs/manager-storage-api.md). Only the two caches are prunable:
+           * both are rebuilt by harvesting Lectio again, which costs a few
+           * background requests. The settings blob is not - losing it silently
+           * resets someone's chosen marker.
+           */
+          storage: [
+            {
+              key: SETTINGS_KEY,
+              kind: 'setting',
+              label: { en: 'Settings', da: 'Indstillinger' }
+            },
+            {
+              prefix: ROOM_MAP_KEY_PREFIX,
+              kind: 'cache',
+              prunable: true,
+              label: {
+                en: 'Harvested room list',
+                da: 'Indsamlet lokaleliste'
+              }
+            },
+            {
+              prefix: ROOM_WEEK_KEY_PREFIX,
+              kind: 'cache',
+              prunable: true,
+              label: {
+                en: 'Cached room timetables',
+                da: 'Gemte lokaleskemaer'
+              }
+            }
+          ]
         }
       }));
+    }
+
+    /*
+     * The Manager asks; this does the deleting. It matches on the prefix it
+     * declared and nothing else, so a request naming another module's key, or
+     * a key this module never claimed, removes nothing.
+     */
+    function handlePrune(event) {
+      const detail = event?.detail;
+
+      if (detail?.id !== MODULE_ID) {
+        return;
+      }
+
+      if (
+        detail.prefix === ROOM_MAP_KEY_PREFIX ||
+        detail.prefix === ROOM_WEEK_KEY_PREFIX
+      ) {
+        dropKeysWithPrefix(detail.prefix);
+      }
     }
 
     function handleSetting(event) {
@@ -92,8 +163,202 @@
 
     window.addEventListener('lectio-manager:discover', announce);
     window.addEventListener('lectio-manager:set-setting', handleSetting);
+    window.addEventListener('lectio-manager:prune-storage', handlePrune);
     announce();
   })();
+
+
+  // =========================================================
+  // OWN STORAGE: PRUNE AND REPORT
+  // =========================================================
+
+  /*
+   * A write that fails is still caught and still carried in memory - that rule
+   * has not changed. What is new is that it says so, once per page load, as a
+   * token with nothing from the page in it. With no Manager installed nothing
+   * listens and this is a no-op. See docs/manager-problem-log.md.
+   *
+   * The once-per-page flag hangs off the function rather than sitting beside
+   * it as a module-scope `let`: this file is evaluated top to bottom with the
+   * Manager handshake running part-way through it, and a declaration hoists
+   * where a binding would still be in its temporal dead zone.
+   */
+  function reportStorageWriteFailure() {
+    if (reportStorageWriteFailure.reported) {
+      return;
+    }
+
+    reportStorageWriteFailure.reported = true;
+
+    try {
+      window.dispatchEvent(new CustomEvent('lectio-module:report', {
+        detail: {
+          moduleId: 'chairs-up',
+          kind: 'error',
+          code: 'storage-write'
+        }
+      }));
+    }
+
+    catch (_) {
+      // Reporting a failure must never become a second failure.
+    }
+  }
+
+
+  function dropKeysWithPrefix(
+    prefix
+  ) {
+    try {
+      const doomed = [];
+
+      for (
+        let index = 0;
+        index < localStorage.length;
+        index += 1
+      ) {
+        const key =
+          localStorage.key(index);
+
+
+        if (
+          typeof key === 'string' &&
+          key.startsWith(prefix)
+        ) {
+          doomed.push(key);
+        }
+      }
+
+
+      // Collected first: removing while enumerating renumbers the keys behind
+      // the cursor and silently skips every other one.
+      for (const key of doomed) {
+        localStorage.removeItem(key);
+      }
+
+
+      return doomed.length;
+    }
+
+    catch (_) {
+      return 0;
+    }
+  }
+
+
+  /*
+   * Expiry that only runs when something happens to look at a cache is expiry
+   * that mostly does not run (issue #29). The room map already had a ~30-day
+   * life and was only ever checked on the read path; the room-week cache had
+   * no life at all - one key per room per week, kept for as long as the
+   * browser profile lasts.
+   *
+   * Both are dropped here, on load, before anything reads them.
+   */
+  function pruneStaleStorage() {
+    try {
+      const fetchedAt =
+        Number(
+          localStorage.getItem(
+            ROOM_MAP_TIME_KEY
+          ) || 0
+        );
+
+
+      if (
+        fetchedAt &&
+        Date.now() - fetchedAt >= ROOM_MAP_REFRESH_MS
+      ) {
+        localStorage.removeItem(ROOM_MAP_KEY);
+        localStorage.removeItem(ROOM_MAP_TIME_KEY);
+      }
+    }
+
+    catch (_) {
+      // Nothing to prune if storage cannot be read at all.
+    }
+
+
+    pruneStaleRoomWeeks();
+  }
+
+
+  /*
+   * A room-week entry is a snapshot of one room's bookings in one ISO week.
+   * Last week's is never read again, so anything older than the current week
+   * goes. This week's and next week's stay, because that is the lookahead the
+   * module actually uses.
+   */
+  function pruneStaleRoomWeeks() {
+    const current =
+      getISOWeek(
+        new Date()
+      );
+
+
+    const cutoff =
+      current.isoYear * 100 +
+      current.isoWeek;
+
+
+    try {
+      const doomed = [];
+
+
+      for (
+        let index = 0;
+        index < localStorage.length;
+        index += 1
+      ) {
+        const key =
+          localStorage.key(index);
+
+
+        if (
+          typeof key !== 'string' ||
+          !key.startsWith(`${ROOM_WEEK_PREFIX}.`)
+        ) {
+          continue;
+        }
+
+
+        const parts =
+          key.split('.');
+
+
+        const isoWeek =
+          Number(parts[parts.length - 1]);
+
+        const isoYear =
+          Number(parts[parts.length - 2]);
+
+
+        // A key that does not parse is not one this version wrote, and
+        // guessing at it is exactly what must not happen here.
+        if (
+          !Number.isInteger(isoWeek) ||
+          !Number.isInteger(isoYear)
+        ) {
+          continue;
+        }
+
+
+        if (isoYear * 100 + isoWeek < cutoff) {
+          doomed.push(key);
+        }
+      }
+
+
+      for (const key of doomed) {
+        localStorage.removeItem(key);
+      }
+    }
+
+    catch (_) {
+      // Storage unavailable; there is nothing to prune and nothing to say.
+    }
+  }
+
 
   function loadSettings() {
     try {
@@ -115,7 +380,10 @@
     try {
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
     } catch (_) {
-      // The visual setting still applies for this page when storage is unavailable.
+      // The visual setting still applies for this page when storage is
+      // unavailable - but a setting that stops sticking is the symptom this
+      // is worth reporting for.
+      reportStorageWriteFailure();
     }
   }
 
@@ -454,7 +722,7 @@
    * That avoids rediscovering all 74 rooms.
    */
   const ROOM_MAP_PREFIX =
-    `lectioChairsUp.v102.${SCHOOL}`;
+    `${ROOM_MAP_KEY_PREFIX}${SCHOOL}`;
 
   const ROOM_MAP_KEY =
     `${ROOM_MAP_PREFIX}.roomMap`;
@@ -471,7 +739,7 @@
    * before cancellation-awareness was added.
    */
   const ROOM_WEEK_PREFIX =
-    `lectioChairsUp.v104.${SCHOOL}.roomWeek`;
+    `${ROOM_WEEK_KEY_PREFIX}${SCHOOL}.roomWeek`;
 
 
   // =========================================================
@@ -529,6 +797,9 @@
 
   injectStyles();
   applySettingsToPage();
+  // Before anything reads a cache, so a stale one is gone rather than merely
+  // ignored on the one read path that happened to check its age (issue #29).
+  pruneStaleStorage();
 
   main().catch(error => {
     console.error(
@@ -2439,6 +2710,10 @@
         '[Lectio Chairs Up] Could not save room map:',
         error
       );
+    
+
+
+      reportStorageWriteFailure();
     }
   }
 
@@ -3253,6 +3528,10 @@
         '[Lectio Chairs Up] Room cache write failed:',
         error
       );
+    
+
+
+      reportStorageWriteFailure();
     }
   }
 

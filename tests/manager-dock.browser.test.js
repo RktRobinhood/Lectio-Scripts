@@ -80,6 +80,17 @@ test('manager records a bounded, redacted problem log before its panel exists', 
     await runFixture('manager-problem-log.html', 'lectio-manager-log-', '?phase=one', ['--virtual-time-budget=6000']);
 });
 
+// The storage readout is the only place the Manager looks at data it does not
+// own, and the only place it can destroy any. The seam is what is checked: it
+// measures localStorage and takes everything else from a module's declaration,
+// a module that declares nothing is not guessed at, and a prune removes
+// exactly what was declared prunable - by the owning module, never by the
+// Manager, and never another module's key or one that merely looks like the
+// Manager's own.
+test('manager measures storage generically and prunes only what a module declared', async () => {
+    await runFixture('manager-storage.html', 'lectio-manager-storage-', '', ['--virtual-time-budget=6000']);
+});
+
 // Nothing else can tell the Manager it is stale, so it reads its own catalogue
 // entry. The notice must appear only for a genuinely newer version behind an
 // install link on this repository's raw host.

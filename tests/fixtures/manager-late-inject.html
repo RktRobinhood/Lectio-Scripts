@@ -67,6 +67,29 @@
         const nativeWarn = console.warn.bind(console);
         console.warn = (...args) => { window.bootWarnings.push(args.map(String).join(' ')); nativeWarn(...args); };
 
+        /*
+         * A module answering Discovery while the Manager is still evaluating
+         * its own file. init() calls requestDiscovery(), so everything the
+         * registration path touches - the Storage Declaration among it - is
+         * read at exactly the moment that caught 1.21.0 and 1.25.0: during
+         * top-level evaluation, with the rest of the file still a dead zone.
+         */
+        window.addEventListener('lectio-manager:discover', () => {
+            window.dispatchEvent(new CustomEvent('lectio-module:register', {
+                detail: {
+                    id: 'late-module',
+                    name: 'Late Module',
+                    version: '1.0.0',
+                    settingsSchema: [],
+                    currentValues: {},
+                    storage: [
+                        { key: 'lectioLate.settings.v1', kind: 'setting', label: { en: 'Settings', da: 'Indstillinger' } },
+                        { prefix: 'lectioLate.cache.v1.', kind: 'cache', prunable: true, label: 'Cache' }
+                    ]
+                }
+            }));
+        });
+
         function assert(condition, message) {
             if (!condition) throw new Error(message);
         }
@@ -87,6 +110,12 @@
                     const discarded = window.bootWarnings.filter((line) => /Discarding invalid cached catalogue/.test(line));
                     assert(discarded.length === 0,
                         `The Manager threw away its cached catalogue while booting late: ${discarded.join(' | ')}`);
+
+                    // A registration made during evaluation was accepted and
+                    // remembered. A throw on the way through is caught by the
+                    // dispatcher, so nothing else here would notice.
+                    assert(JSON.parse(storage.get('lectioManager.installed.v1') || '{}')['late-module'],
+                        'A module registering during the Manager\'s own evaluation was dropped');
 
                     const dock = document.querySelector('#lectio-manager-dock-root');
                     assert(dock, 'Manager never built its dock');

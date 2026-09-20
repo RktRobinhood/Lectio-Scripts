@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio module storage fixture</title>
+    <script>
+        /* Four modules on a browser that has been used for a while: an
+           expired room map, room-week snapshots for a week that has been and
+           gone, cache keys written by versions that no longer exist, a scan
+           lock left behind by a tab that was closed mid-scan, and a Change
+           Radar snapshot belonging to a login nobody has used in months.
+
+           Every one of those was already bounded, and every one of those
+           bounds only ran on a path that happened to be taken - so on a
+           browser that opens Lectio and learns nothing new, none of them ran
+           at all. Issue #29 is that they now run on load.
+
+           There is no Manager here on purpose. The declaration is a one-way
+           dispatch and the prune request is one-way the other way, so this
+           page stands in for the Manager at both ends and the modules must
+           behave identically to being installed alone. */
+        window.registrations = new Map();
+        window.pageErrors = [];
+
+        window.addEventListener('lectio-module:register', (event) => {
+            window.registrations.set(event.detail.id, event.detail);
+        });
+
+        window.addEventListener('error', (event) => {
+            window.pageErrors.push(String(event.message));
+        });
+
+        const gmStorage = new Map();
+        window.GM_getValue = (key, fallback) => gmStorage.has(key) ? gmStorage.get(key) : fallback;
+        window.GM_setValue = (key, value) => gmStorage.set(key, value);
+        window.GM_xmlhttpRequest = (options) => {
+            setTimeout(() => options.onerror && options.onerror(), 0);
+        };
+
+        /* Nothing here reaches Lectio, and nothing may hang. */
+        window.fetch = () => Promise.resolve(new Response(
+            '<!DOCTYPE html><html><body></body></html>',
+            { status: 200, headers: { 'content-type': 'text/html' } }
+        ));
+
+        const DAY = 24 * 60 * 60 * 1000;
+        const now = Date.now();
+
+        function isoWeekOf(date) {
+            const point = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+            const day = point.getUTCDay() || 7;
+            point.setUTCDate(point.getUTCDate() + 4 - day);
+            const yearStart = new Date(Date.UTC(point.getUTCFullYear(), 0, 1));
+            return {
+                week: Math.ceil(((point - yearStart) / 86400000 + 1) / 7),
+                year: point.getUTCFullYear()
+            };
+        }
+
+        const thisWeek = isoWeekOf(new Date());
+
+        window.CURRENT_ROOM_WEEK_KEY =
+            `lectioChairsUp.v104.223.roomWeek.RO1.${thisWeek.year}.${thisWeek.week}`;
+
+        /* Keys that must survive, and keys that must not. Split explicitly so
+           a prune that took too much fails as loudly as one that took too
+           little. */
+        window.MUST_GO = {
+            // Chairs Up: a room map well past its ~30-day life, and a
+            // room-week snapshot for a week that is behind us.
+            'lectioChairsUp.v102.223.roomMap': JSON.stringify({ '1': 'RO1' }),
+            'lectioChairsUp.v102.223.roomMapTime': String(now - 40 * DAY),
+            'lectioChairsUp.v104.223.roomWeek.RO1.2020.10': JSON.stringify({ bookings: [] }),
+
+            // Unread: a cache version that no longer exists, and a current
+            // one whose ten minutes are long gone.
+            'lectioUnreadMessages.cache.v3.223': JSON.stringify({ unreadCount: 3 }),
+            'lectioUnreadMessages.cache.v4.223': JSON.stringify({
+                checkedAt: now - 3 * 60 * 60 * 1000,
+                unreadCount: 4,
+                messages: []
+            }),
+
+            // Subject Colours: a lock from a tab closed mid-scan, and a
+            // backoff whose deadline has passed.
+            'lectioSubjectColours.scanLock.v1': String(now - 60 * 60 * 1000),
+            'lectioSubjectColours.scanBackoff.v1': String(now - 60 * 60 * 1000),
+
+            // Change Radar: a whole snapshot belonging to a login this
+            // browser has not used in a hundred days.
+            'lectioChangeRadar.v1.223.student-ancient.state': JSON.stringify({ version: 1, snapshot: { events: {} }, history: [] }),
+            'lectioChangeRadar.v1.223.student-ancient.lastPoll': String(now - 100 * DAY),
+            'lectioChangeRadar.v1.223.student-ancient.lastViewed': String(now - 100 * DAY),
+            'lectioChangeRadar.v1.223.student-ancient.settings': JSON.stringify({})
+        };
+
+        window.MUST_STAY = {
+            'lectioChairsUp.settings.v1': JSON.stringify({ markerStyle: 'badge' }),
+            'lectioUnreadMessages.settings.v1': JSON.stringify({ pollMinutes: 10 }),
+            // scanWeeks 0 keeps the background scanner out of this fixture.
+            'lectioSubjectColours.settings.v1': JSON.stringify({ schema: 2, scanWeeks: 0 }),
+            'lectioChangeRadar.v1.223.student-fresh.state': JSON.stringify({ version: 1, snapshot: { events: {} }, history: [] }),
+            'lectioChangeRadar.v1.223.student-fresh.lastPoll': String(now - 60 * 1000),
+            'somethingElse.v1': 'not a module key at all'
+        };
+
+        window.MUST_STAY[window.CURRENT_ROOM_WEEK_KEY] = JSON.stringify({ bookings: [] });
+
+        localStorage.clear();
+        for (const [key, value] of Object.entries(window.MUST_GO)) localStorage.setItem(key, value);
+        for (const [key, value] of Object.entries(window.MUST_STAY)) localStorage.setItem(key, value);
+    </script>
+</head>
+<body>
+    <div id="nav"><a href="/lectio/223/beskeder2.aspx">Beskeder</a></div>
+
+    <pre id="test-result" data-test-result="pending">PENDING</pre>
+
+    <script src="/modules-unstable/Lectio-Subject-Colours.user.js"></script>
+    <script src="/modules-unstable/Lectio-Chairs-Up.user.js"></script>
+    <script src="/modules-unstable/Lectio-Unread-Message-Notifications.user.js"></script>
+    <script src="/modules-unstable/Lectio-Change-Radar.user.js"></script>
+    <script>
+        function assert(condition, message) {
+            if (!condition) throw new Error(message);
+        }
+
+        window.addEventListener('load', async () => {
+            const result = document.getElementById('test-result');
+
+            try {
+                // Chairs Up routes off the URL and Change Radar jitters its
+                // first check, so give all four a turn. Chrome runs this on a
+                // virtual clock, so the wait costs nothing.
+                await new Promise((done) => setTimeout(done, 10000));
+
+                // 1. Everything stale is gone, and it went on load - nothing
+                //    on this page asked any module to do it.
+                for (const key of Object.keys(window.MUST_GO)) {
+                    assert(localStorage.getItem(key) === null,
+                        `A stale entry survived a page load: ${key}`);
+                }
+
+                // 2. Nothing else went with it.
+                for (const key of Object.keys(window.MUST_STAY)) {
+                    assert(localStorage.getItem(key) !== null,
+                        `Pruning took something it should not have: ${key}`);
+                }
+
+                // 3. Every module says what it stores, in the shape the
+                //    Manager renders without understanding.
+                for (const moduleId of [
+                    'subject-colours', 'chairs-up', 'message-notifications', 'change-radar'
+                ]) {
+                    const registration = window.registrations.get(moduleId);
+                    assert(registration, `${moduleId} did not register at all`);
+
+                    const declaration = registration.storage;
+                    assert(Array.isArray(declaration) && declaration.length,
+                        `${moduleId} declared no storage`);
+
+                    for (const entry of declaration) {
+                        const named = [entry.key, entry.prefix].filter(Boolean);
+                        assert(named.length === 1,
+                            `${moduleId} declared an entry with ${named.length} identifiers`);
+                        assert(['cache', 'setting', 'state'].includes(entry.kind),
+                            `${moduleId} declared an unknown kind: ${entry.kind}`);
+                    }
+
+                    // A settings blob is never offered up for deletion: a key
+                    // name cannot tell anyone it holds someone's chosen
+                    // colours, so nothing but the owner may decide, and the
+                    // owner decides no.
+                    const prunableSettings = declaration.filter((entry) =>
+                        entry.prunable && entry.kind === 'setting');
+                    assert(prunableSettings.length === 0,
+                        `${moduleId} offered to delete a setting: ${JSON.stringify(prunableSettings)}`);
+                }
+
+                // 4. A prune is carried out by the owner and matched exactly.
+                //    Aimed at the wrong module, or at a key the owner never
+                //    declared, it removes nothing at all.
+                window.dispatchEvent(new CustomEvent('lectio-manager:prune-storage', {
+                    detail: { id: 'chairs-up', prefix: 'lectioSubjectColours.' }
+                }));
+                window.dispatchEvent(new CustomEvent('lectio-manager:prune-storage', {
+                    detail: { id: 'message-notifications', key: 'lectioChairsUp.settings.v1' }
+                }));
+                window.dispatchEvent(new CustomEvent('lectio-manager:prune-storage', {
+                    detail: { id: 'chairs-up', prefix: 'lectioChairsUp.settings.v1' }
+                }));
+
+                for (const key of Object.keys(window.MUST_STAY)) {
+                    assert(localStorage.getItem(key) !== null,
+                        `A misaimed prune request deleted something: ${key}`);
+                }
+
+                // 5. Aimed correctly, it takes exactly what was declared.
+                window.dispatchEvent(new CustomEvent('lectio-manager:prune-storage', {
+                    detail: { id: 'chairs-up', prefix: 'lectioChairsUp.v104.' }
+                }));
+
+                assert(localStorage.getItem(window.CURRENT_ROOM_WEEK_KEY) === null,
+                    'A declared prunable cache survived a prune request from its own module');
+                assert(localStorage.getItem('lectioChairsUp.settings.v1') !== null,
+                    'Pruning a cache took the owning module\'s settings with it');
+                assert(localStorage.getItem('lectioSubjectColours.settings.v1') !== null,
+                    'Pruning one module\'s cache reached another module\'s keys');
+
+                assert(window.pageErrors.length === 0,
+                    `A module threw while pruning with no Manager installed: ${window.pageErrors.join(' | ')}`);
+
+                result.dataset.testResult = 'pass';
+                result.textContent = 'PASS';
+            } catch (error) {
+                result.dataset.testResult = 'fail';
+                result.textContent = `FAIL: ${error.message}`;
+            }
+        });
+    </script>
+</body>
+</html>

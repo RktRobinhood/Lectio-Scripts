@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Module Skeleton
 // @namespace    https://github.com/RktRobinhood/Lectio-Scripts
-// @version      0.2.1
+// @version      0.3.0
 // @description  A complete, do-nothing module you copy to start a new one. Registers, renders one control of every type, themes itself, speaks both languages, and tears down cleanly.
 // @author       RktRobinhood
 // @match        https://www.lectio.dk/lectio/*
@@ -32,6 +32,7 @@
  *   - Colours through the --lectio-theme-* seam           ADR-0006
  *   - Optional dock item that fails quietly alone         ADR-0012
  *   - Selector-drift reporting to the Manager             docs/manager-problem-log.md
+ *   - Declaring what it stores, and pruning on request    docs/manager-storage-api.md
  *   - Both languages inline, Danish by default            ADR-0013
  *   - Teardown of every listener, timer and DOM insertion
  *
@@ -50,7 +51,7 @@
     // next to this file; `node scripts/check-versions.mjs` enforces it.
     const MODULE_ID = 'module-skeleton';
     const MODULE_NAME = 'Lectio - Module Skeleton';
-    const MODULE_VERSION = '0.2.1';
+    const MODULE_VERSION = '0.3.0';
 
     const STYLE_ID = 'lectio-module-skeleton-styles';
     const SETTINGS_KEY = 'lectioModuleSkeleton.settings.v1';
@@ -164,9 +165,46 @@
                         advanced: true
                     }
                 ],
-                currentValues: { ...settings }
+                currentValues: { ...settings },
+                /*
+                 * What this module keeps in the browser. Optional, and
+                 * rendered by the Manager without it understanding any of it:
+                 * the Manager measures localStorage and takes which keys are
+                 * whose, and which are safe to throw away, from here.
+                 *
+                 * `kind` is cache | setting | state, `area` is page
+                 * (localStorage, the default) or script (GM storage, which
+                 * the Manager cannot see or measure), and `prunable: true`
+                 * puts a Clear button beside the row. Only ever mark
+                 * something prunable that this module can rebuild - a
+                 * settings blob never is. Exactly one of `key` and `prefix`.
+                 *
+                 * See docs/manager-storage-api.md.
+                 */
+                storage: [
+                    {
+                        key: SETTINGS_KEY,
+                        kind: 'setting',
+                        label: { en: 'Settings', da: 'Indstillinger' }
+                    }
+                ]
             }
         }));
+    }
+
+    /*
+     * The Manager asks; the module deletes. The Manager never removes a key
+     * itself, so a request this ignores leaves everything exactly as it was.
+     * Match on the id and on the entry as declared, and nothing else.
+     */
+    function handlePruneStorage(event) {
+        const detail = event?.detail;
+
+        if (detail?.id !== MODULE_ID) return;
+
+        // Nothing here is declared prunable, so there is nothing to do. A
+        // module with a cache would compare detail.key or detail.prefix
+        // against what it declared and remove exactly that.
     }
 
     /* ---------------------------------------------------------------- *
@@ -197,7 +235,15 @@
             localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
         } catch (_) {
             // Private browsing, a full quota, or storage switched off. Carry on
-            // with the in-memory copy rather than throwing on a Lectio page.
+            // with the in-memory copy rather than throwing on a Lectio page -
+            // and say so once, so a setting that stops sticking has a cause
+            // the user can see. See docs/manager-problem-log.md.
+            if (!saveSettings.reported) {
+                saveSettings.reported = true;
+                window.dispatchEvent(new CustomEvent('lectio-module:report', {
+                    detail: { moduleId: MODULE_ID, kind: 'error', code: 'storage-write' }
+                }));
+            }
         }
     }
 
@@ -529,6 +575,7 @@
 
     window.addEventListener('lectio-manager:discover', announce, { signal: lifecycle.signal });
     window.addEventListener('lectio-manager:set-setting', handleSetting, { signal: lifecycle.signal });
+    window.addEventListener('lectio-manager:prune-storage', handlePruneStorage, { signal: lifecycle.signal });
     window.addEventListener('lectio-manager:preview-setting', handlePreview, { signal: lifecycle.signal });
     window.addEventListener('lectio-manager:clear-setting-preview', handleClearPreview, { signal: lifecycle.signal });
     window.addEventListener('lectio-manager:dock:render-panel', handleDockPanelRender, { signal: lifecycle.signal });
