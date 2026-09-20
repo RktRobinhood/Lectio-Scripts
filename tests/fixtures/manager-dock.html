@@ -268,6 +268,45 @@
                 assert(saved.sizeMode === 'large', 'Dock size preference was not persisted');
                 assert(saved.edge === 'bottom' && saved.align === 'end', 'Dock placement was not persisted');
 
+                // The dock starts transparent enough to read the page through
+                // it, and both fills are adjustable. Only what sits behind the
+                // icons moves - the icons themselves are drawn in currentColor
+                // and must stay fully opaque at every setting.
+                const shellOpacity = document.querySelector('.lectio-manager-dock-shell-opacity');
+                const itemOpacity = document.querySelector('.lectio-manager-dock-item-opacity');
+                const fill = (name) => dock.style.getPropertyValue(name);
+                assert(shellOpacity.value === '30' && itemOpacity.value === '60',
+                    `Opacity sliders did not start at their defaults: ${shellOpacity.value}/${itemOpacity.value}`);
+                assert(document.querySelector('.lectio-manager-dock-shell-opacity-value').textContent === '30%' &&
+                    document.querySelector('.lectio-manager-dock-item-opacity-value').textContent === '60%',
+                    'Opacity readouts did not match the sliders');
+                assert(fill('--lectio-dock-shell-fill') === '30%' && fill('--lectio-dock-shell-fill-fade') === '14%',
+                    `Dock shell fill was not applied: ${fill('--lectio-dock-shell-fill')}`);
+                assert(fill('--lectio-dock-item-fill') === '60%' && fill('--lectio-dock-item-fill-hover') === '80%',
+                    `Dock item fill was not applied: ${fill('--lectio-dock-item-fill')}`);
+
+                const litIcon = document.querySelector('.lectio-manager-dock-icon');
+                const litColour = getComputedStyle(litIcon).color;
+
+                // Dragging repaints; the preference is written when the drag
+                // settles, so a drag in progress must not have been persisted.
+                shellOpacity.value = '70';
+                shellOpacity.dispatchEvent(new Event('input', { bubbles: true }));
+                assert(fill('--lectio-dock-shell-fill') === '70%', 'Dragging the dock slider did not repaint the shell');
+                assert(JSON.parse(storage.get('lectioManager.dock.v1')).shellOpacity === 30,
+                    'A drag in progress was persisted before it settled');
+                shellOpacity.dispatchEvent(new Event('change', { bubbles: true }));
+                assert(JSON.parse(storage.get('lectioManager.dock.v1')).shellOpacity === 70,
+                    'A settled drag was not persisted');
+
+                itemOpacity.value = '0';
+                itemOpacity.dispatchEvent(new Event('input', { bubbles: true }));
+                itemOpacity.dispatchEvent(new Event('change', { bubbles: true }));
+                assert(fill('--lectio-dock-item-fill') === '0%' && fill('--lectio-dock-item-fill-hover') === '20%',
+                    'Clearing the icon background did not reach the tiles');
+                assert(getComputedStyle(litIcon).opacity === '1' && getComputedStyle(litIcon).color === litColour,
+                    'Fading the plate behind an icon also faded the icon');
+
                 window.dispatchEvent(new CustomEvent('lectio-manager:dock:remove', {
                     detail: { moduleId: 'test-module' }
                 }));

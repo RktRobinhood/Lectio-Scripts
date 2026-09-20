@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "generatedAt": "2026-09-20T18:00:00Z",
   "manager": {
-    "version": "1.20.1",
+    "version": "1.21.0",
     "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/manager/Lectio-Manager.user.js",
     "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues"
   },

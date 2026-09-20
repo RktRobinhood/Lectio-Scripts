@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.20.1
+// @version      1.21.0
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules, including their settings and shared dock controls.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
@@ -81,6 +81,8 @@
             sizeSmall: 'Small',
             sizeNormal: 'Normal',
             sizeLarge: 'Large',
+            dockOpacity: 'Dock background',
+            itemOpacity: 'Icon background',
             shrinkToFit: 'Shrink icons to fit the screen',
             autoHide: 'Auto-hide until hovered or focused',
             resetDockOrder: 'Reset dock order',
@@ -159,6 +161,8 @@
             sizeSmall: 'Lille',
             sizeNormal: 'Normal',
             sizeLarge: 'Stor',
+            dockOpacity: 'Dokkens baggrund',
+            itemOpacity: 'Ikonernes baggrund',
             shrinkToFit: 'Formindsk ikoner, så de passer til skærmen',
             autoHide: 'Skjul automatisk, indtil musen eller fokus er på den',
             resetDockOrder: 'Nulstil dokkens rækkefølge',
@@ -256,7 +260,7 @@
     // Kept in step with the @version header by scripts/check-versions.mjs. The
     // header is metadata Tampermonkey reads; this is the only copy the running
     // script can see, and it is what the self-update notice compares.
-    const MANAGER_VERSION = '1.20.1';
+    const MANAGER_VERSION = '1.21.0';
 
     const STABLE_CATALOGUE_URL =
         'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/catalogue/modules.json';
@@ -816,6 +820,8 @@
         set('.lectio-manager-dock-edge-label', t('screenEdge'));
         set('.lectio-manager-dock-align-label', t('positionOnEdge'));
         set('.lectio-manager-dock-size-label', t('iconSize'));
+        set('.lectio-manager-dock-shell-opacity-label', t('dockOpacity'));
+        set('.lectio-manager-dock-item-opacity-label', t('itemOpacity'));
         set('.lectio-manager-dock-fit-label', t('shrinkToFit'));
         set('.lectio-manager-dock-autohide-label', t('autoHide'));
         set('.lectio-manager-dock-reset', t('resetDockOrder'));
@@ -1114,6 +1120,16 @@
     // v1 stored a single vertical `position` and always hugged the left edge.
     const LEGACY_DOCK_POSITIONS = { top: 'start', center: 'center', bottom: 'end' };
 
+    /*
+     * The two fills are deliberately low. The dock is glass: most of what makes
+     * it readable is the blur and the saturation boost behind it, not the fill,
+     * so a thin fill still reads as a panel while the page keeps showing
+     * through. The icons are drawn in currentColor and are never faded - only
+     * what sits behind them moves with these numbers.
+     */
+    const DOCK_SHELL_OPACITY_DEFAULT = 30;
+    const DOCK_ITEM_OPACITY_DEFAULT = 60;
+
     function defaultDockPreferences() {
         return {
             version: 2,
@@ -1122,8 +1138,16 @@
             align: 'center',
             sizeMode: 'auto',
             autoFit: true,
-            autoHide: false
+            autoHide: false,
+            shellOpacity: DOCK_SHELL_OPACITY_DEFAULT,
+            itemOpacity: DOCK_ITEM_OPACITY_DEFAULT
         };
+    }
+
+    function clampDockOpacity(value, fallback) {
+        const number = Math.round(Number(value));
+        if (!Number.isFinite(number)) return fallback;
+        return Math.min(100, Math.max(0, number));
     }
 
     function isVerticalDock(edge = dockPreferences?.edge) {
@@ -1155,7 +1179,9 @@
                     ? parsed.sizeMode
                     : defaults.sizeMode,
                 autoFit: parsed.autoFit !== false,
-                autoHide: parsed.autoHide === true
+                autoHide: parsed.autoHide === true,
+                shellOpacity: clampDockOpacity(parsed.shellOpacity, defaults.shellOpacity),
+                itemOpacity: clampDockOpacity(parsed.itemOpacity, defaults.itemOpacity)
             };
         } catch (error) {
             console.warn(LOG, 'Discarding invalid dock preferences:', error);
@@ -1679,6 +1705,21 @@
         dockElements.root.dataset.align = dockPreferences.align;
         dockElements.root.dataset.orientation = isVerticalDock() ? 'vertical' : 'horizontal';
         dockElements.root.classList.toggle('is-auto-hide', dockPreferences.autoHide);
+
+        /*
+         * Both fills are written as ready-made percentages rather than as raw
+         * numbers, so the stylesheet can drop them straight into color-mix()
+         * and keep its own values as the fallback. The shell's second stop is
+         * the weaker end of its gradient, and a tile lifts by a fixed amount
+         * under the pointer, which is what keeps an icon readable while it is
+         * also the thing being scaled.
+         */
+        const shellOpacity = clampDockOpacity(dockPreferences.shellOpacity, DOCK_SHELL_OPACITY_DEFAULT);
+        const itemOpacity = clampDockOpacity(dockPreferences.itemOpacity, DOCK_ITEM_OPACITY_DEFAULT);
+        dockElements.root.style.setProperty('--lectio-dock-shell-fill', `${shellOpacity}%`);
+        dockElements.root.style.setProperty('--lectio-dock-shell-fill-fade', `${Math.round(shellOpacity * 0.45)}%`);
+        dockElements.root.style.setProperty('--lectio-dock-item-fill', `${itemOpacity}%`);
+        dockElements.root.style.setProperty('--lectio-dock-item-fill-hover', `${Math.min(100, itemOpacity + 20)}%`);
         hideDockTooltip();
         syncDockPreferenceControls();
         updateDockFit();
@@ -1712,6 +1753,19 @@
         if (size) size.value = dockPreferences.sizeMode;
         if (fit) fit.checked = dockPreferences.autoFit;
         if (autoHide) autoHide.checked = dockPreferences.autoHide;
+
+        for (const [selector, value] of [
+            ['shell-opacity', dockPreferences.shellOpacity],
+            ['item-opacity', dockPreferences.itemOpacity]
+        ]) {
+            const slider = elements.root.querySelector(`.lectio-manager-dock-${selector}`);
+            const readout = elements.root.querySelector(`.lectio-manager-dock-${selector}-value`);
+            // Writing the value back mid-drag is harmless - it is the value the
+            // drag just produced - and it is what keeps the two in step when the
+            // preference changes from anywhere else.
+            if (slider) slider.value = String(value);
+            if (readout) readout.textContent = `${value}%`;
+        }
     }
 
     function updateDockFit() {
@@ -1860,6 +1914,16 @@
                                 <option value="normal">Normal</option>
                                 <option value="large">Large</option>
                             </select>
+                        </label>
+                        <label class="lectio-manager-prefs-field lectio-manager-prefs-range">
+                            <span class="lectio-manager-dock-shell-opacity-label">Dock background</span>
+                            <input type="range" class="lectio-manager-dock-shell-opacity" min="0" max="100" step="5">
+                            <output class="lectio-manager-dock-shell-opacity-value"></output>
+                        </label>
+                        <label class="lectio-manager-prefs-field lectio-manager-prefs-range">
+                            <span class="lectio-manager-dock-item-opacity-label">Icon background</span>
+                            <input type="range" class="lectio-manager-dock-item-opacity" min="0" max="100" step="5">
+                            <output class="lectio-manager-dock-item-opacity-value"></output>
                         </label>
                         <label class="lectio-manager-prefs-check">
                             <input type="checkbox" class="lectio-manager-dock-fit">
@@ -2015,6 +2079,26 @@
             saveDockPreferences();
             applyDockPreferences();
         });
+
+        /*
+         * The dock is behind the settings panel while these are dragged, so the
+         * only way to choose a fill is to watch it change: every input event
+         * repaints, and the preference is written once the drag settles rather
+         * than on every pixel of it.
+         */
+        for (const [selector, key] of [
+            ['shell-opacity', 'shellOpacity'],
+            ['item-opacity', 'itemOpacity']
+        ]) {
+            const slider = root.querySelector(`.lectio-manager-dock-${selector}`);
+            if (!slider) continue;
+
+            slider.addEventListener('input', (event) => {
+                dockPreferences[key] = clampDockOpacity(event.target.value, dockPreferences[key]);
+                applyDockPreferences();
+            });
+            slider.addEventListener('change', saveDockPreferences);
+        }
 
         root.querySelector('.lectio-manager-dock-fit').addEventListener('change', (event) => {
             dockPreferences.autoFit = event.target.checked;
@@ -4141,6 +4225,25 @@
                 font: inherit;
             }
 
+            /* A slider needs the room a select does not, so the label keeps only
+               what it needs and the track takes the rest of the row. */
+            .lectio-manager-prefs-range input[type='range'] {
+                flex: 1 1 auto;
+                min-width: 0;
+                margin: 0;
+                accent-color: var(--lectio-theme-accent, #0f6f6f);
+                cursor: pointer;
+            }
+
+            .lectio-manager-prefs-range output {
+                min-width: 32px;
+                color: var(--lectio-theme-accent, #176766);
+                font-size: 10px;
+                font-weight: 700;
+                text-align: right;
+                font-variant-numeric: tabular-nums;
+            }
+
             .lectio-manager-prefs-check {
                 justify-content: flex-start;
                 cursor: pointer;
@@ -5059,8 +5162,8 @@
                 background:
                     linear-gradient(
                         155deg,
-                        color-mix(in srgb, var(--lectio-theme-surface, #ffffff) 20%, transparent),
-                        color-mix(in srgb, var(--lectio-theme-surface, #ffffff) 9%, transparent)
+                        color-mix(in srgb, var(--lectio-theme-surface, #ffffff) var(--lectio-dock-shell-fill, 20%), transparent),
+                        color-mix(in srgb, var(--lectio-theme-surface, #ffffff) var(--lectio-dock-shell-fill-fade, 9%), transparent)
                     );
                 box-shadow:
                     0 12px 32px rgba(0, 0, 0, .16),
@@ -5153,7 +5256,7 @@
                 box-sizing: border-box;
                 border: 1px solid rgba(255, 255, 255, .42);
                 border-radius: 50%;
-                background: color-mix(in srgb, var(--lectio-theme-surface, #ffffff) 38%, transparent);
+                background: color-mix(in srgb, var(--lectio-theme-surface, #ffffff) var(--lectio-dock-item-fill, 38%), transparent);
                 color: var(--lectio-theme-accent, #0f6f6f);
                 padding: 0;
                 cursor: pointer;
@@ -5183,7 +5286,7 @@
                    tile keeps its resting shadow the whole time, so nothing
                    behind it ever changes. */
                 border-color: rgba(255, 255, 255, .7);
-                background: color-mix(in srgb, var(--lectio-theme-surface, #ffffff) 62%, transparent);
+                background: color-mix(in srgb, var(--lectio-theme-surface, #ffffff) var(--lectio-dock-item-fill-hover, 62%), transparent);
                 outline: none;
             }
 
