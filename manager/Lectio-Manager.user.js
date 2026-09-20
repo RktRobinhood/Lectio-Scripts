@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.19.0
+// @version      1.19.1
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules, including their settings and shared dock controls.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
@@ -215,7 +215,7 @@
     // Kept in step with the @version header by scripts/check-versions.mjs. The
     // header is metadata Tampermonkey reads; this is the only copy the running
     // script can see, and it is what the self-update notice compares.
-    const MANAGER_VERSION = '1.19.0';
+    const MANAGER_VERSION = '1.19.1';
 
     const STABLE_CATALOGUE_URL =
         'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/catalogue/modules.json';
@@ -1603,8 +1603,21 @@
 
         dockElements.root.style.setProperty('--lectio-dock-item-size', `${itemSize}px`);
         dockElements.root.style.setProperty('--lectio-dock-gap', `${gap}px`);
-        dockElements.items.style.maxHeight = vertical ? `${available - 12}px` : '';
-        dockElements.items.style.maxWidth = vertical ? '' : `${available - 12}px`;
+
+        /*
+         * Only clamp and scroll when the icons genuinely do not fit. A scroll
+         * container counts a magnified tile's transform as overflow, so leaving
+         * this on permanently meant hovering the first or last icon grew it past
+         * the box, raised a scrollbar nobody asked for, and clipped the very
+         * animation that caused it. Off, the tile is free to grow over the edge
+         * of the shell, which is what a dock is supposed to look like.
+         */
+        const needed = (itemCount * itemSize) + (Math.max(0, itemCount - 1) * gap) + 12;
+        const scrollable = itemCount > 0 && needed > available;
+
+        dockElements.items.classList.toggle('is-scrollable', scrollable);
+        dockElements.items.style.maxHeight = scrollable && vertical ? `${available - 12}px` : '';
+        dockElements.items.style.maxWidth = scrollable && !vertical ? `${available - 12}px` : '';
     }
 
     /*
@@ -4911,16 +4924,19 @@
                 background:
                     linear-gradient(
                         155deg,
-                        color-mix(in srgb, var(--lectio-theme-surface, #ffffff) 40%, transparent),
-                        color-mix(in srgb, var(--lectio-theme-surface, #ffffff) 22%, transparent)
+                        color-mix(in srgb, var(--lectio-theme-surface, #ffffff) 20%, transparent),
+                        color-mix(in srgb, var(--lectio-theme-surface, #ffffff) 9%, transparent)
                     );
                 box-shadow:
-                    0 12px 32px rgba(0, 0, 0, .20),
-                    0 2px 8px rgba(0, 0, 0, .10),
-                    inset 0 1px 0 rgba(255, 255, 255, .55),
-                    inset 0 0 0 1px rgba(255, 255, 255, .10);
-                -webkit-backdrop-filter: blur(20px) saturate(175%);
-                backdrop-filter: blur(20px) saturate(175%);
+                    0 12px 32px rgba(0, 0, 0, .16),
+                    0 2px 8px rgba(0, 0, 0, .08),
+                    inset 0 1px 0 rgba(255, 255, 255, .45),
+                    inset 0 0 0 1px rgba(255, 255, 255, .08);
+                /* Most of the legibility comes from the blur and the saturation
+                   boost, not from the fill - which is why the fill can be this
+                   thin and the photo behind it still reads as the photo. */
+                -webkit-backdrop-filter: blur(24px) saturate(190%);
+                backdrop-filter: blur(24px) saturate(190%);
                 transition: transform 150ms ease, opacity 150ms ease;
             }
 
@@ -4953,22 +4969,39 @@
                 transform: translateY(calc(100% - 10px));
             }
 
+            /* Visible by default so a magnified tile can grow past the shell.
+               Scrolling is switched on from updateDockFit only when the icons
+               really do not fit, which is also when magnifying them is pointless. */
             .lectio-manager-dock-items {
                 display: flex;
                 gap: var(--lectio-dock-gap);
+                overflow: visible;
                 scrollbar-width: thin;
             }
 
             #lectio-manager-dock-root[data-orientation='vertical'] .lectio-manager-dock-items {
                 flex-direction: column;
-                overflow-x: hidden;
-                overflow-y: auto;
             }
 
             #lectio-manager-dock-root[data-orientation='horizontal'] .lectio-manager-dock-items {
                 flex-direction: row;
+            }
+
+            #lectio-manager-dock-root[data-orientation='vertical'] .lectio-manager-dock-items.is-scrollable {
+                overflow-x: hidden;
+                overflow-y: auto;
+            }
+
+            #lectio-manager-dock-root[data-orientation='horizontal'] .lectio-manager-dock-items.is-scrollable {
                 overflow-x: auto;
                 overflow-y: hidden;
+            }
+
+            .lectio-manager-dock-items.is-scrollable .lectio-manager-dock-item:hover,
+            .lectio-manager-dock-items.is-scrollable .lectio-manager-dock-item:focus-visible,
+            .lectio-manager-dock-items.is-scrollable .lectio-manager-dock-item:hover + .lectio-manager-dock-item,
+            .lectio-manager-dock-items.is-scrollable .lectio-manager-dock-item:has(+ .lectio-manager-dock-item:hover) {
+                transform: none;
             }
 
             /* The tiles are glass too, but denser than the shell they sit in -
@@ -4983,18 +5016,18 @@
                 align-items: center;
                 justify-content: center;
                 box-sizing: border-box;
-                border: 1px solid rgba(255, 255, 255, .45);
+                border: 1px solid rgba(255, 255, 255, .42);
                 border-radius: 50%;
-                background: color-mix(in srgb, var(--lectio-theme-surface, #ffffff) 66%, transparent);
+                background: color-mix(in srgb, var(--lectio-theme-surface, #ffffff) 38%, transparent);
                 color: var(--lectio-theme-accent, #0f6f6f);
                 padding: 0;
                 cursor: pointer;
                 touch-action: none;
-                -webkit-backdrop-filter: blur(6px) saturate(140%);
-                backdrop-filter: blur(6px) saturate(140%);
+                -webkit-backdrop-filter: blur(12px) saturate(160%);
+                backdrop-filter: blur(12px) saturate(160%);
                 box-shadow:
-                    0 2px 6px rgba(0, 0, 0, .14),
-                    inset 0 1px 0 rgba(255, 255, 255, .6);
+                    0 2px 6px rgba(0, 0, 0, .12),
+                    inset 0 1px 0 rgba(255, 255, 255, .5);
                 transform-origin: var(--lectio-dock-grow, center center);
                 transition:
                     transform 200ms cubic-bezier(.22, .8, .3, 1.1),
@@ -5006,12 +5039,15 @@
             .lectio-manager-dock-item:hover,
             .lectio-manager-dock-item:focus-visible,
             .lectio-manager-dock-item.is-active {
-                border-color: rgba(255, 255, 255, .72);
-                background: color-mix(in srgb, var(--lectio-theme-surface, #ffffff) 82%, transparent);
+                /* Hover is the one moment the tile earns some opacity: it is the
+                   thing being looked at, and the icon has to stay readable while
+                   it is also the thing being scaled. */
+                border-color: rgba(255, 255, 255, .7);
+                background: color-mix(in srgb, var(--lectio-theme-surface, #ffffff) 62%, transparent);
                 outline: none;
                 box-shadow:
-                    0 8px 20px rgba(0, 0, 0, .22),
-                    inset 0 1px 0 rgba(255, 255, 255, .75),
+                    0 8px 20px rgba(0, 0, 0, .2),
+                    inset 0 1px 0 rgba(255, 255, 255, .7),
                     0 0 0 2px color-mix(in srgb, var(--lectio-theme-accent, #0f6f6f) 26%, transparent);
             }
 

@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-09-20T16:00:00Z",
+  "generatedAt": "2026-09-20T17:00:00Z",
   "manager": {
-    "version": "1.19.0",
+    "version": "1.19.1",
     "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/manager/Lectio-Manager.user.js",
     "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues"
   },

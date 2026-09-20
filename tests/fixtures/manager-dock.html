@@ -178,6 +178,21 @@
                 assert(dock.dataset.edge === 'left', `Dock did not default to the left edge: ${dock.dataset.edge}`);
                 assert(dock.dataset.align === 'center', `Dock did not default to the middle: ${dock.dataset.align}`);
                 assert(dock.dataset.orientation === 'vertical', 'A left-edge dock was not vertical');
+
+                // A scroll container treats a magnified tile's transform as
+                // overflow, so a dock whose icons already fit must not be one:
+                // hovering the first icon on the default left-edge dock otherwise
+                // raised a scrollbar and then clipped the animation that raised it.
+                const itemStrip = document.querySelector('.lectio-manager-dock-items');
+                assert(!itemStrip.classList.contains('is-scrollable'),
+                    'A dock with room to spare was still a scroll container');
+                assert(getComputedStyle(itemStrip).overflowY === 'visible',
+                    `A vertical dock with room to spare clipped its items: ${getComputedStyle(itemStrip).overflowY}`);
+                assert(!itemStrip.style.maxHeight && !itemStrip.style.maxWidth,
+                    'A dock with room to spare was still clamped to a maximum size');
+                assert(itemStrip.scrollHeight <= itemStrip.clientHeight + 1,
+                    'A dock with room to spare could still be scrolled');
+
                 const align = document.querySelector('.lectio-manager-dock-align');
                 assert([...align.options].map((option) => option.textContent).join('|') === 'Top|Middle|Bottom',
                     `Vertical alignment labels were wrong: ${[...align.options].map((option) => option.textContent)}`);
@@ -196,6 +211,12 @@
                 assert(align.value === 'end', 'Changing edge silently dropped the chosen alignment');
                 assert(getComputedStyle(document.querySelector('.lectio-manager-dock-items')).flexDirection === 'row',
                     'A horizontal dock still laid its items out as a column');
+
+                // The same has to hold once the dock is a row.
+                assert(getComputedStyle(itemStrip).overflowX === 'visible',
+                    `A horizontal dock with room to spare clipped its items: ${getComputedStyle(itemStrip).overflowX}`);
+                assert(itemStrip.scrollWidth <= itemStrip.clientWidth + 1,
+                    'A horizontal dock with room to spare could still be scrolled');
 
                 const size = document.querySelector('.lectio-manager-dock-size');
                 size.value = 'large';
