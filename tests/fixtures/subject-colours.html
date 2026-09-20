@@ -63,6 +63,11 @@
             scanWeeks: 0,
             colourOther: true,
             showLegend: phase !== 'legend-off',
+            // Settings written with the current schema are a deliberate choice
+            // and must survive load untouched. The one phase that omits it is
+            // 'legacy-floating', which models a record left by 0.7.0 - where
+            // 'floating' was only ever the default nobody had chosen.
+            ...(phase === 'legacy-floating' ? {} : { schema: 2 }),
             legendLocation: phase === 'dock'
                 ? 'dock'
                 : (phase.startsWith('auto-') ? 'auto' : 'floating'),
@@ -471,6 +476,28 @@
                     const rows = mount.querySelectorAll('.lectio-subject-colours-legend__row');
                     if (rows.length !== 2) {
                         throw new Error(`the dock colour key listed ${rows.length} classes instead of 2`);
+                    }
+                }
+
+                // 0.7.0 persisted 'floating' for everyone, so simply changing the
+                // default shipped "prefer the dock" to new installs only. A record
+                // from before the schema marker is upgraded once, and the upgrade
+                // is written back so it does not have to run again.
+                if (phase === 'legacy-floating') {
+                    const stored = JSON.parse(localStorage.getItem('lectioSubjectColours.settings.v1'));
+                    if (stored.legendLocation !== 'auto') {
+                        throw new Error(`a 0.7.0 'floating' record stayed on ${stored.legendLocation} instead of moving to auto`);
+                    }
+                    if (stored.schema !== 2) {
+                        throw new Error('the migrated record was not stamped with its schema, so it would migrate again');
+                    }
+                    if (document.getElementById('lectio-subject-colours-legend')) {
+                        throw new Error('the migrated record still drew its own floating key');
+                    }
+
+                    window.dispatchEvent(new CustomEvent('lectio-manager:discover'));
+                    if (!window.dockRegistrations.get('subject-colours:colour-key')) {
+                        throw new Error('the migrated record did not hand the colour key to the dock');
                     }
                 }
 

@@ -11,9 +11,9 @@ const execFileAsync = promisify(execFile);
 const chromePath = process.env.CHROME_PATH ||
     'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe';
 
-async function runFixture(fixtureName, profilePrefix) {
+async function runFixture(fixtureName, profilePrefix, query = '') {
     const profileDirectory = await mkdtemp(join(tmpdir(), profilePrefix));
-    const fixtureUrl = pathToFileURL(resolve(__dirname, 'fixtures', fixtureName)).href;
+    const fixtureUrl = pathToFileURL(resolve(__dirname, 'fixtures', fixtureName)).href + query;
 
     try {
         const { stdout } = await execFileAsync(chromePath, [
@@ -38,4 +38,13 @@ test('manager dock supports lifecycle, activation, panels, ordering, and placeme
 
 test('manager migrates v1 dock placement and renders the channel as one dropdown', async () => {
     await runFixture('manager-prefs.html', 'lectio-manager-prefs-');
+});
+
+// Nothing else can tell the Manager it is stale, so it reads its own catalogue
+// entry. The notice must appear only for a genuinely newer version behind an
+// install link on this repository's raw host.
+test('manager notices when the catalogue advertises a newer Manager than itself', async () => {
+    for (const phase of ['newer', 'older', 'unapproved', 'missing']) {
+        await runFixture('manager-self-update.html', 'lectio-manager-self-', `?phase=${phase}`);
+    }
 });

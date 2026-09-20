@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Change Radar
 // @namespace    https://github.com/RktRobinhood/Lectio-Scripts
-// @version      0.4.0
+// @version      0.4.1
 // @description  Watches your Lectio timetable for cancellations and schedule changes and keeps a compact recent-change HUD.
 // @author       RktRobinhood
 // @match        https://www.lectio.dk/lectio/*
@@ -20,7 +20,7 @@
     id: 'change-radar',
     aliases: ['schedule-change-radar', 'lectio-change-radar', 'change-log'],
     name: 'Lectio Change Radar',
-    version: '0.4.0',
+    version: '0.4.1',
     channel: 'unstable'
   });
 
@@ -33,6 +33,9 @@
   });
 
   const DISPLAY_MODES = Object.freeze(['auto', 'dock', 'floating']);
+  // Bumped when a stored setting needs rewriting rather than merely
+  // re-defaulting. Schema 2 introduced displayMode: 'auto'.
+  const SETTINGS_SCHEMA = 2;
 
   const DEFAULT_SETTINGS = Object.freeze({
     displayMode: 'auto',
@@ -1502,14 +1505,24 @@
   function loadSettings() {
     try {
       const parsed = JSON.parse(localStorage.getItem(STORAGE.settings) || '{}');
-      return sanitizeSettings(parsed);
+      const settings = sanitizeSettings(parsed);
+
+      // A stored value always beats a changed default, and 0.3.0 stored its own
+      // default of 'floating'. Without rewriting it once, "prefer the dock"
+      // would only ever reach installs that had never saved a setting.
+      if ((Number(parsed?.schema) || 0) < SETTINGS_SCHEMA && settings.displayMode === 'floating') {
+        settings.displayMode = 'auto';
+        saveSettings(settings);
+      }
+
+      return settings;
     } catch (_) {
       return { ...DEFAULT_SETTINGS };
     }
   }
 
   function sanitizeSettings(values) {
-    const out = { ...DEFAULT_SETTINGS };
+    const out = { ...DEFAULT_SETTINGS, schema: SETTINGS_SCHEMA };
     if (DISPLAY_MODES.includes(values?.displayMode)) {
       out.displayMode = values.displayMode;
     }

@@ -1,13 +1,21 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-09-20T12:00:00Z",
+  "generatedAt": "2026-09-20T14:00:00Z",
+  "manager": {
+    "version": "1.18.0",
+    "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/manager/Lectio-Manager.user.js",
+    "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues"
+  },
   "modules": [
     {
       "id": "english-mode",
       "name": "English Mode",
       "description": "Adds a DA / EN switch and translates the Lectio interface into context-aware English.",
       "category": "Interface",
-      "audience": ["student", "teacher"],
+      "audience": [
+        "student",
+        "teacher"
+      ],
       "status": "stable",
       "version": "1.9.2",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-English-Mode.user.js",
@@ -18,7 +26,9 @@
       "name": "Chairs Up",
       "description": "Marks a lesson when it is the last active booking of the day in that room.",
       "category": "Timetable",
-      "audience": ["teacher"],
+      "audience": [
+        "teacher"
+      ],
       "status": "stable",
       "version": "1.1.1",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Chairs-Up.user.js",
@@ -29,7 +39,10 @@
       "name": "Schedule Summary",
       "description": "Collapses the schedule's week information into a compact strip with a hover preview and click-to-expand control.",
       "category": "Timetable",
-      "audience": ["student", "teacher"],
+      "audience": [
+        "student",
+        "teacher"
+      ],
       "status": "experimental",
       "version": "0.2.2",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Schedule-Summary.user.js",
@@ -40,7 +53,10 @@
       "name": "Unread Message Notifications",
       "description": "Shows an unread-message badge beside Beskeder / Messages. Currently limited to Lectio school 223.",
       "category": "Messages",
-      "audience": ["student", "teacher"],
+      "audience": [
+        "student",
+        "teacher"
+      ],
       "status": "stable",
       "version": "0.5.0",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Unread-Message-Notifications.user.js",
@@ -51,7 +67,10 @@
       "name": "Lectio Theming",
       "description": "Gives Lectio a soft, translucent glass shell with 46 built-in colour schemes, each with its own distinct background photo, or derives one from a website or image. Supports your own background picture and hand-picked colours.",
       "category": "Interface",
-      "audience": ["student", "teacher"],
+      "audience": [
+        "student",
+        "teacher"
+      ],
       "status": "experimental",
       "version": "0.18.0",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Theming.user.js",
@@ -62,9 +81,12 @@
       "name": "Subject Colours",
       "description": "Learns which classes are really yours from your own timetable and gives each one its own colour, with a separate muted spectrum for one-off activities like assemblies and meetings. An optional per-class shape marker helps when colour alone is not enough.",
       "category": "Timetable",
-      "audience": ["student", "teacher"],
+      "audience": [
+        "student",
+        "teacher"
+      ],
       "status": "experimental",
-      "version": "0.8.0",
+      "version": "0.8.1",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Subject-Colours.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues"
     }

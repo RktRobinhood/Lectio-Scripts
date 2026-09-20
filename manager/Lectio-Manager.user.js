@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.17.0
+// @version      1.18.0
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules, including their settings and shared dock controls.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
@@ -28,6 +28,11 @@
      * feature code, or touch Tampermonkey's own enable/disable
      * switches. Catalogue fields are rendered as text/links only.
      */
+
+    // Kept in step with the @version header by scripts/check-versions.mjs. The
+    // header is metadata Tampermonkey reads; this is the only copy the running
+    // script can see, and it is what the self-update notice compares.
+    const MANAGER_VERSION = '1.18.0';
 
     const STABLE_CATALOGUE_URL =
         'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/catalogue/modules.json';
@@ -376,8 +381,58 @@
         return {
             schemaVersion: 1,
             generatedAt: isNonEmptyString(parsed.generatedAt) ? parsed.generatedAt : new Date().toISOString(),
+            manager: validateManagerEntry(parsed.manager),
             modules
         };
+    }
+
+    /*
+     * The Manager is not a module - it is in no channel and registers with
+     * nobody - but it is the one script here that cannot tell you it is out of
+     * date. Modules get an "Update available" row because the Manager compares
+     * their registered version against the catalogue; the Manager itself has
+     * only Tampermonkey's own update check, which is off by default and silent
+     * when it is on. So the catalogue carries the Manager's current version too,
+     * and the Manager reads its own entry. Optional: an older catalogue without
+     * it simply means no notice.
+     */
+    function validateManagerEntry(entry) {
+        if (!entry || typeof entry !== 'object') return null;
+
+        const { version, installUrl } = entry;
+
+        if (!isNonEmptyString(version) || !isNonEmptyString(installUrl)) return null;
+        if (!isApprovedInstallUrl(installUrl)) {
+            console.warn(LOG, 'Ignoring manager entry with disallowed installUrl:', installUrl);
+            return null;
+        }
+
+        return { version, installUrl };
+    }
+
+    /*
+     * Shown at the top of the panel when the catalogue advertises a newer
+     * Manager than the one running. It cannot install anything itself - the link
+     * opens the raw userscript, which is what makes Tampermonkey offer its own
+     * install page - so this is a notice, not an updater. Deliberately not
+     * dismissible: unlike the Tampermonkey tip, it goes away by being acted on,
+     * and it only ever appears when there is genuinely something newer.
+     */
+    function renderManagerUpdateNotice() {
+        if (!elements?.selfUpdate) return;
+
+        const entry = catalogue?.manager;
+        const comparison = entry ? compareVersions(MANAGER_VERSION, entry.version) : null;
+
+        if (comparison === null || comparison >= 0) {
+            elements.selfUpdate.hidden = true;
+            return;
+        }
+
+        elements.selfUpdateText.textContent =
+            `Lectio Manager v${entry.version} is available (you have v${MANAGER_VERSION}).`;
+        elements.selfUpdateLink.href = entry.installUrl;
+        elements.selfUpdate.hidden = false;
     }
 
     function isApprovedInstallUrl(value) {
@@ -471,6 +526,9 @@
         return {
             schemaVersion: 1,
             generatedAt: unstableCatalogue.generatedAt || stableCatalogue.generatedAt,
+            // The Manager ships from one place whatever channel is selected, so
+            // its entry always comes from the stable catalogue.
+            manager: stableCatalogue.manager,
             modules: [...byId.values()]
         };
     }
@@ -1229,21 +1287,37 @@
         dockElements.items.style.maxWidth = vertical ? '' : `${available - 12}px`;
     }
 
+    /*
+     * Dock icon house style
+     * ---------------------
+     * One monochrome set, drawn on a 24 grid at stroke-width 2 with round caps
+     * and joins, inheriting the theme through currentColor so the dock recolours
+     * with everything else rather than sitting on top of it as a sticker sheet.
+     *
+     * The shapes are not drawn here. They come from Lucide (ISC) in
+     * assets/icons/ and are inlined by scripts/build-dock-icons.mjs, because a
+     * userscript is one file with no bundler and no runtime fetch. Hand-drawing
+     * them is what produced a palette with hollow rings for paint and a refresh
+     * arrow that swept the wrong way, so the block below is generated - edit the
+     * SVGs or the mapping in that script, never these strings.
+     */
     function dockIconSvg(key) {
         const icons = {
-            mail: '<path d="M3 5h18v14H3z"></path><path d="m3 6 9 7 9-7"></path>',
-            translate: '<path d="M4 5h10M9 3v2c0 5-2 8-6 10"></path><path d="M5 10c2 3 4 4 7 5M14 20l4-10 4 10M15.5 17h5"></path>',
-            chair: '<path d="M6 12h12v5H6zM8 12V7a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v5M7 17v4M17 17v4"></path>',
-            refresh: '<path d="M4 12a8 8 0 0 1 13.7-5.6L20 9M20 4v5h-5"></path><path d="M20 12a8 8 0 0 1-13.7 5.6L4 15M4 20v-5h5"></path>',
-            settings: '<circle cx="12" cy="12" r="3"></circle><path d="M19 13.5v-3l-2-1-.5-1.2.7-2.1-2.1-2.1-2.1.7-1.2-.5-1.9h-3l-1 1.9-1.2.5-2.1-.7-2.1 2.1.7 2.1-.5 1.2-1.9 1v3l1.9 1 .5 1.2-.7 2.1 2.1 2.1 2.1-.7 1.2.5 1 1.9h3l1-1.9 1.2-.5 2.1.7 2.1-2.1-.7-2.1z"></path>',
-            calendar: '<rect x="3" y="5" width="18" height="16" rx="2"></rect><path d="M7 3v4M17 3v4M3 10h18"></path>',
-            warning: '<path d="M12 3 2.5 20h19zM12 9v5M12 17h.01"></path>',
-            info: '<circle cx="12" cy="12" r="9"></circle><path d="M12 11v6M12 7h.01"></path>',
-            bell: '<path d="M6 17h12l-1.5-2V10a4.5 4.5 0 0 0-9 0v5zM10 20h4"></path>',
-            wrench: '<path d="M14 6a4 4 0 0 0-5 5L3 17l4 4 6-6a4 4 0 0 0 5-5l-3 3-3-3z"></path>',
-            palette: '<path d="M12 3a9 9 0 0 0 0 18h1.5a2 2 0 0 0 0-4H12a2 2 0 0 1 0-4h3a6 6 0 0 0 0-12z"></path><circle cx="7.5" cy="10" r="1"></circle><circle cx="9" cy="6.5" r="1"></circle><circle cx="13.5" cy="6" r="1"></circle>',
-            radar: '<circle cx="12" cy="12" r="8"></circle><circle cx="12" cy="12" r="4"></circle><path d="M12 12 17.5 6.5M12 3v2M21 12h-2M12 21v-2M3 12h2"></path>',
-            default: '<circle cx="12" cy="12" r="9"></circle><path d="M12 8v4M12 16h.01"></path>'
+        // --- BEGIN GENERATED ICONS (node scripts/build-dock-icons.mjs) ---
+            mail: '<path d="m22 7-8.991 5.727a2 2 0 0 1-2.009 0L2 7"/><rect x="2" y="4" width="20" height="16" rx="2"/>', // lucide/mail
+            translate: '<path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/>', // lucide/languages
+            chair: '<path d="M19 9V6a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v3"/><path d="M3 16a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5a2 2 0 0 0-4 0v1.5a.5.5 0 0 1-.5.5h-9a.5.5 0 0 1-.5-.5V11a2 2 0 0 0-4 0z"/><path d="M5 18v2"/><path d="M19 18v2"/>', // lucide/armchair
+            refresh: '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>', // lucide/refresh-cw
+            settings: '<path d="M14 17H5"/><path d="M19 7h-9"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/>', // lucide/settings-2
+            calendar: '<path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/>', // lucide/calendar
+            warning: '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>', // lucide/triangle-alert
+            info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>', // lucide/info
+            bell: '<path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/>', // lucide/bell
+            wrench: '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.106-3.105c.32-.322.863-.22.983.218a6 6 0 0 1-8.259 7.057l-7.91 7.91a1 1 0 0 1-2.999-3l7.91-7.91a6 6 0 0 1 7.057-8.259c.438.12.54.662.219.984z"/>', // lucide/wrench
+            palette: '<path d="M12 22a1 1 0 0 1 0-20 10 9 0 0 1 10 9 5 5 0 0 1-5 5h-2.25a1.75 1.75 0 0 0-1.4 2.8l.3.4a1.75 1.75 0 0 1-1.4 2.8z"/><circle cx="13.5" cy="6.5" r="1.15" fill="currentColor"/><circle cx="17.5" cy="10.5" r="1.15" fill="currentColor"/><circle cx="6.5" cy="12.5" r="1.15" fill="currentColor"/><circle cx="8.5" cy="7.5" r="1.15" fill="currentColor"/>', // lucide/palette
+            radar: '<path d="M19.07 4.93A10 10 0 0 0 6.99 3.34"/><path d="M4 6h.01"/><path d="M2.29 9.62A10 10 0 1 0 21.31 8.35"/><path d="M16.24 7.76A6 6 0 1 0 8.23 16.67"/><path d="M12 18h.01"/><path d="M17.99 11.66A6 6 0 0 1 15.77 16.67"/><circle cx="12" cy="12" r="2"/><g class="lectio-manager-dock-sweep"><path d="m13.41 10.59 5.66-5.66"/></g>', // lucide/radar
+            default: '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="1"/>', // lucide/circle-dot
+        // --- END GENERATED ICONS ---
         };
 
         return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">${icons[key] || icons.default}</svg>`;
@@ -1324,6 +1398,10 @@
                     The Manager shows available module updates and opens Tampermonkey's normal confirmation page. To disable, manually check, or remove a script, click the Tampermonkey icon in your browser toolbar and choose <strong>Dashboard</strong>.
                 </div>
                 <div id="lectio-manager-main-view" class="lectio-manager-main-view">
+                    <div class="lectio-manager-self-update" role="status" hidden>
+                        <span class="lectio-manager-self-update-text"></span>
+                        <a class="lectio-manager-self-update-link" target="_blank" rel="noopener noreferrer">Update</a>
+                    </div>
                     <div class="lectio-manager-tip" hidden>
                         <span class="lectio-manager-tip-text">Get automatic updates: open Tampermonkey &rarr; Settings &rarr; enable "Check for updates".</span>
                         <button type="button" class="lectio-manager-tip-dismiss" aria-label="Dismiss tip">&times;</button>
@@ -1607,7 +1685,10 @@
             helpPanel,
             list: root.querySelector('.lectio-manager-list'),
             viewHeading: root.querySelector('.lectio-manager-view-heading'),
-            errorBox: root.querySelector('.lectio-manager-error')
+            errorBox: root.querySelector('.lectio-manager-error'),
+            selfUpdate: root.querySelector('.lectio-manager-self-update'),
+            selfUpdateText: root.querySelector('.lectio-manager-self-update-text'),
+            selfUpdateLink: root.querySelector('.lectio-manager-self-update-link')
         };
 
         syncDockPreferenceControls();
@@ -1708,6 +1789,7 @@
 
         renderNavMenu();
         renderPrimaryTabs();
+        renderManagerUpdateNotice();
 
         const { list, viewHeading } = elements;
         list.innerHTML = '';
@@ -3838,6 +3920,50 @@
                 font-weight: 700;
             }
 
+            /* Warmer than the Tampermonkey tip beside it, because this one is
+               about the Manager being out of date rather than a suggestion. */
+            .lectio-manager-self-update {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                margin: 6px 12px 0;
+                padding: 8px 10px;
+                font-size: 11px;
+                line-height: 1.35;
+                background: #fff6e5;
+                color: #7a4a00;
+                border: 1px solid #f0cf94;
+                border-radius: 8px;
+            }
+
+            .lectio-manager-self-update[hidden] {
+                display: none !important;
+            }
+
+            .lectio-manager-self-update-text {
+                flex: 1;
+                min-width: 0;
+                font-weight: 600;
+            }
+
+            .lectio-manager-self-update-link {
+                flex: none;
+                border: 1px solid #c08324;
+                border-radius: 6px;
+                background: #ffffff;
+                color: #8a5200;
+                padding: 3px 9px;
+                font-weight: 700;
+                text-decoration: none;
+                white-space: nowrap;
+            }
+
+            .lectio-manager-self-update-link:hover,
+            .lectio-manager-self-update-link:focus-visible {
+                background: #8a5200;
+                color: #ffffff;
+            }
+
             .lectio-manager-tip {
                 display: flex;
                 align-items: flex-start;
@@ -4429,14 +4555,40 @@
                 right: 72px;
             }
 
+            /*
+             * Glass, not a white card. Three things make it read as glass and
+             * all of them are needed: a heavily blurred and saturated backdrop
+             * so whatever is behind it stays recognisable as itself, a fill weak
+             * enough to see through, and a bright inner top edge standing in for
+             * a specular highlight on a real bevel. The old 92% fill left it
+             * opaque, which is why it looked like a floating white pill.
+             */
             .lectio-manager-dock-shell {
-                padding: 6px;
-                border: 1px solid color-mix(in srgb, var(--lectio-theme-muted, #d6dde0) 85%, transparent);
-                border-radius: calc((var(--lectio-dock-item-size) / 2) + 7px);
-                background: color-mix(in srgb, var(--lectio-theme-surface, #ffffff) 92%, transparent);
-                box-shadow: 0 5px 18px rgba(0, 0, 0, .18);
-                backdrop-filter: blur(8px);
+                padding: 7px;
+                border: 1px solid rgba(255, 255, 255, .38);
+                border-radius: calc((var(--lectio-dock-item-size) / 2) + 8px);
+                background:
+                    linear-gradient(
+                        155deg,
+                        color-mix(in srgb, var(--lectio-theme-surface, #ffffff) 40%, transparent),
+                        color-mix(in srgb, var(--lectio-theme-surface, #ffffff) 22%, transparent)
+                    );
+                box-shadow:
+                    0 12px 32px rgba(0, 0, 0, .20),
+                    0 2px 8px rgba(0, 0, 0, .10),
+                    inset 0 1px 0 rgba(255, 255, 255, .55),
+                    inset 0 0 0 1px rgba(255, 255, 255, .10);
+                -webkit-backdrop-filter: blur(20px) saturate(175%);
+                backdrop-filter: blur(20px) saturate(175%);
                 transition: transform 150ms ease, opacity 150ms ease;
+            }
+
+            /* Without a backdrop-filter the fill alone is far too faint to sit
+               on a photo, so those browsers get an opaque shell instead. */
+            @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+                .lectio-manager-dock-shell {
+                    background: color-mix(in srgb, var(--lectio-theme-surface, #ffffff) 90%, transparent);
+                }
             }
 
             /* Auto-hide slides the shell off whichever edge it is docked to. */
@@ -4478,6 +4630,9 @@
                 overflow-y: hidden;
             }
 
+            /* The tiles are glass too, but denser than the shell they sit in -
+               roughly two thirds to its third - so they read as objects resting
+               on the panel rather than holes cut out of it. */
             .lectio-manager-dock-item {
                 position: relative;
                 display: flex;
@@ -4487,22 +4642,69 @@
                 align-items: center;
                 justify-content: center;
                 box-sizing: border-box;
-                border: 1px solid var(--lectio-theme-muted, #d6dde0);
+                border: 1px solid rgba(255, 255, 255, .45);
                 border-radius: 50%;
-                background: var(--lectio-theme-surface, #ffffff);
+                background: color-mix(in srgb, var(--lectio-theme-surface, #ffffff) 66%, transparent);
                 color: var(--lectio-theme-accent, #0f6f6f);
                 padding: 0;
                 cursor: pointer;
                 touch-action: none;
+                -webkit-backdrop-filter: blur(6px) saturate(140%);
+                backdrop-filter: blur(6px) saturate(140%);
+                box-shadow:
+                    0 2px 6px rgba(0, 0, 0, .14),
+                    inset 0 1px 0 rgba(255, 255, 255, .6);
+                transform-origin: var(--lectio-dock-grow, center center);
+                transition:
+                    transform 200ms cubic-bezier(.22, .8, .3, 1.1),
+                    background-color 180ms ease,
+                    border-color 180ms ease,
+                    box-shadow 180ms ease;
             }
 
             .lectio-manager-dock-item:hover,
             .lectio-manager-dock-item:focus-visible,
             .lectio-manager-dock-item.is-active {
-                border-color: var(--lectio-theme-accent, #0f6f6f);
-                background: var(--lectio-theme-surface-alt, #e8f3f3);
+                border-color: rgba(255, 255, 255, .72);
+                background: color-mix(in srgb, var(--lectio-theme-surface, #ffffff) 82%, transparent);
                 outline: none;
-                box-shadow: 0 0 0 2px color-mix(in srgb, var(--lectio-theme-accent, #0f6f6f) 22%, transparent);
+                box-shadow:
+                    0 8px 20px rgba(0, 0, 0, .22),
+                    inset 0 1px 0 rgba(255, 255, 255, .75),
+                    0 0 0 2px color-mix(in srgb, var(--lectio-theme-accent, #0f6f6f) 26%, transparent);
+            }
+
+            /*
+             * Dock magnification. The hovered tile grows most and its immediate
+             * neighbours a little, which is the whole of the macOS effect at
+             * this row length. The :has(+ :hover) rule reaches the tile *before*
+             * the hovered one - the sibling combinator only ever looks forward -
+             * so both sides respond without any pointer maths in JS.
+             */
+            .lectio-manager-dock-item:hover,
+            .lectio-manager-dock-item:focus-visible {
+                transform: scale(1.26);
+                z-index: 2;
+            }
+
+            .lectio-manager-dock-item:hover + .lectio-manager-dock-item,
+            .lectio-manager-dock-item:focus-visible + .lectio-manager-dock-item,
+            .lectio-manager-dock-item:has(+ .lectio-manager-dock-item:hover),
+            .lectio-manager-dock-item:has(+ .lectio-manager-dock-item:focus-visible) {
+                transform: scale(1.11);
+                z-index: 1;
+            }
+
+            /* Tiles grow away from the screen edge, never into it. */
+            #lectio-manager-dock-root[data-edge='left'] .lectio-manager-dock-item { --lectio-dock-grow: left center; }
+            #lectio-manager-dock-root[data-edge='right'] .lectio-manager-dock-item { --lectio-dock-grow: right center; }
+            #lectio-manager-dock-root[data-edge='top'] .lectio-manager-dock-item { --lectio-dock-grow: center top; }
+            #lectio-manager-dock-root[data-edge='bottom'] .lectio-manager-dock-item { --lectio-dock-grow: center bottom; }
+
+            /* Dragging owns the transform; magnification must not fight it. */
+            .lectio-manager-dock-item.is-dragging,
+            .lectio-manager-dock-item.is-dragging:hover {
+                transform: none;
             }
 
             .lectio-manager-dock-item.is-dragging {
@@ -4548,12 +4750,54 @@
                 height: calc(var(--lectio-dock-item-size) * .5);
             }
 
+            /* Lucide is drawn for stroke-width 2 on this grid; thinning it to
+               taste is what makes a sourced set look redrawn. Only currentColor
+               is used, so the dock follows the active theme and its own
+               active/warning/error states without any per-icon colour. */
             .lectio-manager-dock-icon svg {
                 fill: none;
                 stroke: currentColor;
-                stroke-width: 1.8;
+                stroke-width: 2;
                 stroke-linecap: round;
                 stroke-linejoin: round;
+                shape-rendering: geometricPrecision;
+            }
+
+            .lectio-manager-dock-sweep {
+                transform-box: view-box;
+                transform-origin: 12px 12px;
+            }
+
+            /* The radar only sweeps while it is being looked at. A dock that
+               animates permanently is a dock you learn to ignore. */
+            .lectio-manager-dock-item:hover .lectio-manager-dock-sweep,
+            .lectio-manager-dock-item:focus-visible .lectio-manager-dock-sweep {
+                animation: lectio-manager-dock-sweep 2.2s linear infinite;
+            }
+
+            @keyframes lectio-manager-dock-sweep {
+                from { transform: rotate(0deg); }
+                to { transform: rotate(360deg); }
+            }
+
+            @media (prefers-reduced-motion: reduce) {
+                .lectio-manager-dock-item {
+                    transition: background-color 180ms ease, border-color 180ms ease;
+                }
+
+                .lectio-manager-dock-item:hover,
+                .lectio-manager-dock-item:focus-visible,
+                .lectio-manager-dock-item:hover + .lectio-manager-dock-item,
+                .lectio-manager-dock-item:focus-visible + .lectio-manager-dock-item,
+                .lectio-manager-dock-item:has(+ .lectio-manager-dock-item:hover),
+                .lectio-manager-dock-item:has(+ .lectio-manager-dock-item:focus-visible) {
+                    transform: none;
+                }
+
+                .lectio-manager-dock-item:hover .lectio-manager-dock-sweep,
+                .lectio-manager-dock-item:focus-visible .lectio-manager-dock-sweep {
+                    animation: none;
+                }
             }
 
             .lectio-manager-dock-badge {
@@ -4582,12 +4826,14 @@
                 position: absolute;
                 z-index: 2;
                 max-width: min(260px, calc(100vw - 100px));
-                border: 1px solid var(--lectio-theme-muted, #d6dde0);
-                border-radius: 6px;
-                background: var(--lectio-theme-text, #10201e);
+                border: 1px solid rgba(255, 255, 255, .16);
+                border-radius: 7px;
+                background: color-mix(in srgb, var(--lectio-theme-text, #10201e) 82%, transparent);
                 color: var(--lectio-theme-surface, #ffffff);
-                box-shadow: 0 3px 10px rgba(0, 0, 0, .2);
-                padding: 5px 7px;
+                box-shadow: 0 6px 18px rgba(0, 0, 0, .28);
+                -webkit-backdrop-filter: blur(12px) saturate(160%);
+                backdrop-filter: blur(12px) saturate(160%);
+                padding: 5px 8px;
                 font-size: 10px;
                 line-height: 1.25;
                 pointer-events: none;
@@ -4625,10 +4871,14 @@
                 max-height: min(76vh, 560px);
                 box-sizing: border-box;
                 overflow: auto;
-                border: 1px solid var(--lectio-theme-muted, #d6dde0);
-                border-radius: 10px;
-                background: var(--lectio-theme-surface, #ffffff);
-                box-shadow: 0 10px 28px rgba(0, 0, 0, .22);
+                border: 1px solid rgba(255, 255, 255, .42);
+                border-radius: 12px;
+                background: color-mix(in srgb, var(--lectio-theme-surface, #ffffff) 88%, transparent);
+                box-shadow:
+                    0 14px 36px rgba(0, 0, 0, .24),
+                    inset 0 1px 0 rgba(255, 255, 255, .6);
+                -webkit-backdrop-filter: blur(20px) saturate(175%);
+                backdrop-filter: blur(20px) saturate(175%);
                 padding: 14px;
             }
 

@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio Manager self-update fixture</title>
+</head>
+<body>
+    <script>
+        // The Manager is the one script here that cannot be told it is stale by
+        // anything else: modules get an "Update available" row because the
+        // Manager compares their registered version against the catalogue, but
+        // nothing performs that comparison for the Manager. So the catalogue
+        // carries a manager entry and the Manager reads its own.
+        //
+        // 'newer' advertises a version past anything this file will ever ship;
+        // 'older' one behind anything it has ever shipped; 'unapproved' points
+        // the install link somewhere other than this repository's raw host; and
+        // 'missing' is a catalogue from before the manager entry existed.
+        const phase = new URLSearchParams(location.search).get('phase') || 'newer';
+
+        const managerEntry = {
+            newer: {
+                version: '99.0.0',
+                installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/manager/Lectio-Manager.user.js'
+            },
+            older: {
+                version: '0.0.1',
+                installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/manager/Lectio-Manager.user.js'
+            },
+            unapproved: {
+                version: '99.0.0',
+                installUrl: 'https://example.invalid/Lectio-Manager.user.js'
+            },
+            missing: undefined
+        }[phase];
+
+        const catalogue = {
+            schemaVersion: 1,
+            generatedAt: '2026-09-20T00:00:00.000Z',
+            manager: managerEntry,
+            modules: [{
+                id: 'example',
+                name: 'Example',
+                description: 'A module, so the catalogue is valid.',
+                version: '1.0.0',
+                installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Chairs-Up.user.js'
+            }]
+        };
+
+        const storage = new Map([
+            ['lectioManager.catalogue.v1', JSON.stringify(catalogue)],
+            ['lectioManager.lastRefresh.v1', Date.now()],
+            ['lectioManager.updateTipDismissed.v1', true]
+        ]);
+
+        window.GM_getValue = (key, fallback) => storage.has(key) ? storage.get(key) : fallback;
+        window.GM_setValue = (key, value) => storage.set(key, value);
+        window.GM_xmlhttpRequest = () => {};
+    </script>
+    <script src="../../manager/Lectio-Manager.user.js"></script>
+    <script>
+        function assert(condition, message) {
+            if (!condition) throw new Error(message);
+        }
+
+        window.addEventListener('load', () => {
+            try {
+                document.querySelector('#lectio-manager-toggle').click();
+
+                const notice = document.querySelector('.lectio-manager-self-update');
+                const text = document.querySelector('.lectio-manager-self-update-text');
+                const link = document.querySelector('.lectio-manager-self-update-link');
+
+                assert(notice, 'the Manager has no self-update notice at all');
+
+                if (phase === 'newer') {
+                    assert(!notice.hidden, 'a newer Manager in the catalogue raised no notice');
+                    assert(/99\.0\.0/.test(text.textContent), `the notice did not name the newer version: ${text.textContent}`);
+                    assert(
+                        link.getAttribute('href') === 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/manager/Lectio-Manager.user.js',
+                        `the notice linked somewhere unexpected: ${link.getAttribute('href')}`
+                    );
+                    // The running version has to appear too, or there is no way
+                    // to tell whether the notice is stale.
+                    assert(/you have v\d+\.\d+\.\d+/.test(text.textContent), `the notice did not name the running version: ${text.textContent}`);
+                }
+
+                // An entry whose install link is not this repository's raw host
+                // is dropped by the same rule that guards module installs, so no
+                // notice can point a person at someone else's userscript.
+                if (phase === 'unapproved' || phase === 'missing' || phase === 'older') {
+                    assert(notice.hidden, `phase ${phase} still raised an update notice`);
+                }
+
+                document.documentElement.dataset.testResult = 'pass';
+            } catch (error) {
+                document.documentElement.dataset.testResult = `fail: ${error.message}`;
+            }
+        });
+    </script>
+</body>
+</html>

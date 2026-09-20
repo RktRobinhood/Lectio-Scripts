@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Subject Colours
 // @namespace    https://www.lectio.dk/
-// @version      0.8.0
+// @version      0.8.1
 // @description  Learns which classes are actually yours from your own timetable and gives each one its own colour, with a separate muted spectrum for one-off activities like assemblies and meetings.
 // @match        https://www.lectio.dk/lectio/*
 // @grant        none
@@ -15,7 +15,7 @@
 
     const MODULE_ID = 'subject-colours';
     const MODULE_NAME = 'Lectio - Subject Colours';
-    const MODULE_VERSION = '0.8.0';
+    const MODULE_VERSION = '0.8.1';
     const LOG = '[Lectio Subject Colours]';
     const STYLE_ID = 'lectio-subject-colours-styles';
 
@@ -50,6 +50,9 @@
     const HIGHLIGHT_CLASS = 'lectio-subject-colours-highlight';
 
     const SETTINGS_KEY = 'lectioSubjectColours.settings.v1';
+    // Bumped when a stored setting needs rewriting rather than merely
+    // re-defaulting. Schema 2 introduced legendLocation: 'auto'.
+    const SETTINGS_SCHEMA = 2;
     // Learned schedule data is scoped per school: the same browser can be
     // signed in to more than one Lectio installation, and a hold id from one
     // means nothing in another.
@@ -150,7 +153,11 @@
     const TOOLTIP_DATE_PATTERN = /(\d{1,2})\/(\d{1,2})-(\d{4})(?:\s+(\d{1,2}):(\d{2}))?/;
 
     const lifecycle = new AbortController();
+    let settingsMigrated = false;
     let settings = loadSettings();
+    // Write the migrated value back, so the upgrade happens once rather than on
+    // every page load, and so a later deliberate 'floating' is left alone.
+    if (settingsMigrated) saveSettings();
     let store = loadStore();
     let theme = readTheme();
     // A page can load with the lock already on from a previous session (or
@@ -181,6 +188,19 @@
         const saved = readJson(SETTINGS_KEY, {});
         const overrides = {};
 
+        // Changing DEFAULT_SETTINGS never reaches an existing install: 0.7.0
+        // persisted its own default, 'floating', for everyone who ever opened
+        // the settings panel, and a stored value always wins over a default.
+        // Without this, "prefer the dock" shipped to new installs only.
+        let legendLocation = hasOption(LEGEND_LOCATION_OPTIONS, saved.legendLocation)
+            ? saved.legendLocation
+            : DEFAULT_SETTINGS.legendLocation;
+
+        if ((Number(saved.schema) || 0) < 2 && legendLocation === 'floating') {
+            legendLocation = 'auto';
+            settingsMigrated = true;
+        }
+
         if (saved.overrides && typeof saved.overrides === 'object') {
             for (const [key, value] of Object.entries(saved.overrides)) {
                 if (isHexColour(value)) overrides[key] = String(value).toLowerCase();
@@ -201,9 +221,8 @@
             showLegend: typeof saved.showLegend === 'boolean'
                 ? saved.showLegend
                 : DEFAULT_SETTINGS.showLegend,
-            legendLocation: hasOption(LEGEND_LOCATION_OPTIONS, saved.legendLocation)
-                ? saved.legendLocation
-                : DEFAULT_SETTINGS.legendLocation,
+            schema: SETTINGS_SCHEMA,
+            legendLocation,
             patternMarkers: typeof saved.patternMarkers === 'boolean'
                 ? saved.patternMarkers
                 : DEFAULT_SETTINGS.patternMarkers,

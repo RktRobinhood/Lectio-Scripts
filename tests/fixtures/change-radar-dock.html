@@ -36,6 +36,20 @@
         window.addEventListener('lectio-module:register', (event) => {
             window.registrations.set(event.detail.id, event.detail);
         });
+
+        // A settings record exactly as 0.3.0 left it: 'floating' was that
+        // version's default, written out for everyone, and with no schema
+        // marker. A stored value beats a changed default, so without a one-time
+        // migration the 0.4.0 dock default would never reach an existing
+        // install - which is precisely what happened in the field.
+        // The fixture is served from /lectio/223/ and carries no laererid or
+        // elevid, so the module scopes its storage to school 223, current-user.
+        window.radarSettingsKey = 'lectioChangeRadar.v1.223.current-user.settings';
+        localStorage.setItem(window.radarSettingsKey, JSON.stringify({
+            displayMode: 'floating',
+            pollMinutes: 10,
+            weeksAhead: 1
+        }));
     </script>
     <script src="/manager/Lectio-Manager.user.js"></script>
     <script src="/modules-unstable/Lectio-Change-Radar.user.js"></script>
@@ -56,7 +70,14 @@
                 assert(registration, 'Change Radar did not register with the Manager');
                 assert(registration.settingsSchema.find((item) => item.key === 'displayMode')?.type === 'select', 'Radar location was not exposed as a select setting');
                 assert(registration.settingsSchema.find((item) => item.key === 'hoverOpen')?.type === 'toggle', 'Radar toggle settings did not use the Manager schema');
-                assert(registration.currentValues.displayMode === 'auto', `Radar location did not default to automatic: ${registration.currentValues.displayMode}`);
+                // The stored record says 'floating'; reaching automatic here is
+                // the one-time migration off 0.3.0's persisted default.
+                assert(registration.currentValues.displayMode === 'auto', `Radar location did not reach automatic: ${registration.currentValues.displayMode}`);
+
+                const migrated = JSON.parse(localStorage.getItem(window.radarSettingsKey));
+                assert(migrated.displayMode === 'auto', `the migration was not written back: ${migrated.displayMode}`);
+                assert(migrated.schema === 2, 'the migrated record was not stamped with its schema, so it would migrate again');
+                assert(migrated.pollMinutes === 10, 'the migration discarded an unrelated stored setting');
 
                 // The Manager is installed on this page, so automatic mode puts
                 // the radar in the shared dock rather than floating on the page.

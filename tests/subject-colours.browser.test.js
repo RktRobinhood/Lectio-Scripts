@@ -85,6 +85,11 @@ test('subject colours are learned from a repeating timetable and keep their own 
         const autoFloating = await runFixture('auto-floating', { virtualTimeMs: 12000 });
         assert.match(autoFloating, /data-test-result="pass"/, autoFloating);
 
+        // An install carrying 0.7.0's persisted 'floating' is moved to automatic
+        // once, so the dock default reaches people who already had the module.
+        const legacyFloating = await runFixture('legacy-floating');
+        assert.match(legacyFloating, /data-test-result="pass"/, legacyFloating);
+
         // Turning the key off in settings removes it from the page entirely.
         const legendOff = await runFixture('legend-off');
         assert.match(legendOff, /data-test-result="pass"/, legendOff);

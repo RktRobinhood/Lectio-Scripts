@@ -45,7 +45,7 @@ function headerVersion(source) {
 // frozen MODULE object as `version: '…'`. Both are the number the module reports
 // at registration, which is what the Manager compares against the catalogue.
 function registeredVersion(source) {
-    return source.match(/(?:MODULE_VERSION\s*=|version:)\s*'([\d][^']*)'/)?.[1] ?? null;
+    return source.match(/(?:MANAGER_VERSION\s*=|MODULE_VERSION\s*=|version:)\s*'([\d][^']*)'/)?.[1] ?? null;
 }
 
 function moduleId(source) {
@@ -65,6 +65,11 @@ const catalogued = new Map([
     ...readCatalogue('modules-unstable/modules.json')
 ]);
 
+// The Manager's own entry, which drives its self-update notice. A stale one here
+// fails silently: the notice simply never appears, and the Manager goes on
+// looking current forever.
+const managerEntry = JSON.parse(readFileSync('catalogue/modules.json', 'utf8')).manager ?? null;
+
 const userscripts = [
     ...readdirSync('modules').map((name) => join('modules', name)),
     ...readdirSync('modules-unstable').map((name) => join('modules-unstable', name)),
@@ -82,10 +87,12 @@ for (const path of userscripts) {
 
     if (!header) problems.push(`${path}: no @version in the userscript header`);
 
-    // The Manager is not a module: it never registers itself, and it is not in
-    // any catalogue. Tampermonkey's own update check is what ships it.
-    if (!registered && !isManager) {
-        problems.push(`${path}: could not find the version it reports at registration`);
+    if (!registered) {
+        problems.push(
+            isManager
+                ? `${path}: could not find its MANAGER_VERSION constant`
+                : `${path}: could not find the version it reports at registration`
+        );
     }
 
     if (header && registered && header !== registered) {
@@ -95,7 +102,19 @@ for (const path of userscripts) {
         );
     }
 
-    if (!isManager) {
+    if (isManager) {
+        if (!managerEntry) {
+            problems.push(
+                'catalogue/modules.json: has no "manager" entry, so the Manager can never ' +
+                'tell anyone it is out of date'
+            );
+        } else if (managerEntry.version !== header) {
+            problems.push(
+                `${path}: @version is ${header} but catalogue/modules.json's manager entry says ` +
+                `${managerEntry.version} - the self-update notice compares against that entry`
+            );
+        }
+    } else {
         if (!id) {
             problems.push(`${path}: could not find its module id`);
         } else {
