@@ -1,0 +1,482 @@
+<!doctype html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio Manager boot integrity fixture</title>
+</head>
+<body>
+    <script>
+        /*
+         * BOOT INTEGRITY (issue #49)
+         * ==========================
+         *
+         * The Manager has shipped the same defect three times - 1.21.0, 1.25.0
+         * (#32) and 1.27.0-in-progress (#30). Each time a module-scope const was
+         * declared below the point where init() is called. Tampermonkey injects
+         * at document-idle, so readyState is never 'loading' on a real install
+         * and init() runs during the file's own top-level evaluation, inside
+         * that const's temporal dead zone. The ReferenceError lands in one of
+         * the Manager's many catch blocks - several of which are deliberately
+         * silent - and the Manager carries on, degraded, with nothing on the
+         * console. CI and the whole local suite passed all three.
+         *
+         * manager-late-inject.html is the sibling of this file and is kept. It
+         * is the *regression* test: it names the three bugs and asserts the
+         * three specific things that broke. It has been strengthened twice,
+         * reactively, once per bug - which is the ratchet #49 exists to end. It
+         * is not extended a third time here, deliberately, for three reasons.
+         *
+         *   1. Different contract. That fixture asks "did these three things
+         *      survive?". This one asks "did boot do anything wrong at all?" -
+         *      no console output, no network, no stored value replaced, and
+         *      every subsystem holding what was stored for it rather than a
+         *      default. A general invariant living in a file of specific ones
+         *      is easy to weaken by accident while editing a specific one.
+         *   2. Incompatible setup. The general assertions need storage that is
+         *      complete and entirely valid - both catalogues, both refresh
+         *      stamps, an installed registry, a problem log and its seen
+         *      marker, an updates-seen signature. The late-inject fixture
+         *      deliberately has none of that, and giving it some would change
+         *      what its existing assertions mean.
+         *   3. Two tests fail differently. If someone rewrites this one badly,
+         *      the historical one still bites, and the other way round.
+         *
+         * WHY THIS CATCHES A SWALLOWED ERROR
+         * ----------------------------------
+         * A caught exception cannot be observed directly from outside the
+         * script, so it is caught four ways at once, none of which needs to
+         * know what broke:
+         *
+         *   - no console.warn or console.error during boot, at all. The catch
+         *     blocks that do say something say it there.
+         *   - no GM_xmlhttpRequest during boot. Both caches are stored fresh,
+         *     so a Manager that reaches the network has thrown its cache away.
+         *     That is exactly #32, and it is silent to everything else.
+         *   - no stored value replaced. Boot reads; the only key it may
+         *     legitimately write is the installed registry, which Discovery
+         *     updates. This is the damage #30 did on the next save.
+         *   - every subsystem observably holding its *stored* state, never a
+         *     default. A silent catch that falls back is the shape with no
+         *     console output at all (there are a dozen `catch (_) {}` in the
+         *     file), so nothing but the end state can see it.
+         *
+         * Every stored value below is deliberately different from the Manager's
+         * own default, so falling back to a default is always visible.
+         */
+
+        const now = Date.now();
+        const RAW = 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main';
+
+        // A stable catalogue carrying every optional field a Manager reads, so
+        // every per-field helper in validateCatalogue is exercised during the
+        // one moment that matters - and a second, bare entry so the defaults
+        // those helpers fall back to are exercised too.
+        const stableCatalogue = {
+            schemaVersion: 1,
+            generatedAt: '2026-09-20T00:00:00.000Z',
+            manager: { version: '1.0.0', installUrl: `${RAW}/manager/Lectio-Manager.user.js` },
+            modules: [
+                {
+                    id: 'boot-alpha',
+                    name: 'Boot Alpha',
+                    description: 'A cached entry with every optional field a Manager reads.',
+                    category: 'Interface',
+                    audience: ['student', 'teacher'],
+                    aliases: ['boot-alpha-legacy'],
+                    status: 'stable',
+                    version: '2.0.0',
+                    changelog: 'Stable line for Boot Alpha.',
+                    installUrl: `${RAW}/modules/Lectio-Boot-Alpha.user.js`,
+                    supportUrl: 'https://github.com/RktRobinhood/Lectio-Scripts/issues',
+                    i18n: {
+                        da: {
+                            name: 'Opstart Alfa',
+                            description: 'Dansk beskrivelse af Boot Alpha.',
+                            changelog: 'Dansk ændringstekst.'
+                        }
+                    }
+                },
+                {
+                    id: 'boot-beta',
+                    name: 'Boot Beta',
+                    description: 'A cached entry with nothing optional at all.',
+                    version: '1.4.0',
+                    installUrl: `${RAW}/modules/Lectio-Boot-Beta.user.js`
+                },
+                // Installed, on the stable line, not running here: the entry
+                // whose Danish name is read straight off the stable cache.
+                {
+                    id: 'boot-gamma',
+                    name: 'Boot Gamma',
+                    description: 'A stable entry that is installed but not running on this page.',
+                    category: 'Timetable',
+                    audience: ['teacher'],
+                    status: 'stable',
+                    version: '1.2.0',
+                    installUrl: `${RAW}/modules/Lectio-Boot-Gamma.user.js`,
+                    i18n: { da: { name: 'Opstart Gamma', description: 'Dansk beskrivelse af Boot Gamma.' } }
+                }
+            ]
+        };
+
+        // The Experimental overlay, ahead of stable, so the stored release
+        // channel has a visible consequence: a Manager that lost its channel
+        // would offer 2.0.0 instead of 2.1.0.
+        const unstableCatalogue = {
+            schemaVersion: 1,
+            generatedAt: '2026-09-20T00:00:00.000Z',
+            modules: [
+                {
+                    id: 'boot-alpha',
+                    name: 'Boot Alpha',
+                    description: 'The Experimental copy, one bump ahead.',
+                    category: 'Interface',
+                    status: 'unstable',
+                    version: '2.1.0',
+                    changelog: 'Experimental line for Boot Alpha.',
+                    installUrl: `${RAW}/modules-unstable/Lectio-Boot-Alpha.user.js`,
+                    i18n: { da: { name: 'Opstart Alfa (forsøg)', description: 'Dansk beskrivelse af forsøgsudgaven.' } }
+                }
+            ]
+        };
+
+        /*
+         * A registry holding a module that is running here at an older version
+         * than the channel offers, and one that is not in either catalogue at
+         * all. The second is the case a Manager that quietly reset its registry
+         * would lose without any other symptom.
+         */
+        const installedRegistry = {
+            'boot-alpha': { name: 'Boot Alpha', version: '2.0.0', lastSeenAt: now - 86400000 },
+            'boot-gamma': { name: 'Boot Gamma', version: '1.2.0', lastSeenAt: now - 43200000 },
+            'boot-gone': { name: 'Boot Gone', version: '0.3.0', lastSeenAt: now - 172800000 }
+        };
+
+        // A drift report from a module, older than the log's own seen marker's
+        // predecessor: unseen, so the gear has to carry the mark for it.
+        const problemLog = [
+            { at: now - 60000, kind: 'drift', moduleId: 'boot-alpha', code: 'lesson-blocks', found: 0, message: '', where: 'other', count: 2 },
+            { at: now - 30000, kind: 'notice', moduleId: 'boot-alpha', code: 'cache-rebuilt', found: null, message: '', where: 'other', count: 1 }
+        ];
+
+        /*
+         * A dock the user has moved, resized, faded and set to hide itself, on
+         * the opposite edge from the default and with a deliberate item order.
+         * Every one of these differs from defaultDockPreferences(), so the
+         * silent fallback #30 shipped is visible in all of them.
+         */
+        const storedDock = {
+            version: 2,
+            order: ['boot-alpha:second', 'boot-alpha:first'],
+            edge: 'bottom',
+            align: 'start',
+            sizeMode: 'large',
+            autoFit: false,
+            autoHide: true,
+            shellOpacity: 12,
+            itemOpacity: 88
+        };
+
+        /*
+         * The updates-seen signature for exactly the update that is waiting.
+         * The gear must therefore stay unmarked for updates - which it can only
+         * do by having read this. A Manager that lost the marker falls back to
+         * the empty string and nags.
+         */
+        const initialStorage = {
+            'lectioManager.catalogue.v1': JSON.stringify(stableCatalogue),
+            'lectioManager.catalogue.unstable.v1': JSON.stringify(unstableCatalogue),
+            'lectioManager.lastRefresh.v1': now,
+            'lectioManager.lastRefresh.unstable.v1': now,
+            'lectioManager.releaseChannel.v1': 'unstable',
+            'lectioManager.language.v1': 'da',
+            'lectioManager.view.v1': 'all',
+            'lectioManager.sortMode.v1': 'name',
+            'lectioManager.updateTipDismissed.v1': true,
+            'lectioManager.installed.v1': JSON.stringify(installedRegistry),
+            'lectioManager.dock.v1': JSON.stringify(storedDock),
+            'lectioManager.log.v1': JSON.stringify(problemLog),
+            'lectioManager.logSeen.v1': now - 3600000,
+            'lectioManager.updatesSeen.v1': 'boot-alpha@2.1.0'
+        };
+
+        const storage = new Map(Object.entries(initialStorage));
+        window.storageWrites = [];
+
+        window.GM_getValue = (key, fallback) => (storage.has(key) ? storage.get(key) : fallback);
+        window.GM_setValue = (key, value) => {
+            window.storageWrites.push(key);
+            storage.set(key, value);
+        };
+
+        // Never answered on purpose. Boot must not reach here at all: both
+        // caches are fresh, so a request is proof the cache was discarded.
+        window.networkRequests = [];
+        window.GM_xmlhttpRequest = (options) => {
+            window.networkRequests.push(String(options && options.url));
+        };
+
+        window.bootErrors = [];
+        window.addEventListener('error', (event) => window.bootErrors.push(String(event.message)));
+        window.bootRejections = [];
+        window.addEventListener('unhandledrejection',
+            (event) => window.bootRejections.push(String(event.reason)));
+
+        /*
+         * The console is the net for every catch that says something. It is
+         * watched from before the Manager is injected until after the panel has
+         * been opened, and anything at all in it is a failure - the Manager
+         * given complete, valid, current state has nothing to complain about.
+         */
+        window.consoleNoise = [];
+        for (const level of ['warn', 'error']) {
+            const native = console[level].bind(console);
+            console[level] = (...args) => {
+                window.consoleNoise.push(`${level}: ${args.map(String).join(' ')}`);
+                native(...args);
+            };
+        }
+
+        /*
+         * A module that answers Discovery while the Manager is still evaluating
+         * its own file. init() calls requestDiscovery(), so the registration
+         * path, the settings schema, the storage declaration and the request
+         * slot are all read at exactly the moment the three historical bugs
+         * struck: during top-level evaluation, with the rest of the file still
+         * a dead zone.
+         */
+        window.slotAnswers = [];
+        window.addEventListener('lectio-manager:slot:wait',
+            (event) => window.slotAnswers.push(['wait', event.detail]));
+        window.addEventListener('lectio-manager:slot:grant',
+            (event) => window.slotAnswers.push(['grant', event.detail]));
+
+        window.settingEvents = [];
+        window.addEventListener('lectio-manager:set-setting',
+            (event) => window.settingEvents.push(`${event.detail.key}=${event.detail.value}`));
+
+        window.discoveries = 0;
+        window.addEventListener('lectio-manager:discover', () => {
+            window.discoveries += 1;
+
+            window.dispatchEvent(new CustomEvent('lectio-manager:slot:request', {
+                detail: { moduleId: 'boot-alpha', requestId: 'boot-r1' }
+            }));
+
+            // One control of every type the Manager renders, so a schema read
+            // during evaluation exercises every branch of the settings seam.
+            window.dispatchEvent(new CustomEvent('lectio-module:register', {
+                detail: {
+                    id: 'boot-alpha',
+                    name: 'Boot Alpha',
+                    version: '2.0.0',
+                    settingsSchema: [
+                        { key: 'enabled', type: 'toggle', label: 'Enabled', section: 'General', value: true },
+                        { key: 'density', type: 'select', label: 'Density', section: 'General', options: [
+                            { value: 'compact', label: 'Compact' },
+                            { value: 'comfortable', label: 'Comfortable' }
+                        ], previewOnHover: true },
+                        { key: 'scale', type: 'range', label: 'Scale', min: 50, max: 200, step: 10 },
+                        { key: 'nickname', type: 'text', label: 'Nickname' },
+                        { key: 'accent', type: 'color', label: 'Accent' },
+                        { key: 'relearn', type: 'button', label: 'Relearn' }
+                    ],
+                    currentValues: {
+                        enabled: false,
+                        density: 'comfortable',
+                        scale: 130,
+                        nickname: 'Alfa',
+                        accent: '#123456'
+                    },
+                    storage: [
+                        { key: 'lectioBootAlpha.settings.v1', kind: 'setting', label: { en: 'Settings', da: 'Indstillinger' } },
+                        { prefix: 'lectioBootAlpha.cache.v1.', kind: 'cache', prunable: true, label: 'Cache' }
+                    ]
+                }
+            }));
+        });
+
+        function assert(condition, message) {
+            if (!condition) throw new Error(message);
+        }
+
+        window.addEventListener('load', () => {
+            assert(document.readyState !== 'loading', 'Test setup injected the Manager too early');
+
+            const script = document.createElement('script');
+            script.src = '../../manager/Lectio-Manager.user.js';
+            script.onload = () => setTimeout(() => {
+                try {
+                    check();
+                    document.documentElement.dataset.testResult = 'pass';
+                } catch (error) {
+                    document.documentElement.dataset.testResult = `fail: ${error.message}`;
+                }
+            }, 300);
+
+            document.head.appendChild(script);
+        });
+
+        function check() {
+            // ---- 1. nothing raised, nothing said -----------------------
+            assert(window.bootErrors.length === 0,
+                `The Manager threw while booting: ${window.bootErrors.join(' | ')}`);
+            assert(window.bootRejections.length === 0,
+                `The Manager left a rejection unhandled while booting: ${window.bootRejections.join(' | ')}`);
+
+            const bootNoise = window.consoleNoise.slice();
+            assert(bootNoise.length === 0,
+                'The Manager complained on the console while booting with complete, valid, '
+                + `current stored state - which is what a caught exception looks like: ${bootNoise.join(' | ')}`);
+
+            // ---- 2. it did not go to the network -----------------------
+            assert(window.networkRequests.length === 0,
+                'The Manager fetched a catalogue while booting even though both caches were '
+                + `stored fresh - it threw its cache away: ${window.networkRequests.join(' | ')}`);
+
+            // ---- 3. it read; it did not overwrite ----------------------
+            // Discovery legitimately updates the installed registry. Every
+            // other key must come out of boot exactly as it went in.
+            for (const [key, value] of Object.entries(initialStorage)) {
+                if (key === 'lectioManager.installed.v1') continue;
+
+                assert(String(storage.get(key)) === String(value),
+                    `Boot replaced a stored value it should only have read (${key}): `
+                    + `${String(storage.get(key))}`);
+            }
+
+            // ---- 4. every subsystem holds its stored state -------------
+            const toggle = document.querySelector('#lectio-manager-toggle');
+            assert(toggle, 'The Manager never built its button');
+
+            // Language
+            assert(document.documentElement.dataset.lectioLanguage === 'da',
+                `The stored language was lost while booting: ${document.documentElement.dataset.lectioLanguage}`);
+
+            // Problem log and its seen marker: one unseen module-attributed
+            // entry, so the gear carries the mark.
+            assert(toggle.classList.contains('has-problems'),
+                'The stored problem log or its seen marker was lost while booting - '
+                + 'the gear shows nothing waiting');
+            const storedLog = JSON.parse(storage.get('lectioManager.log.v1'));
+            assert(storedLog.length === 2 && storedLog[0].code === 'lesson-blocks',
+                'The stored problem log did not survive boot');
+
+            // Updates-seen marker: an update is genuinely waiting, and this
+            // browser has already seen exactly it, so the gear stays unmarked.
+            assert(!('updateCount' in toggle.dataset),
+                `The stored updates-seen marker was lost while booting, so the gear nags about `
+                + `an update this browser has already been shown: ${toggle.dataset.updateCount}`);
+
+            // Installed registry: the live registration refreshed its own row,
+            // and the module that is not in either catalogue is still there.
+            const registry = JSON.parse(storage.get('lectioManager.installed.v1'));
+            assert(registry['boot-gone'] && registry['boot-gone'].version === '0.3.0',
+                'Boot lost a module from the installed registry');
+            assert(registry['boot-alpha'] && registry['boot-alpha'].version === '2.0.0',
+                'A module registering during the Manager\'s own evaluation was dropped');
+
+            // Request slots: answered from the boot block, during evaluation.
+            assert(window.slotAnswers.some(([kind, detail]) =>
+                kind === 'grant' && detail
+                && detail.moduleId === 'boot-alpha' && detail.requestId === 'boot-r1'),
+                'A slot requested during the Manager\'s own evaluation went unanswered: '
+                + JSON.stringify(window.slotAnswers));
+
+            // Dock preferences: every field, all of them non-default.
+            const dock = document.querySelector('#lectio-manager-dock-root');
+            assert(dock, 'The Manager never built its dock');
+            assert(dock.dataset.edge === 'bottom',
+                `The stored dock edge was replaced by the default: ${dock.dataset.edge}`);
+            assert(dock.dataset.align === 'start',
+                `The stored dock alignment was replaced by the default: ${dock.dataset.align}`);
+            assert(dock.dataset.orientation === 'horizontal',
+                `A bottom-edge dock did not become a row: ${dock.dataset.orientation}`);
+            assert(dock.classList.contains('is-auto-hide'),
+                'The stored auto-hide preference was replaced by the default');
+            assert(dock.style.getPropertyValue('--lectio-dock-shell-fill') === '12%',
+                'The stored dock fill was replaced by the default: '
+                + dock.style.getPropertyValue('--lectio-dock-shell-fill'));
+            assert(dock.style.getPropertyValue('--lectio-dock-item-fill') === '88%',
+                'The stored icon fill was replaced by the default: '
+                + dock.style.getPropertyValue('--lectio-dock-item-fill'));
+
+            // The stored order, which is the reverse of the order these two
+            // arrive in. Registered after the assertions above so nothing
+            // written by a dock render can colour them.
+            for (const itemId of ['first', 'second']) {
+                window.dispatchEvent(new CustomEvent('lectio-manager:dock:register', {
+                    detail: {
+                        moduleId: 'boot-alpha', itemId, type: 'action',
+                        icon: 'info', label: `Item ${itemId}`
+                    }
+                }));
+            }
+            assert(!dock.hidden, 'A dock built during a late boot never became visible');
+            const dockOrder = [...dock.querySelectorAll('[data-dock-key]')]
+                .map((element) => element.dataset.dockKey);
+            assert(dockOrder.join(',') === 'boot-alpha:second,boot-alpha:first',
+                `The stored dock order was lost while booting: ${dockOrder.join(',')}`);
+
+            // Release channel: the Experimental overlay is one bump ahead, so
+            // the channel is only honoured if 2.1.0 is what is offered.
+            toggle.click();
+            const panel = document.querySelector('#lectio-manager-panel');
+            assert(panel && !panel.hasAttribute('hidden'), 'The panel did not open');
+
+            const channel = document.querySelector('.lectio-manager-channel-select');
+            assert(!channel || channel.value === 'unstable',
+                `The stored release channel was lost while booting: ${channel && channel.value}`);
+
+            // View and sort mode, read at boot and only visible now.
+            const allTab = document.querySelector('[data-primary-view="all"]');
+            assert(allTab && allTab.getAttribute('aria-selected') === 'true',
+                'The stored view was replaced by the default when the Manager booted');
+            const sortByName = document.querySelector('.lectio-manager-sort [data-sort="name"]');
+            assert(sortByName && sortByName.classList.contains('is-active'),
+                'The stored sort mode was replaced by the default when the Manager booted');
+
+            // The cached catalogue survived validation during a late boot. The
+            // Available view lists what is not installed, so the bare entry is
+            // the one visible from the stored view.
+            const available = [...document.querySelectorAll('.lectio-manager-card-name')]
+                .map((element) => element.textContent.trim());
+            assert(available.includes('Boot Beta'),
+                `A cached entry with no optional fields did not survive a late boot: ${available.join(', ')}`);
+
+            // Installed, where the rich entry and its Danish translation are.
+            document.querySelector('[data-primary-view="installed"]').click();
+            const installedNames = [...document.querySelectorAll('.lectio-manager-card-name')]
+                .map((element) => element.textContent.trim());
+            assert(installedNames.includes('Opstart Gamma'),
+                `The stable cache's Danish name did not survive a late boot: ${installedNames.join(', ')}`);
+            assert(installedNames.includes('Opstart Alfa (forsøg)'),
+                `The overlay's Danish name did not survive a late boot: ${installedNames.join(', ')}`);
+
+            const alphaCard = document.querySelector('[data-module-id="boot-alpha"]');
+            assert(alphaCard && /2\.1\.0/.test(alphaCard.textContent),
+                'The Experimental overlay did not win, so the stored release channel was lost');
+
+            // Module settings, as they were reported during evaluation.
+            const settingsButton = alphaCard.querySelector('.lectio-manager-settings-btn');
+            assert(settingsButton, 'A module that registered during evaluation got no settings button');
+            settingsButton.click();
+
+            const settingsView = document.querySelector('.lectio-manager-settings-view');
+            assert(settingsView && !settingsView.hidden, 'The focused settings view did not open');
+            assert(settingsView.querySelector('input[type="text"]').value === 'Alfa',
+                'A value reported during the Manager\'s own evaluation did not reach its control');
+            assert(settingsView.querySelector('input[type="color"]').value === '#123456',
+                'A colour reported during the Manager\'s own evaluation did not reach its control');
+            assert(settingsView.querySelector('input[type="range"]').value === '130',
+                'A range reported during the Manager\'s own evaluation did not reach its control');
+            assert(settingsView.querySelector('input[type="checkbox"]').checked === false,
+                'A toggle reported during the Manager\'s own evaluation did not reach its control');
+
+            // ---- 5. still nothing said ---------------------------------
+            assert(window.consoleNoise.length === 0,
+                `The Manager complained on the console: ${window.consoleNoise.join(' | ')}`);
+        }
+    </script>
+</body>
+</html>

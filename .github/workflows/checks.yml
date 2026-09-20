@@ -69,6 +69,12 @@ jobs:
       - name: Dock icons are up to date
         run: node scripts/build-dock-icons.mjs --check
 
+      # No module-scope const/let/class below the Manager's boot block. That
+      # shape has shipped three times (1.21.0, 1.25.0 / #32, 1.27.0 / #30) and
+      # is valid JavaScript, so the syntax gate above passes it every time.
+      - name: No module-scope state below the Manager's boot block
+        run: node scripts/check-boot-order.mjs
+
       # The browser tests shell out to Chrome via CHROME_PATH, falling back to a
       # Windows path that does not exist here, so the runner's Chrome is found
       # and exported instead. CHROME_PATH points at a small wrapper rather than

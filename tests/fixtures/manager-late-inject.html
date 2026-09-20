@@ -14,8 +14,19 @@
          * A const declared below it parses fine, passes a syntax check, and
          * works in any fixture that loads the Manager with a plain <script> tag
          * during parse - and then throws a ReferenceError for every real user.
-         * This fixture is the only one that reproduces how the Manager is
-         * actually injected.
+         * This fixture reproduces how the Manager is actually injected. It is
+         * the regression test for the three versions that shipped that shape,
+         * and each assertion below names the one it is there for. Nothing here
+         * is to be relaxed.
+         *
+         * The general guard added for #49 is a sibling, not a replacement:
+         * manager-boot-integrity.html boots the Manager the same way with
+         * every subsystem's stored state present and fails on *any* exception,
+         * including one caught and swallowed in silence, which this fixture
+         * cannot see. scripts/check-boot-order.mjs is the static half. New
+         * boot-path coverage belongs in those two; this one stays as it is so
+         * the three known bugs keep failing something that is not being
+         * rewritten.
          */
         /*
          * The cached catalogue carries a real entry, with every optional field
