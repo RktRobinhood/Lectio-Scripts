@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Schedule Summary
 // @namespace    https://www.lectio.dk/
-// @version      0.2.2
+// @version      0.2.3
 // @description  Collapses the schedule's week information into a compact, previewable summary strip.
 // @match        https://www.lectio.dk/lectio/*/SkemaNy.aspx*
 // @grant        none
@@ -15,7 +15,7 @@
 
     const MODULE_ID = 'schedule-summary';
     const MODULE_NAME = 'Lectio - Schedule Summary';
-    const MODULE_VERSION = '0.2.2';
+    const MODULE_VERSION = '0.2.3';
     const STYLE_ID = 'lectio-schedule-summary-styles';
     const ENHANCED_ATTRIBUTE = 'data-lectio-schedule-summary';
     const SETTINGS_KEY = 'lectioScheduleSummary.settings.v1';
@@ -191,7 +191,11 @@
     announce();
 
     function labels() {
-        const language = (document.documentElement.lang || '').toLowerCase();
+        // Language, in order of authority: the Manager's published choice, then
+        // whatever Lectio (or English Mode) has put on <html lang>, then Danish -
+        // Lectio is a Danish system, so a module running on its own stays Danish.
+        const preferred = document.documentElement?.dataset?.lectioLanguage;
+        const language = (preferred || document.documentElement.lang || 'da').toLowerCase();
         const english = language.startsWith('en');
 
         return english

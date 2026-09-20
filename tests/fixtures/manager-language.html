@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio Manager language fixture</title>
+</head>
+<body>
+    <script>
+        // 'fresh' is a first run with nothing stored; 'stored-da' is someone who
+        // already chose Danish and must get it back.
+        const phase = new URLSearchParams(location.search).get('phase') || 'fresh';
+
+        const catalogue = {
+            schemaVersion: 1,
+            generatedAt: '2026-09-20T00:00:00.000Z',
+            modules: [{
+                id: 'example',
+                name: 'Example',
+                description: 'A module, so the catalogue is valid.',
+                version: '1.0.0',
+                installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Chairs-Up.user.js'
+            }]
+        };
+
+        const storage = new Map([
+            ['lectioManager.catalogue.v1', JSON.stringify(catalogue)],
+            ['lectioManager.lastRefresh.v1', Date.now()],
+            ['lectioManager.updateTipDismissed.v1', true]
+        ]);
+
+        if (phase === 'stored-da') storage.set('lectioManager.language.v1', 'da');
+
+        window.GM_getValue = (key, fallback) => storage.has(key) ? storage.get(key) : fallback;
+        window.GM_setValue = (key, value) => storage.set(key, value);
+        window.GM_xmlhttpRequest = () => {};
+
+        window.languageAnnouncements = [];
+        window.addEventListener('lectio-manager:language', (event) => {
+            window.languageAnnouncements.push(event.detail.language);
+        });
+    </script>
+    <script src="../../manager/Lectio-Manager.user.js"></script>
+    <script>
+        function assert(condition, message) {
+            if (!condition) throw new Error(message);
+        }
+
+        window.addEventListener('load', () => {
+            try {
+                const html = document.documentElement;
+                const select = document.querySelector('.lectio-manager-language-select');
+                const title = document.querySelector('.lectio-manager-title');
+                const installedTab = document.querySelector('[data-primary-view="installed"]');
+                const channelLabel = document.querySelector('.lectio-manager-channel-label label');
+
+                assert(select, 'the Manager has no language control');
+
+                if (phase === 'fresh') {
+                    // Lectio serves lang="da", but the Manager is for IB students
+                    // and starts in English regardless.
+                    assert(select.value === 'en', `the Manager did not default to English: ${select.value}`);
+                    assert(html.dataset.lectioLanguage === 'en', `the choice was not published: ${html.dataset.lectioLanguage}`);
+                    assert(/Installed/.test(installedTab.textContent), `the Installed tab was not in English: ${installedTab.textContent}`);
+                }
+
+                if (phase === 'stored-da') {
+                    assert(select.value === 'da', `a stored Danish choice was not restored: ${select.value}`);
+                    assert(html.dataset.lectioLanguage === 'da', `the stored choice was not published: ${html.dataset.lectioLanguage}`);
+                    assert(/Installeret/.test(installedTab.textContent), `the Installed tab was not in Danish: ${installedTab.textContent}`);
+                }
+
+                // Switching re-labels the chrome in place, without rebuilding the
+                // panel, and tells every module about it. Setting the control to
+                // what it already says is not a change and must announce nothing,
+                // so this always moves it somewhere new first.
+                const choose = (value) => {
+                    select.value = value;
+                    select.dispatchEvent(new Event('change', { bubbles: true }));
+                };
+
+                if (select.value === 'da') {
+                    choose('en');
+                    assert(html.dataset.lectioLanguage === 'en', 'switching to English did not republish');
+                }
+
+                const before = window.languageAnnouncements.length;
+                choose('da');
+
+                assert(html.dataset.lectioLanguage === 'da', 'switching did not republish the attribute');
+                assert(
+                    window.languageAnnouncements.length > before &&
+                    window.languageAnnouncements.at(-1) === 'da',
+                    'switching did not announce the change to modules'
+                );
+                assert(storage.get('lectioManager.language.v1') === 'da', 'the choice was not persisted');
+                assert(/Udgivelseskanal/.test(channelLabel.textContent), `a settings label stayed English: ${channelLabel.textContent}`);
+                assert(/Installeret/.test(installedTab.textContent), `the tabs stayed English: ${installedTab.textContent}`);
+                assert(title.textContent === 'Lectio Tools', 'the product name should not be translated');
+
+                // Re-selecting the language already in force changes nothing and
+                // must not announce a change nobody made.
+                const quiet = window.languageAnnouncements.length;
+                choose('da');
+                assert(window.languageAnnouncements.length === quiet, 're-selecting the current language announced a change');
+
+                choose('en');
+                assert(/Release channel/.test(channelLabel.textContent), `switching back left Danish behind: ${channelLabel.textContent}`);
+                assert(/Installed/.test(installedTab.textContent), `switching back left Danish tabs: ${installedTab.textContent}`);
+
+                document.documentElement.dataset.testResult = 'pass';
+            } catch (error) {
+                document.documentElement.dataset.testResult = `fail: ${error.message}`;
+            }
+        });
+    </script>
+</body>
+</html>

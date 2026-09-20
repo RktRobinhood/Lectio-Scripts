@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.18.0
+// @version      1.19.0
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules, including their settings and shared dock controls.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
@@ -29,10 +29,193 @@
      * switches. Catalogue fields are rendered as text/links only.
      */
 
+    /*
+     * LANGUAGE
+     * --------
+     * Lectio itself is Danish, so a module running on its own has no reason to
+     * be anything else and defaults to Danish. The Manager is the exception: it
+     * exists mainly for IB students, so its own interface starts in English and
+     * offers Danish as a setting.
+     *
+     * Whatever the Manager is set to is published on the <html> element as
+     * data-lectio-language and announced on lectio-manager:language, so a module
+     * can follow the person's one choice instead of guessing. The order a module
+     * should read is: that attribute, then documentElement.lang (which Lectio
+     * sets, and English Mode overrides), then Danish.
+     */
+    const LANGUAGES = ['en', 'da'];
+    const DEFAULT_LANGUAGE = 'en';
+    const LANGUAGE_ATTRIBUTE = 'lectioLanguage';
+
+    const TEXT = {
+        en: {
+            appTitle: 'Lectio Tools',
+            settingsBtn: 'Manager settings',
+            settingsBtnChannel: (channel) => `Manager settings — channel: ${channel}`,
+            helpBtn: 'How to disable, update, or remove a script',
+            refreshBtn: 'Refresh catalogue',
+            close: 'Close',
+            closePanel: 'Close panel',
+            dockToolbar: 'Lectio tools',
+            dockPanel: 'Dock panel',
+            language: 'Language',
+            languageInfo: 'What does this change?',
+            languageHelp: 'This sets the language of the Manager itself, and tells any module that supports it which language you prefer. Lectio is Danish, so a module on its own stays Danish until you choose otherwise.',
+            releaseChannel: 'Release channel',
+            releaseChannelInfo: 'What is a release channel?',
+            releaseChannelHelp: 'A release channel decides which list of modules the Manager reads. <strong>Stable</strong> offers finished modules only. <strong>Unstable</strong> also offers experimental ones that are still being built, so they can change or break without warning.',
+            unstableNote: 'Unstable adds experimental modules from modules-unstable. Switching channel only changes what the Manager offers. It never installs, disables, or removes a userscript automatically.',
+            stable: 'Stable',
+            unstable: 'Unstable',
+            dock: 'Dock',
+            screenEdge: 'Screen edge',
+            positionOnEdge: 'Position on edge',
+            iconSize: 'Icon size',
+            edgeLeft: 'Left',
+            edgeRight: 'Right',
+            edgeTop: 'Top',
+            edgeBottom: 'Bottom',
+            alignVertical: { start: 'Top', center: 'Middle', end: 'Bottom' },
+            alignHorizontal: { start: 'Left', center: 'Centre', end: 'Right' },
+            sizeAuto: 'Auto',
+            sizeSmall: 'Small',
+            sizeNormal: 'Normal',
+            sizeLarge: 'Large',
+            shrinkToFit: 'Shrink icons to fit the screen',
+            autoHide: 'Auto-hide until hovered or focused',
+            resetDockOrder: 'Reset dock order',
+            dockWarning: 'The dock only appears when a module is using it. Drag an icon, or press Ctrl with an arrow key, to reorder.',
+            helpPanel: 'The Manager shows available module updates and opens Tampermonkey’s normal confirmation page. To disable, manually check, or remove a script, click the Tampermonkey icon in your browser toolbar and choose <strong>Dashboard</strong>.',
+            updateTip: 'Get automatic updates: open Tampermonkey → Settings → enable "Check for updates".',
+            dismissTip: 'Dismiss tip',
+            selfUpdate: (available, running) => `Lectio Manager v${available} is available (you have v${running}).`,
+            update: 'Update',
+            downgrade: 'Downgrade',
+            install: 'Install',
+            installTest: 'Install test',
+            installed: 'Installed',
+            available: 'Available',
+            modules: 'Modules',
+            allModules: 'All available modules',
+            audience: 'Audience',
+            student: 'Student',
+            teacher: 'Teacher',
+            category: 'Category',
+            experimental: 'Experimental',
+            notActiveHere: 'Not active on this page',
+            notDetected: 'Not detected',
+            settings: 'Settings',
+            remove: 'Remove',
+            removeHint: 'Remove from Installed — use this only if you have uninstalled the module in Tampermonkey.',
+            loading: 'Loading catalogue…',
+            noInstalled: 'No installed modules detected yet.',
+            allInstalled: 'All available modules are installed.',
+            noneMatch: 'No available modules match this filter.',
+            updateAvailable: (version, installed) => `Update available: v${version} (installed v${installed})`,
+            channelTarget: (channel, version, installed) => `${channel} target: v${version} (installed v${installed})`,
+            selectedTarget: 'Selected',
+            lastRefreshed: (time) => `Last refreshed: ${time}`,
+            neverRefreshed: 'not refreshed yet',
+            refreshedJustNow: 'Catalogue updated just now',
+            refreshFailedAll: 'Could not load the module catalogue.',
+            refreshFailedSome: (detail) => `Could not refresh everything - showing last valid data. ${detail}`,
+            settingInfo: (label) => `What does “${label}” do?`,
+            choose: 'Choose',
+            run: 'Run',
+            reportIssue: 'Report a bug or idea'
+        },
+        da: {
+            appTitle: 'Lectio Tools',
+            settingsBtn: 'Indstillinger for Manager',
+            settingsBtnChannel: (channel) => `Indstillinger for Manager — kanal: ${channel}`,
+            helpBtn: 'Sådan slår du et script fra, opdaterer eller fjerner det',
+            refreshBtn: 'Opdater kataloget',
+            close: 'Luk',
+            closePanel: 'Luk panelet',
+            dockToolbar: 'Lectio-værktøjer',
+            dockPanel: 'Dokpanel',
+            language: 'Sprog',
+            languageInfo: 'Hvad ændrer det?',
+            languageHelp: 'Dette vælger sproget i selve Manageren og fortæller de moduler, der understøtter det, hvilket sprog du foretrækker. Lectio er dansk, så et modul, der kører alene, bliver på dansk, indtil du vælger andet.',
+            releaseChannel: 'Udgivelseskanal',
+            releaseChannelInfo: 'Hvad er en udgivelseskanal?',
+            releaseChannelHelp: 'En udgivelseskanal afgør, hvilken liste over moduler Manageren læser. <strong>Stabil</strong> tilbyder kun færdige moduler. <strong>Ustabil</strong> tilbyder også eksperimentelle moduler, der stadig er under udvikling, og som derfor kan ændre sig eller gå i stykker uden varsel.',
+            unstableNote: 'Ustabil tilføjer eksperimentelle moduler fra modules-unstable. At skifte kanal ændrer kun, hvad Manageren tilbyder dig. Den installerer, deaktiverer eller fjerner aldrig et userscript af sig selv.',
+            stable: 'Stabil',
+            unstable: 'Ustabil',
+            dock: 'Dok',
+            screenEdge: 'Skærmkant',
+            positionOnEdge: 'Placering på kanten',
+            iconSize: 'Ikonstørrelse',
+            edgeLeft: 'Venstre',
+            edgeRight: 'Højre',
+            edgeTop: 'Top',
+            edgeBottom: 'Bund',
+            alignVertical: { start: 'Øverst', center: 'Midt', end: 'Nederst' },
+            alignHorizontal: { start: 'Venstre', center: 'Midt', end: 'Højre' },
+            sizeAuto: 'Automatisk',
+            sizeSmall: 'Lille',
+            sizeNormal: 'Normal',
+            sizeLarge: 'Stor',
+            shrinkToFit: 'Formindsk ikoner, så de passer til skærmen',
+            autoHide: 'Skjul automatisk, indtil musen eller fokus er på den',
+            resetDockOrder: 'Nulstil dokkens rækkefølge',
+            dockWarning: 'Dokken vises kun, når et modul bruger den. Træk et ikon, eller hold Ctrl nede og brug piletasterne, for at ændre rækkefølgen.',
+            helpPanel: 'Manageren viser tilgængelige modulopdateringer og åbner Tampermonkeys egen bekræftelsesside. For at slå et script fra, tjekke manuelt eller fjerne det skal du klikke på Tampermonkey-ikonet i browserens værktøjslinje og vælge <strong>Dashboard</strong>.',
+            updateTip: 'Få automatiske opdateringer: åbn Tampermonkey → Indstillinger → slå "Check for updates" til.',
+            dismissTip: 'Skjul tippet',
+            selfUpdate: (available, running) => `Lectio Manager v${available} er tilgængelig (du har v${running}).`,
+            update: 'Opdater',
+            downgrade: 'Nedgrader',
+            install: 'Installer',
+            installTest: 'Installer test',
+            installed: 'Installeret',
+            available: 'Tilgængelige',
+            modules: 'Moduler',
+            allModules: 'Alle tilgængelige moduler',
+            audience: 'Målgruppe',
+            student: 'Elev',
+            teacher: 'Lærer',
+            category: 'Kategori',
+            experimental: 'Eksperimentel',
+            notActiveHere: 'Ikke aktiv på denne side',
+            notDetected: 'Ikke fundet',
+            settings: 'Indstillinger',
+            remove: 'Fjern',
+            removeHint: 'Fjern fra Installeret — brug kun dette, hvis du har afinstalleret modulet i Tampermonkey.',
+            loading: 'Henter kataloget…',
+            noInstalled: 'Ingen installerede moduler fundet endnu.',
+            allInstalled: 'Alle tilgængelige moduler er installeret.',
+            noneMatch: 'Ingen tilgængelige moduler matcher dette filter.',
+            updateAvailable: (version, installed) => `Opdatering tilgængelig: v${version} (installeret v${installed})`,
+            channelTarget: (channel, version, installed) => `${channel} mål: v${version} (installeret v${installed})`,
+            selectedTarget: 'Valgt',
+            lastRefreshed: (time) => `Sidst opdateret: ${time}`,
+            neverRefreshed: 'ikke opdateret endnu',
+            refreshedJustNow: 'Kataloget er lige opdateret',
+            refreshFailedAll: 'Kunne ikke hente modulkataloget.',
+            refreshFailedSome: (detail) => `Kunne ikke opdatere alt - viser senest gyldige data. ${detail}`,
+            settingInfo: (label) => `Hvad gør “${label}”?`,
+            choose: 'Vælg',
+            run: 'Kør',
+            reportIssue: 'Rapportér en fejl eller idé'
+        }
+    };
+
+    let language = DEFAULT_LANGUAGE;
+
+    // Falls back to English for any key a translation has not caught up with,
+    // so a missing string is an English string rather than a blank control.
+    function t(key, ...args) {
+        const value = TEXT[language]?.[key] ?? TEXT.en[key];
+        if (value === undefined) return key;
+        return typeof value === 'function' ? value(...args) : value;
+    }
+
     // Kept in step with the @version header by scripts/check-versions.mjs. The
     // header is metadata Tampermonkey reads; this is the only copy the running
     // script can see, and it is what the self-update notice compares.
-    const MANAGER_VERSION = '1.18.0';
+    const MANAGER_VERSION = '1.19.0';
 
     const STABLE_CATALOGUE_URL =
         'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/catalogue/modules.json';
@@ -53,6 +236,7 @@
         5 * 60 * 1000;
 
     const DISCOVER_EVENT = 'lectio-manager:discover';
+    const LANGUAGE_EVENT = 'lectio-manager:language';
     const REGISTER_EVENT = 'lectio-module:register';
     const SET_SETTING_EVENT = 'lectio-manager:set-setting';
     const PREVIEW_SETTING_EVENT = 'lectio-manager:preview-setting';
@@ -73,6 +257,7 @@
     const STORAGE_UNSTABLE_CATALOGUE = 'lectioManager.catalogue.unstable.v1';
     const STORAGE_UNSTABLE_LAST_REFRESH = 'lectioManager.lastRefresh.unstable.v1';
     const STORAGE_RELEASE_CHANNEL = 'lectioManager.releaseChannel.v1';
+    const STORAGE_LANGUAGE = 'lectioManager.language.v1';
 
     const STORAGE_VIEW = 'lectioManager.view.v1';
     const STORAGE_SORT_MODE = 'lectioManager.sortMode.v1';
@@ -141,6 +326,11 @@
         lastRefresh = Number(GM_getValue(STORAGE_LAST_REFRESH, 0)) || 0;
         unstableLastRefresh = Number(GM_getValue(STORAGE_UNSTABLE_LAST_REFRESH, 0)) || 0;
         releaseChannel = normalizeReleaseChannel(GM_getValue(STORAGE_RELEASE_CHANNEL, 'stable'));
+        language = normalizeLanguage(GM_getValue(STORAGE_LANGUAGE, DEFAULT_LANGUAGE));
+        // Published before anything is built, so a module that loads alongside
+        // the Manager sees the choice on its first read rather than starting in
+        // one language and being corrected.
+        publishLanguage({ announce: false });
         catalogue = buildEffectiveCatalogue();
         currentView = normalizeView(GM_getValue(STORAGE_VIEW, 'installed'));
         sortMode = normalizeSortMode(GM_getValue(STORAGE_SORT_MODE, 'category'));
@@ -149,6 +339,7 @@
 
         buildUI();
         buildDock();
+        applyStaticText();
         renderModuleList();
         updateRefreshedLabel({ justUpdated: false });
         updateChannelUI();
@@ -264,8 +455,8 @@
                 console.warn(LOG, 'Catalogue refresh partially failed:', errors);
                 showError(
                     stableCatalogue
-                        ? `Could not refresh everything - showing last valid data. ${errors.join(' | ')}`
-                        : 'Could not load the module catalogue.'
+                        ? t('refreshFailedSome', errors.join(' | '))
+                        : t('refreshFailedAll')
                 );
             } else {
                 showError(null);
@@ -429,8 +620,7 @@
             return;
         }
 
-        elements.selfUpdateText.textContent =
-            `Lectio Manager v${entry.version} is available (you have v${MANAGER_VERSION}).`;
+        elements.selfUpdateText.textContent = t('selfUpdate', entry.version, MANAGER_VERSION);
         elements.selfUpdateLink.href = entry.installUrl;
         elements.selfUpdate.hidden = false;
     }
@@ -467,6 +657,138 @@
 
     function normalizeSortMode(value) {
         return ['category', 'name'].includes(value) ? value : 'category';
+    }
+
+    function normalizeLanguage(value) {
+        return LANGUAGES.includes(value) ? value : DEFAULT_LANGUAGE;
+    }
+
+    /*
+     * One choice, published two ways. The attribute is for modules that read it
+     * whenever they happen to render; the event is for modules already running
+     * that need to re-render on a change. A module reads, in order:
+     * data-lectio-language, then documentElement.lang, then Danish.
+     */
+    function publishLanguage({ announce = true } = {}) {
+        if (document.documentElement) {
+            document.documentElement.dataset[LANGUAGE_ATTRIBUTE] = language;
+        }
+
+        if (announce) {
+            window.dispatchEvent(new CustomEvent(LANGUAGE_EVENT, { detail: { language } }));
+        }
+    }
+
+    function setLanguage(value) {
+        const next = normalizeLanguage(value);
+        if (next === language) return;
+
+        language = next;
+        GM_setValue(STORAGE_LANGUAGE, language);
+        publishLanguage();
+        applyStaticText();
+        renderModuleList();
+        updateRefreshedLabel({ justUpdated: false });
+        updateChannelUI();
+        syncDockPreferenceControls();
+        renderDock();
+    }
+
+    /*
+     * The Manager builds its chrome once from a template, so switching language
+     * cannot go back through that template without tearing the panel down and
+     * losing whatever is open. Instead every fixed string is written here, from
+     * the same table, on load and again on every change. Anything that already
+     * re-renders per catalogue - the module list, the dock - is left to its own
+     * render function.
+     */
+    function applyStaticText() {
+        if (!elements) return;
+
+        const { root } = elements;
+        const set = (selector, text) => {
+            const node = root.querySelector(selector);
+            if (node) node.textContent = text;
+        };
+        const label = (selector, text) => {
+            const node = root.querySelector(selector);
+            if (!node) return;
+            node.title = text;
+            node.setAttribute('aria-label', text);
+        };
+
+        set('.lectio-manager-title', t('appTitle'));
+        label('#lectio-manager-toggle', t('appTitle'));
+        label('.lectio-manager-help', t('helpBtn'));
+        label('.lectio-manager-refresh', t('refreshBtn'));
+        label('.lectio-manager-close', t('close'));
+
+        set('.lectio-manager-language-label label', t('language'));
+        label('.lectio-manager-language-info', t('languageInfo'));
+        set('.lectio-manager-language-help', t('languageHelp'));
+
+        set('.lectio-manager-channel-label label', t('releaseChannel'));
+        label('.lectio-manager-channel-info', t('releaseChannelInfo'));
+
+        const channelHelp = root.querySelector('.lectio-manager-channel-help');
+        if (channelHelp) channelHelp.innerHTML = t('releaseChannelHelp');
+
+        set('.lectio-manager-channel-note', t('unstableNote'));
+
+        const channelSelect = root.querySelector('.lectio-manager-channel-select');
+        if (channelSelect) {
+            channelSelect.querySelector('option[value="stable"]').textContent = t('stable');
+            channelSelect.querySelector('option[value="unstable"]').textContent = t('unstable');
+        }
+
+        set('.lectio-manager-prefs-section > summary', t('dock'));
+        set('.lectio-manager-dock-edge-label', t('screenEdge'));
+        set('.lectio-manager-dock-align-label', t('positionOnEdge'));
+        set('.lectio-manager-dock-size-label', t('iconSize'));
+        set('.lectio-manager-dock-fit-label', t('shrinkToFit'));
+        set('.lectio-manager-dock-autohide-label', t('autoHide'));
+        set('.lectio-manager-dock-reset', t('resetDockOrder'));
+        set('.lectio-manager-prefs-warning', t('dockWarning'));
+
+        const edgeSelect = root.querySelector('.lectio-manager-dock-edge');
+        if (edgeSelect) {
+            const edges = { left: 'edgeLeft', right: 'edgeRight', top: 'edgeTop', bottom: 'edgeBottom' };
+            for (const option of edgeSelect.options) option.textContent = t(edges[option.value]);
+        }
+
+        const sizeSelect = root.querySelector('.lectio-manager-dock-size');
+        if (sizeSelect) {
+            const sizes = { auto: 'sizeAuto', small: 'sizeSmall', normal: 'sizeNormal', large: 'sizeLarge' };
+            for (const option of sizeSelect.options) option.textContent = t(sizes[option.value]);
+        }
+
+        const helpPanel = root.querySelector('.lectio-manager-help-panel');
+        if (helpPanel) helpPanel.innerHTML = t('helpPanel');
+
+        set('.lectio-manager-tip-text', t('updateTip'));
+        label('.lectio-manager-tip-dismiss', t('dismissTip'));
+        set('.lectio-manager-self-update-link', t('update'));
+        set('.lectio-manager-footer-link', t('reportIssue'));
+
+        const tabs = root.querySelector('.lectio-manager-tabs');
+        if (tabs) tabs.setAttribute('aria-label', t('modules'));
+
+        const installedTab = root.querySelector('[data-primary-view="installed"]');
+        const availableTab = root.querySelector('[data-primary-view="all"]');
+        if (installedTab) installedTab.childNodes[0].nodeValue = `${t('installed')} `;
+        if (availableTab) availableTab.childNodes[0].nodeValue = `${t('available')} `;
+
+        const dockItems = document.querySelector('.lectio-manager-dock-items');
+        if (dockItems) dockItems.setAttribute('aria-label', t('dockToolbar'));
+
+        const flyout = document.querySelector('.lectio-manager-dock-flyout');
+        if (flyout) flyout.setAttribute('aria-label', t('dockPanel'));
+
+        const flyoutClose = document.querySelector('.lectio-manager-dock-flyout-close');
+        if (flyoutClose) flyoutClose.setAttribute('aria-label', t('closePanel'));
+
+        const languageSelect = root.querySelector('.lectio-manager-language-select');
+        if (languageSelect) languageSelect.value = language;
     }
 
     function normalizeReleaseChannel(value) {
@@ -1230,9 +1552,7 @@
     // "Start" and "end" mean different things on a column than on a row, so the
     // labels follow the chosen edge rather than exposing the raw values.
     function dockAlignmentLabels(edge) {
-        return isVerticalDock(edge)
-            ? { start: 'Top', center: 'Middle', end: 'Bottom' }
-            : { start: 'Left', center: 'Centre', end: 'Right' };
+        return isVerticalDock(edge) ? t('alignVertical') : t('alignHorizontal');
     }
 
     function syncDockPreferenceControls() {
@@ -1343,6 +1663,17 @@
                 </div>
                 <div class="lectio-manager-channel-panel lectio-manager-prefs-panel" hidden>
                     <div class="lectio-manager-prefs-field lectio-manager-channel-field">
+                        <span class="lectio-manager-prefs-row-label lectio-manager-language-label">
+                            <label for="lectio-manager-language-select">Language</label>
+                            <button type="button" class="lectio-manager-setting-info lectio-manager-language-info" aria-controls="lectio-manager-language-help" aria-expanded="false">${helpSvg()}</button>
+                        </span>
+                        <select id="lectio-manager-language-select" class="lectio-manager-language-select">
+                            <option value="en">English</option>
+                            <option value="da">Dansk</option>
+                        </select>
+                    </div>
+                    <small id="lectio-manager-language-help" class="lectio-manager-language-help" hidden></small>
+                    <div class="lectio-manager-prefs-field lectio-manager-channel-field">
                         <span class="lectio-manager-channel-label">
                             <label for="lectio-manager-channel-select">Release channel</label>
                             <button type="button" class="lectio-manager-setting-info lectio-manager-channel-info" title="What is a release channel?" aria-label="What is a release channel?" aria-controls="lectio-manager-channel-help" aria-expanded="false">${helpSvg()}</button>
@@ -1357,7 +1688,7 @@
                     <details class="lectio-manager-prefs-section">
                         <summary>Dock</summary>
                         <label class="lectio-manager-prefs-field">
-                            <span>Screen edge</span>
+                            <span class="lectio-manager-dock-edge-label">Screen edge</span>
                             <select class="lectio-manager-dock-edge">
                                 <option value="left">Left</option>
                                 <option value="right">Right</option>
@@ -1366,7 +1697,7 @@
                             </select>
                         </label>
                         <label class="lectio-manager-prefs-field">
-                            <span>Position on edge</span>
+                            <span class="lectio-manager-dock-align-label">Position on edge</span>
                             <select class="lectio-manager-dock-align">
                                 <option value="start">Top</option>
                                 <option value="center">Middle</option>
@@ -1374,7 +1705,7 @@
                             </select>
                         </label>
                         <label class="lectio-manager-prefs-field">
-                            <span>Icon size</span>
+                            <span class="lectio-manager-dock-size-label">Icon size</span>
                             <select class="lectio-manager-dock-size">
                                 <option value="auto">Auto</option>
                                 <option value="small">Small</option>
@@ -1384,11 +1715,11 @@
                         </label>
                         <label class="lectio-manager-prefs-check">
                             <input type="checkbox" class="lectio-manager-dock-fit">
-                            <span>Shrink icons to fit the screen</span>
+                            <span class="lectio-manager-dock-fit-label">Shrink icons to fit the screen</span>
                         </label>
                         <label class="lectio-manager-prefs-check">
                             <input type="checkbox" class="lectio-manager-dock-autohide">
-                            <span>Auto-hide until hovered or focused</span>
+                            <span class="lectio-manager-dock-autohide-label">Auto-hide until hovered or focused</span>
                         </label>
                         <button type="button" class="lectio-manager-dock-reset">Reset dock order</button>
                         <small class="lectio-manager-prefs-warning">The dock only appears when a module is using it. Drag an icon, or press Ctrl with an arrow key, to reorder.</small>
@@ -1488,14 +1819,23 @@
 
         // "Release channel" means nothing on its own, so the row keeps one line
         // and hides the explanation behind the same info toggle module settings use.
-        const channelInfo = channelPanel.querySelector('.lectio-manager-channel-info');
-        const channelHelp = channelPanel.querySelector('.lectio-manager-channel-help');
+        const infoToggle = (infoSelector, helpSelector) => {
+            const info = channelPanel.querySelector(infoSelector);
+            const help = channelPanel.querySelector(helpSelector);
+            if (!info || !help) return;
 
-        channelInfo.addEventListener('click', () => {
-            const willShow = channelHelp.hidden;
-            channelHelp.hidden = !willShow;
-            channelInfo.setAttribute('aria-expanded', String(willShow));
-        });
+            info.addEventListener('click', () => {
+                const willShow = help.hidden;
+                help.hidden = !willShow;
+                info.setAttribute('aria-expanded', String(willShow));
+            });
+        };
+
+        infoToggle('.lectio-manager-channel-info', '.lectio-manager-channel-help');
+        infoToggle('.lectio-manager-language-info', '.lectio-manager-language-help');
+
+        channelPanel.querySelector('.lectio-manager-language-select')
+            .addEventListener('change', (event) => setLanguage(event.target.value));
 
         helpBtn.addEventListener('click', () => {
             const willShow = helpPanel.hidden;
@@ -1738,8 +2078,8 @@
         elements.channelPanel.classList.toggle('is-unstable', releaseChannel === 'unstable');
         elements.channelBtn.classList.toggle('is-unstable', releaseChannel === 'unstable');
         elements.channelBtn.title = releaseChannel === 'unstable'
-            ? 'Manager settings — channel: Unstable'
-            : 'Manager settings — channel: Stable';
+            ? t('settingsBtnChannel', t('unstable'))
+            : t('settingsBtnChannel', t('stable'));
         elements.channelBtn.setAttribute('aria-label', elements.channelBtn.title);
     }
 
@@ -1797,7 +2137,7 @@
         if (!catalogue) {
             const loading = document.createElement('div');
             loading.className = 'lectio-manager-loading';
-            loading.textContent = 'Loading catalogue…';
+            loading.textContent = t('loading');
             list.appendChild(loading);
             viewHeading.textContent = '';
             return;
@@ -2010,14 +2350,14 @@
 
     function getEmptyStateText(view) {
         if (view === 'installed') {
-            return 'No installed modules detected yet.';
+            return t('noInstalled');
         }
 
         if (getAvailableModules().length === 0) {
-            return 'All available modules are installed.';
+            return t('allInstalled');
         }
 
-        return 'No available modules match this filter.';
+        return t('noneMatch');
     }
 
     // ============================================================
@@ -2039,20 +2379,20 @@
 
         const topGroup = document.createElement('div');
         topGroup.className = 'lectio-manager-nav-group';
-        topGroup.appendChild(buildNavMenuItem('all', 'All available modules'));
+        topGroup.appendChild(buildNavMenuItem('all', t('allModules')));
         navMenu.appendChild(topGroup);
 
         const audienceGroup = document.createElement('div');
         audienceGroup.className = 'lectio-manager-nav-group';
-        audienceGroup.appendChild(buildNavGroupLabel('Audience'));
-        audienceGroup.appendChild(buildNavMenuItem(`${AUDIENCE_VIEW_PREFIX}student`, 'Student'));
-        audienceGroup.appendChild(buildNavMenuItem(`${AUDIENCE_VIEW_PREFIX}teacher`, 'Teacher'));
+        audienceGroup.appendChild(buildNavGroupLabel(t('audience')));
+        audienceGroup.appendChild(buildNavMenuItem(`${AUDIENCE_VIEW_PREFIX}student`, t('student')));
+        audienceGroup.appendChild(buildNavMenuItem(`${AUDIENCE_VIEW_PREFIX}teacher`, t('teacher')));
         navMenu.appendChild(audienceGroup);
 
         if (categories.length) {
             const categoryGroup = document.createElement('div');
             categoryGroup.className = 'lectio-manager-nav-group';
-            categoryGroup.appendChild(buildNavGroupLabel('Category'));
+            categoryGroup.appendChild(buildNavGroupLabel(t('category')));
 
             for (const category of categories) {
                 categoryGroup.appendChild(buildNavMenuItem(`${CATEGORY_VIEW_PREFIX}${category}`, category));
@@ -2109,7 +2449,7 @@
         if (isExperimentalModule(module, record)) {
             const experimental = document.createElement('span');
             experimental.className = 'lectio-manager-card-experimental';
-            experimental.textContent = 'Experimental';
+            experimental.textContent = t('experimental');
             meta.appendChild(experimental);
         }
 
@@ -2156,10 +2496,10 @@
 
             if (hasUpdate) {
                 installedLabel.textContent =
-                    `Update available: v${module.version} (installed v${record.version})`;
+                    t('updateAvailable', module.version, record.version);
             } else if (hasDowngrade) {
                 installedLabel.textContent =
-                    `${releaseChannel === 'stable' ? 'Stable' : 'Selected'} target: v${module.version} (installed v${record.version})`;
+                    t('channelTarget', releaseChannel === 'stable' ? t('stable') : t('selectedTarget'), module.version, record.version);
             } else {
                 installedLabel.textContent =
                     `Installed v${record.version || module.version}`;
@@ -2170,7 +2510,7 @@
             if (!live) {
                 const idle = document.createElement('span');
                 idle.className = 'lectio-manager-status-idle';
-                idle.textContent = 'Not active on this page';
+                idle.textContent = t('notActiveHere');
                 idle.title =
                     `${module.name} is installed but does not run on this Lectio page, so its settings cannot be changed from here.`;
                 status.appendChild(idle);
@@ -2183,7 +2523,7 @@
                 updateLink.href = module.installUrl;
                 updateLink.target = '_blank';
                 updateLink.rel = 'noopener noreferrer';
-                updateLink.textContent = hasDowngrade ? 'Downgrade' : 'Update';
+                updateLink.textContent = hasDowngrade ? t('downgrade') : t('update');
 
                 updateLink.title = hasDowngrade
                     ? `Open Tampermonkey with the selected ${releaseChannel === 'stable' ? 'Stable' : 'Unstable'} version`
@@ -2197,7 +2537,7 @@
                 const settingsBtn = document.createElement('button');
                 settingsBtn.type = 'button';
                 settingsBtn.className = 'lectio-manager-settings-btn';
-                settingsBtn.textContent = 'Settings';
+                settingsBtn.textContent = t('settings');
                 settingsBtn.addEventListener('click', () => showSettingsView(module, live));
                 actions.appendChild(settingsBtn);
             }
@@ -2206,9 +2546,9 @@
                 const forgetBtn = document.createElement('button');
                 forgetBtn.type = 'button';
                 forgetBtn.className = 'lectio-manager-forget-btn';
-                forgetBtn.textContent = 'Remove';
+                forgetBtn.textContent = t('remove');
                 forgetBtn.title =
-                    'Remove from Installed — use this only if you have uninstalled the module in Tampermonkey.';
+                    t('removeHint');
                 forgetBtn.addEventListener('click', () => forgetInstalled(module.id));
                 actions.appendChild(forgetBtn);
             }
@@ -2216,7 +2556,7 @@
         } else {
             const notDetected = document.createElement('span');
             notDetected.className = 'lectio-manager-status-missing';
-            notDetected.textContent = 'Not detected';
+            notDetected.textContent = t('notDetected');
             status.appendChild(notDetected);
 
             const installLink = document.createElement('a');
@@ -2225,7 +2565,7 @@
             installLink.target = '_blank';
             installLink.rel = 'noopener noreferrer';
             installLink.textContent =
-                isExperimentalModule(module, null) ? 'Install test' : 'Install';
+                isExperimentalModule(module, null) ? t('installTest') : t('install');
 
             actions.appendChild(installLink);
         }
@@ -2480,7 +2820,7 @@
 
                 infoBtn.setAttribute(
                     'aria-label',
-                    `What does “${control.label || control.key}” do?`
+                    t('settingInfo', control.label || control.key)
                 );
 
                 infoBtn.innerHTML = helpSvg();
@@ -2665,7 +3005,7 @@
                     input.textContent =
                         control.buttonLabel ||
                         control.label ||
-                        'Run';
+                        t('run');
 
                     input.addEventListener(
                         'click',
@@ -2780,7 +3120,7 @@
         );
 
         trigger.textContent =
-            selected?.label || 'Choose';
+            selected?.label || t('choose');
 
         const menu =
             document.createElement('div');
@@ -3199,11 +3539,11 @@
 
         if (!lastRefresh) {
             elements.refreshBtn.title =
-                'Refresh catalogue — not refreshed yet';
+                `${t('refreshBtn')} — ${t('neverRefreshed')}`;
 
             elements.refreshBtn.setAttribute(
                 'aria-label',
-                'Refresh catalogue — not refreshed yet'
+                `${t('refreshBtn')} — ${t('neverRefreshed')}`
             );
 
             return;
@@ -3213,11 +3553,11 @@
 
         if (justUpdated) {
             elements.refreshBtn.title =
-                'Catalogue updated just now';
+                t('refreshedJustNow');
 
             elements.refreshBtn.setAttribute(
                 'aria-label',
-                'Catalogue updated just now'
+                t('refreshedJustNow')
             );
 
             updatedLabelTimer =
@@ -3232,14 +3572,14 @@
 
         } else {
             const status =
-                `Last refreshed: ${formatTime(lastRefresh)}`;
+                t('lastRefreshed', formatTime(lastRefresh));
 
             elements.refreshBtn.title =
-                `Refresh catalogue — ${status}`;
+                `${t('refreshBtn')} — ${status}`;
 
             elements.refreshBtn.setAttribute(
                 'aria-label',
-                `Refresh catalogue — ${status}`
+                `${t('refreshBtn')} — ${status}`
             );
         }
     }
@@ -3539,7 +3879,8 @@
                 padding: 1px 1px 7px;
             }
 
-            .lectio-manager-channel-label {
+            .lectio-manager-channel-label,
+            .lectio-manager-prefs-row-label {
                 display: inline-flex;
                 align-items: center;
                 gap: 5px;

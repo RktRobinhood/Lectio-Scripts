@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Subject Colours
 // @namespace    https://www.lectio.dk/
-// @version      0.8.1
+// @version      0.8.2
 // @description  Learns which classes are actually yours from your own timetable and gives each one its own colour, with a separate muted spectrum for one-off activities like assemblies and meetings.
 // @match        https://www.lectio.dk/lectio/*
 // @grant        none
@@ -15,7 +15,7 @@
 
     const MODULE_ID = 'subject-colours';
     const MODULE_NAME = 'Lectio - Subject Colours';
-    const MODULE_VERSION = '0.8.1';
+    const MODULE_VERSION = '0.8.2';
     const LOG = '[Lectio Subject Colours]';
     const STYLE_ID = 'lectio-subject-colours-styles';
 
@@ -1438,7 +1438,11 @@
     let legendSignature = '';
 
     function legendLabels() {
-        const language = (document.documentElement.lang || '').toLowerCase();
+        // Language, in order of authority: the Manager's published choice, then
+        // whatever Lectio (or English Mode) has put on <html lang>, then Danish -
+        // Lectio is a Danish system, so a module running on its own stays Danish.
+        const preferred = document.documentElement?.dataset?.lectioLanguage;
+        const language = (preferred || document.documentElement.lang || 'da').toLowerCase();
         const english = language.startsWith('en');
 
         return english

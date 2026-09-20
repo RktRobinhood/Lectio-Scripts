@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio English Mode
 // @namespace    lectio-english-mode
-// @version      1.9.2
+// @version      1.9.3
 // @description  Context-aware English layer for Lectio with instant core UI translation, persistent cache and Google fallback.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-start
@@ -60,7 +60,7 @@
     (function registerWithLectioManager() {
         const MODULE_ID = 'english-mode';
         const MODULE_NAME = 'Lectio English Mode';
-        const MODULE_VERSION = '1.9.2';
+        const MODULE_VERSION = '1.9.3';
 
         function announce() {
             const storedMode = GM_getValue(STORAGE_MODE, MODE_DA);
@@ -150,6 +150,17 @@
         mode !== MODE_EN
     ) {
         mode = MODE_DA;
+    }
+
+    /*
+     * Lectio serves every page as lang="da". This module translates that page
+     * into English but used to leave the attribute saying Danish, so the other
+     * modules that localise themselves - Subject Colours, Schedule Summary -
+     * read "da" and stayed Danish inside an otherwise English page. Publishing
+     * the mode here is the whole fix: it is the signal they already read.
+     */
+    if (document.documentElement) {
+        document.documentElement.lang = mode;
     }
 
     /*

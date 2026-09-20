@@ -40,6 +40,15 @@ test('manager migrates v1 dock placement and renders the channel as one dropdown
     await runFixture('manager-prefs.html', 'lectio-manager-prefs-');
 });
 
+// Lectio is Danish and serves lang="da", but the Manager is mainly for IB
+// students, so it starts in English and publishes whatever is chosen for modules
+// to follow.
+test('manager starts in English, remembers Danish, and publishes the choice', async () => {
+    for (const phase of ['fresh', 'stored-da']) {
+        await runFixture('manager-language.html', 'lectio-manager-lang-', `?phase=${phase}`);
+    }
+});
+
 // Nothing else can tell the Manager it is stale, so it reads its own catalogue
 // entry. The notice must appear only for a genuinely newer version behind an
 // install link on this repository's raw host.
