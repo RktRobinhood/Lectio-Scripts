@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio Manager dock fixture</title>
+</head>
+<body>
+    <script>
+        const catalogue = {
+            schemaVersion: 1,
+            generatedAt: '2026-09-19T00:00:00.000Z',
+            modules: []
+        };
+        const storage = new Map([
+            ['lectioManager.catalogue.v1', JSON.stringify(catalogue)],
+            ['lectioManager.lastRefresh.v1', Date.now()],
+            ['lectioManager.updateTipDismissed.v1', true],
+            ['lectioManager.dock.v1', '{corrupt']
+        ]);
+
+        window.GM_getValue = (key, fallback) => storage.has(key) ? storage.get(key) : fallback;
+        window.GM_setValue = (key, value) => storage.set(key, value);
+        window.GM_xmlhttpRequest = () => {};
+        window.dockActivations = [];
+
+        window.addEventListener('lectio-manager:dock:activate', (event) => {
+            window.dockActivations.push(event.detail);
+        });
+        window.addEventListener('lectio-manager:dock:render-panel', (event) => {
+            if (event.detail.moduleId !== 'test-module' || event.detail.itemId !== 'panel') return;
+            const content = document.createElement('p');
+            content.className = 'test-panel-content';
+            content.textContent = 'Panel rendered by module';
+            event.detail.mount.appendChild(content);
+        });
+    </script>
+    <script src="../../manager/Lectio-Manager.user.js"></script>
+    <script>
+        function assert(condition, message) {
+            if (!condition) throw new Error(message);
+        }
+
+        function register(item) {
+            window.dispatchEvent(new CustomEvent('lectio-manager:dock:register', { detail: item }));
+        }
+
+        function keys() {
+            return [...document.querySelectorAll('.lectio-manager-dock-item')]
+                .map((element) => element.dataset.dockKey);
+        }
+
+        window.addEventListener('load', async () => {
+            try {
+                const dock = document.querySelector('#lectio-manager-dock-root');
+                assert(dock.hidden, 'Empty dock was visible');
+                assert(dock.hasAttribute('inert') || dock.getAttribute('aria-hidden') === 'true', 'Empty dock remained interactive');
+
+                register({
+                    moduleId: 'test-module', itemId: 'action', type: 'action', icon: 'refresh',
+                    label: 'Run action', badge: 120, defaultPriority: 20
+                });
+                register({
+                    moduleId: 'test-module', itemId: 'toggle', type: 'toggle', icon: 'info',
+                    label: 'Toggle feature', value: false, defaultPriority: 10
+                });
+                register({
+                    moduleId: 'test-module', itemId: 'panel', type: 'panel', icon: 'wrench',
+                    label: 'Open panel', defaultPriority: 30
+                });
+
+                assert(!dock.hidden && dock.getAttribute('aria-hidden') === 'false', 'Registered dock did not become visible');
+                assert(keys().join('|') === 'test-module:toggle|test-module:action|test-module:panel', `Unexpected default order: ${keys()}`);
+                assert(document.querySelector('[data-dock-key="test-module:action"] .lectio-manager-dock-badge').textContent === '99+', 'Badge was not truncated');
+                document.querySelector('[data-dock-key="test-module:toggle"]').focus();
+                assert(!document.querySelector('.lectio-manager-dock-tooltip').hidden, 'Keyboard focus did not show the Manager tooltip');
+                assert(document.querySelector('.lectio-manager-dock-tooltip').textContent === 'Toggle feature', 'Manager tooltip showed the wrong text');
+
+                register({
+                    moduleId: 'test-module', itemId: 'action', type: 'action', icon: 'refresh',
+                    label: 'Updated action', badge: 4, state: 'warning'
+                });
+                assert(document.querySelectorAll('[data-dock-key="test-module:action"]').length === 1, 'Duplicate registration created a duplicate item');
+                assert(document.querySelector('[data-dock-key="test-module:action"]').getAttribute('aria-label').startsWith('Updated action'), 'Duplicate registration did not update the item');
+
+                window.dispatchEvent(new CustomEvent('lectio-manager:dock:update', {
+                    detail: { moduleId: 'test-module', itemId: 'action', patch: { badge: 7, state: 'active' } }
+                }));
+                const action = document.querySelector('[data-dock-key="test-module:action"]');
+                assert(action.dataset.state === 'active', 'Patch did not update semantic state');
+                assert(action.querySelector('.lectio-manager-dock-badge').textContent === '7', 'Patch did not update badge');
+                action.click();
+                assert(window.dockActivations.some((item) => item.itemId === 'action'), 'Action activation was not emitted');
+
+                const toggle = document.querySelector('[data-dock-key="test-module:toggle"]');
+                toggle.click();
+                assert(document.querySelector('[data-dock-key="test-module:toggle"]').getAttribute('aria-pressed') === 'true', 'Toggle state did not update');
+                assert(window.dockActivations.some((item) => item.itemId === 'toggle' && item.value === true), 'Toggle activation did not carry its value');
+
+                document.querySelector('[data-dock-key="test-module:panel"]').click();
+                assert(!document.querySelector('.lectio-manager-dock-flyout').hidden, 'Panel flyout did not open');
+                assert(document.querySelector('.test-panel-content')?.textContent === 'Panel rendered by module', 'Module did not receive a panel mount');
+                window.dispatchEvent(new CustomEvent('lectio-manager:dock:update', {
+                    detail: { moduleId: 'test-module', itemId: 'action', patch: { badge: 8 } }
+                }));
+                assert(document.querySelector('[data-dock-key="test-module:panel"]').classList.contains('is-active'), 'An item update cleared the open panel state');
+                document.querySelector('.lectio-manager-dock-flyout-close').focus();
+                document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+                assert(document.querySelector('.lectio-manager-dock-flyout').hidden, 'Escape did not close panel flyout');
+                assert(document.activeElement?.dataset.dockKey === 'test-module:panel', 'Closing a flyout did not restore focus to its item');
+
+                document.querySelector('[data-dock-key="test-module:panel"]').click();
+                window.dispatchEvent(new CustomEvent('lectio-manager:dock:update', {
+                    detail: { moduleId: 'test-module', itemId: 'panel', patch: { visible: false } }
+                }));
+                assert(document.querySelector('.lectio-manager-dock-flyout').hidden, 'Hiding a panel item left an orphaned flyout');
+                window.dispatchEvent(new CustomEvent('lectio-manager:dock:update', {
+                    detail: { moduleId: 'test-module', itemId: 'panel', patch: { visible: true } }
+                }));
+
+                const panelButton = document.querySelector('[data-dock-key="test-module:panel"]');
+                panelButton.focus();
+                panelButton.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', ctrlKey: true, bubbles: true }));
+                assert(keys().join('|') === 'test-module:toggle|test-module:panel|test-module:action', `Keyboard reorder failed: ${keys()}`);
+                const savedOrder = JSON.parse(storage.get('lectioManager.dock.v1')).order;
+                assert(savedOrder.slice(0, 3).join('|') === keys().join('|'), 'Dock order was not persisted');
+
+                const pointerItem = document.querySelector('[data-dock-key="test-module:action"]');
+                const pointerTarget = document.querySelector('[data-dock-key="test-module:toggle"]');
+                const originalElementFromPoint = document.elementFromPoint.bind(document);
+                document.elementFromPoint = () => pointerTarget;
+                pointerItem.dispatchEvent(new PointerEvent('pointerdown', {
+                    pointerId: 41, pointerType: 'touch', button: 0, clientX: 5, clientY: 5, bubbles: true
+                }));
+                pointerItem.dispatchEvent(new PointerEvent('pointermove', {
+                    pointerId: 41, pointerType: 'touch', clientX: 5, clientY: 30, bubbles: true
+                }));
+                pointerItem.dispatchEvent(new PointerEvent('pointerup', {
+                    pointerId: 41, pointerType: 'touch', clientX: 5, clientY: 30, bubbles: true
+                }));
+                document.elementFromPoint = originalElementFromPoint;
+                assert(keys().join('|') === 'test-module:action|test-module:toggle|test-module:panel', `Pointer reorder failed: ${keys()}`);
+
+                register({ moduleId: 'ghost-module', itemId: 'returning', type: 'action', label: 'Returning item', defaultPriority: 999 });
+                const ghost = document.querySelector('[data-dock-key="ghost-module:returning"]');
+                ghost.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', ctrlKey: true, bubbles: true }));
+                document.querySelector('[data-dock-key="ghost-module:returning"]')
+                    .dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', ctrlKey: true, bubbles: true }));
+                assert(keys().join('|') === 'test-module:action|ghost-module:returning|test-module:toggle|test-module:panel', 'Test setup did not place returning item between known items');
+                window.dispatchEvent(new CustomEvent('lectio-manager:dock:remove', {
+                    detail: { moduleId: 'ghost-module', itemId: 'returning' }
+                }));
+                document.querySelector('[data-dock-key="test-module:panel"]')
+                    .dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', ctrlKey: true, bubbles: true }));
+                register({ moduleId: 'ghost-module', itemId: 'returning', type: 'action', label: 'Returning item', defaultPriority: 999 });
+                assert(keys()[1] === 'ghost-module:returning', `Returning item lost its saved placeholder: ${keys()}`);
+
+                document.querySelector('#lectio-manager-toggle').click();
+                document.querySelector('.lectio-manager-channel-btn').click();
+                const position = document.querySelector('.lectio-manager-dock-position');
+                position.value = 'bottom';
+                position.dispatchEvent(new Event('change', { bubbles: true }));
+                const size = document.querySelector('.lectio-manager-dock-size');
+                size.value = 'large';
+                size.dispatchEvent(new Event('change', { bubbles: true }));
+                const autoHide = document.querySelector('.lectio-manager-dock-autohide');
+                autoHide.click();
+                assert(dock.dataset.position === 'bottom', 'Dock position preference was not applied');
+                assert(dock.classList.contains('is-auto-hide'), 'Auto-hide preference was not applied');
+                assert(JSON.parse(storage.get('lectioManager.dock.v1')).sizeMode === 'large', 'Dock size preference was not persisted');
+
+                window.dispatchEvent(new CustomEvent('lectio-manager:dock:remove', {
+                    detail: { moduleId: 'test-module' }
+                }));
+                window.dispatchEvent(new CustomEvent('lectio-manager:dock:remove', {
+                    detail: { moduleId: 'ghost-module' }
+                }));
+                assert(dock.hidden, 'Dock remained visible after its final item was removed');
+                assert(dock.hasAttribute('inert') && dock.getAttribute('aria-hidden') === 'true', 'Empty dock remained interactive after removal');
+
+                document.documentElement.dataset.testResult = 'pass';
+            } catch (error) {
+                document.documentElement.dataset.testResult = `fail: ${error.message}`;
+            }
+        });
+    </script>
+</body>
+</html>

@@ -5,11 +5,11 @@ A repository that stores, versions, and distributes independent Tampermonkey use
 ## Language
 
 **Module**:
-An independent Tampermonkey userscript, in `modules/`, that adds exactly one Lectio feature. Fully self-contained — no shared runtime code with any other module — and works whether installed alone or alongside others.
+An independent Tampermonkey userscript, in `modules/`, that adds exactly one Lectio feature. Its feature logic is fully self-contained — no shared runtime code with any other module — and runs safely whether installed alone or alongside others. Optional Manager-dock presentation is available only when the Manager is installed.
 _Avoid_: script (too generic), extension, plugin.
 
 **Manager**:
-The single always-on userscript (`manager/Lectio-Manager.user.js`) that discovers installed modules, links to install them, and hosts a generic settings surface for them. Contains no feature-specific logic of its own.
+The single always-on userscript (`manager/Lectio-Manager.user.js`) that discovers installed modules, links to install them, hosts a generic settings surface, and owns the optional shared dock used by module-declared global controls. Contains no feature-specific logic of its own.
 _Avoid_: dashboard (reserved for Tampermonkey's own dashboard), app.
 
 **Catalogue**:

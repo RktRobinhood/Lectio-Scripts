@@ -10,12 +10,12 @@ This folder does not replace `modules/` and does not require a separate Git bran
 A harmless diagnostic module. It:
 
 - runs on Lectio pages;
-- registers itself with Lectio Manager as version `0.1.1-beta.1`;
-- adds a small **UNSTABLE TEST** button above the Manager gear;
-- shows a small information panel when clicked;
+- registers itself with Lectio Manager as version `0.2.0`;
+- registers a warning-state diagnostic icon in the shared Manager dock;
+- renders its information inside a Manager-owned dock flyout when clicked;
 - does not modify Lectio records, messages, grades, attendance, or account data.
 
-Its purpose is to prove that an unstable-only module becomes visible only when the Manager is set to Unstable.
+Its purpose is to prove both that an unstable-only module becomes visible only in Experimental mode and that the dock registration/panel contract works without module-owned fixed positioning.
 
 ### `Lectio-Unread-Message-Notifications.user.js`
 A version-channel test copy of the existing Unread Message Notifications userscript.

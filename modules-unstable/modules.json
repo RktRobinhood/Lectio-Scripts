@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "channel": "unstable",
-  "generatedAt": "2026-09-18T19:37:26Z",
+  "generatedAt": "2026-09-20T00:00:00Z",
   "modules": [
     {
       "id": "unstable-channel-test",
@@ -13,7 +13,7 @@
         "teacher"
       ],
       "status": "unstable",
-      "version": "0.1.1-beta.1",
+      "version": "0.2.0",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Unstable-Channel-Test.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues"
     },
