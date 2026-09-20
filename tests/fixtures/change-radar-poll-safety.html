@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio Change Radar poll-safety fixture</title>
+    <script>
+        /* The module reads its school off the path, so this fixture is served
+           from /lectio/223/ by the test's own server rather than opened off
+           disk. Lectio itself is stubbed at window.fetch rather than served,
+           because what has to be reproduced here is a request that never
+           answers and then a Lectio that refuses every request. */
+        window.pageStartedAt = Date.now();
+        window.fetchLog = [];
+        window.maxConcurrentFetches = 0;
+
+        /* Read at call time, so a request already hanging goes on hanging. */
+        window.nextResponse = 'hang';
+
+        /* Pinned so the start jitter is a known number rather than a range a
+           single run cannot tell from no jitter at all. The module multiplies
+           this by its own four-second window, so the first check must land
+           near three seconds; nothing else in the module calls Math.random. */
+        Math.random = () => 0.75;
+
+        window.SCHEDULE_HTML = '<!doctype html><html><body><table>'
+            + '<tr class="s2dayHeader"><th>Uge</th></tr>'
+            + '<tr><td data-date="2030-10-21">'
+            + '<a class="s2skemabrik s2brik s2normal" href="/lectio/223/aktivitet/aktivitetforside2.aspx?absid=900001" '
+            + 'data-tooltip="Matematik A&#10;21/10-2030 08:00 til 09:30&#10;Hold: 3a MA&#10;Lokaler: A12">'
+            + '<span class="s2skemabrikcontent">Matematik A</span></a>'
+            + '</td></tr></table></body></html>';
+
+        let concurrentFetches = 0;
+
+        window.fetch = (url, init) => {
+            const record = {
+                url: String(url),
+                credentials: init && init.credentials,
+                hasSignal: Boolean(init && init.signal),
+                mode: window.nextResponse,
+                startedAt: Date.now(),
+                answered: false,
+                aborted: false,
+                abortedAfterMs: -1
+            };
+
+            window.fetchLog.push(record);
+
+            concurrentFetches += 1;
+            window.maxConcurrentFetches = Math.max(window.maxConcurrentFetches, concurrentFetches);
+
+            if (record.mode === 'ok') {
+                concurrentFetches -= 1;
+                record.answered = true;
+                return Promise.resolve({
+                    ok: true,
+                    status: 200,
+                    url: record.url,
+                    text: () => Promise.resolve(window.SCHEDULE_HTML)
+                });
+            }
+
+            if (record.mode === 'fail') {
+                concurrentFetches -= 1;
+                return Promise.reject(new TypeError('Failed to fetch'));
+            }
+
+            return new Promise((_, reject) => {
+                const signal = init && init.signal;
+                if (!signal) return;
+
+                signal.addEventListener('abort', () => {
+                    record.aborted = true;
+                    record.abortedAfterMs = Date.now() - record.startedAt;
+                    concurrentFetches -= 1;
+                    reject(new DOMException('The user aborted a request.', 'AbortError'));
+                });
+            });
+        };
+
+        /* No Manager in this fixture, so the radar falls back to its floating
+           HUD. One watched week and every extra source off means exactly one
+           request per check, so a request count is a check count. */
+        localStorage.clear();
+        localStorage.setItem('lectioChangeRadar.v1.223.current-user.settings', JSON.stringify({
+            displayMode: 'floating',
+            pollMinutes: 5,
+            weeksAhead: 0,
+            trackAssignments: false,
+            trackAbsence: false,
+            trackDocuments: false
+        }));
+    </script>
+    <script src="/modules-unstable/Lectio-Change-Radar.user.js"></script>
+</head>
+<body>
+    <main id="masterContent">Lectio fixture</main>
+    <script>
+        const STATE_KEY = 'lectioChangeRadar.v1.223.current-user.state';
+
+        const failures = [];
+        const assert = (condition, message) => {
+            if (!condition) failures.push(message);
+        };
+
+        const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+        const waitFor = async (predicate, label, attempts = 400, step = 50) => {
+            for (let attempt = 0; attempt < attempts; attempt += 1) {
+                if (predicate()) return true;
+                await wait(step);
+            }
+            failures.push('timed out waiting for ' + label);
+            return false;
+        };
+
+        const log = window.fetchLog;
+        const at = () => Math.round(Date.now() - window.pageStartedAt) + 'ms';
+        const storedState = () => {
+            try {
+                return JSON.parse(localStorage.getItem(STATE_KEY) || 'null');
+            } catch (_) {
+                return null;
+            }
+        };
+
+        const persisted = (type) => {
+            try {
+                return new PageTransitionEvent(type, { persisted: true });
+            } catch (_) {
+                const event = new Event(type);
+                Object.defineProperty(event, 'persisted', { value: true });
+                return event;
+            }
+        };
+
+        /* Two real, non-forced check triggers and one forced one.
+
+           `becomeVisible` is the module's visibilitychange path, which is what
+           actually hammers a sick Lectio: a failed check never writes
+           lastPoll, so every return to the tab starts another one.
+
+           `nudge` flips a tracker, which the module debounces by 600ms into a
+           forced re-check. It is the stand-in for the person pressing Refresh:
+           an explicit ask, which clears the backoff rather than being
+           swallowed by it. */
+        let noteTracker = false;
+        const nudge = () => {
+            noteTracker = !noteTracker;
+            window.dispatchEvent(new CustomEvent('lectio-manager:set-setting', {
+                detail: { moduleId: 'change-radar', values: { trackLessonNotes: noteTracker } }
+            }));
+        };
+        const becomeVisible = () => document.dispatchEvent(new Event('visibilitychange'));
+
+        (async () => {
+            assert(
+                document.visibilityState === 'visible',
+                'this fixture needs a visible page to exercise the visibilitychange path'
+            );
+
+            /* --- The first check of a page view is jittered ----------------- */
+
+            await waitFor(() => log.length >= 1, 'the first check to start', 200);
+
+            if (log.length >= 1) {
+                const startedAfter = log[0].startedAt - window.pageStartedAt;
+
+                assert(
+                    startedAfter >= 2500,
+                    'the first check was not offset by the pinned jitter, it started after ' +
+                        startedAfter + 'ms'
+                );
+                assert(
+                    startedAfter <= 6000,
+                    'the first check started far later than the jitter window, after ' +
+                        startedAfter + 'ms'
+                );
+                assert(
+                    /\/SkemaNy\.aspx\?week=\d+/.test(log[0].url),
+                    'the first request was not a week of SkemaNy: ' + log[0].url
+                );
+                assert(log[0].hasSignal, 'the week request carried no abort signal');
+                assert(
+                    log[0].credentials === 'include',
+                    'the week request stopped sending the Lectio session cookie'
+                );
+            }
+
+            /* --- Never stack ------------------------------------------------ */
+
+            /* Spaced wider than the module's own 600ms settings debounce, so
+               each nudge is its own re-check attempt rather than five
+               collapsing into one. */
+            for (let attempt = 0; attempt < 5; attempt += 1) {
+                nudge();
+                await wait(800);
+            }
+
+            assert(
+                log.length === 1,
+                'a check started while one was already in flight, got ' + log.length + ' requests'
+            );
+            assert(!log[0].aborted, 'the first request ended before the never-stack nudges were done');
+
+            /* --- The existing hard timeout still ends it -------------------- */
+
+            await waitFor(() => log[0].aborted, 'the hung check to be timed out', 600);
+
+            assert(
+                log[0].abortedAfterMs >= 15000 && log[0].abortedAfterMs <= 27000,
+                'the hung request should still be timed out near twenty seconds, was ' +
+                    log[0].abortedAfterMs + 'ms'
+            );
+
+            /* --- A second consecutive failure backs the radar off ----------- */
+
+            window.nextResponse = 'fail';
+            await wait(300);
+
+            becomeVisible();
+            await waitFor(() => log.length >= 2, 'the second check to start', 200);
+            await wait(300);
+
+            const backedOffAt = log.length;
+
+            for (let attempt = 0; attempt < 6; attempt += 1) {
+                becomeVisible();
+                await wait(500);
+            }
+
+            assert(
+                log.length === backedOffAt,
+                'a background check ran while backed off (' + backedOffAt + ' -> ' + log.length +
+                    ' by ' + at() + ')'
+            );
+
+            /* --- ...and the radar is not merely dead ------------------------ */
+
+            window.nextResponse = 'ok';
+            nudge();
+
+            await waitFor(() => log.length > backedOffAt, 'an explicit re-check to clear the backoff', 200);
+            await waitFor(() => storedState(), 'the recovered check to store a snapshot', 200);
+
+            assert(
+                Object.keys(storedState()?.snapshot?.events || {}).length === 1,
+                'the recovered check did not read the timetable it was given'
+            );
+
+            /* --- A frozen page stops checking ------------------------------- */
+
+            window.nextResponse = 'fail';
+            const frozenAt = log.length;
+
+            window.dispatchEvent(persisted('pagehide'));
+
+            nudge();
+            await wait(900);
+            nudge();
+            await wait(900);
+
+            assert(
+                log.length === frozenAt,
+                'a check ran while the page was frozen for the back/forward cache (' +
+                    frozenAt + ' -> ' + log.length + ')'
+            );
+
+            /* --- ...and a restored one goes back to work -------------------- */
+
+            window.dispatchEvent(persisted('pageshow'));
+
+            nudge();
+            await waitFor(
+                () => log.length > frozenAt,
+                'a check to run again after the page came back from the bfcache',
+                200
+            );
+            await wait(300);
+
+            /* --- The poll timer survived the freeze too ---------------------- */
+
+            /* Nothing below is triggered by this script: the next check can
+               only come from the five-minute interval the module re-armed when
+               the page was restored. A module that tore itself down on
+               pagehide never fires it again. */
+            window.nextResponse = 'ok';
+            const restoredAt = log.length;
+
+            await waitFor(
+                () => log.length > restoredAt,
+                'the re-armed poll timer to run a check after the bfcache restore',
+                1400,
+                500
+            );
+            await wait(500);
+
+            assert(
+                Object.keys(storedState()?.snapshot?.events || {}).length === 1,
+                'the poll-timer check after the restore did not read the timetable'
+            );
+
+            /* --- Two fresh failures, and only two, back it off again --------- */
+
+            /* The check above was a background one that succeeded after a
+               failure, so it is the only thing that can have reset the
+               consecutive-failure count. Two more failures are therefore
+               needed before the radar backs off: if the count had survived
+               that success, the first of them would be the third in a row and
+               the second would be skipped rather than allowed through. */
+            window.nextResponse = 'fail';
+            const recountedAt = log.length;
+
+            await waitFor(
+                () => log.length > recountedAt,
+                'the next poll-timer check to be allowed through',
+                1400,
+                500
+            );
+
+            await wait(5000);
+            const oneFailureAt = log.length;
+
+            becomeVisible();
+            await waitFor(
+                () => log.length > oneFailureAt,
+                'a second fresh failure to be allowed through',
+                200
+            );
+            await wait(300);
+
+            const rebackedOffAt = log.length;
+
+            for (let attempt = 0; attempt < 6; attempt += 1) {
+                becomeVisible();
+                await wait(500);
+            }
+
+            assert(
+                log.length === rebackedOffAt,
+                'the radar did not back off again after two fresh failures (' +
+                    rebackedOffAt + ' -> ' + log.length + ')'
+            );
+
+            window.nextResponse = 'ok';
+            nudge();
+
+            await waitFor(
+                () => log.length > rebackedOffAt,
+                'an explicit re-check to work after the second backoff',
+                200
+            );
+
+            /* --- Over the whole run ------------------------------------------ */
+
+            assert(
+                window.maxConcurrentFetches === 1,
+                'checks overlapped (peak ' + window.maxConcurrentFetches + ' requests at once)'
+            );
+
+            const debug = document.createElement('pre');
+            debug.id = 'test-debug';
+            debug.textContent = log
+                .map((entry, index) => index + ':' + entry.mode + '@' +
+                    Math.round(entry.startedAt - window.pageStartedAt))
+                .join(' ');
+            document.body.appendChild(debug);
+
+            const output = document.createElement('pre');
+            output.id = 'test-result';
+            output.textContent = failures.length ? failures.join(' | ') : 'pass';
+            document.body.dataset.testResult = failures.length ? 'fail' : 'pass';
+            document.body.appendChild(output);
+        })();
+    </script>
+</body>
+</html>

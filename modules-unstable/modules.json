@@ -57,7 +57,7 @@
         "teacher"
       ],
       "status": "unstable",
-      "version": "0.6.1",
+      "version": "0.6.2",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Change-Radar.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
       "i18n": {

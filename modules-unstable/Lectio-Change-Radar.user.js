@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Change Radar
 // @namespace    https://github.com/RktRobinhood/Lectio-Scripts
-// @version      0.6.1
+// @version      0.6.2
 // @description  Watches Lectio for the changes you choose to track - timetable, assignments, absence, documents - and keeps a compact recent-change HUD.
 // @author       RktRobinhood
 // @match        https://www.lectio.dk/lectio/*
@@ -20,7 +20,7 @@
     id: 'change-radar',
     aliases: ['schedule-change-radar', 'lectio-change-radar', 'change-log'],
     name: 'Lectio Change Radar',
-    version: '0.6.1',
+    version: '0.6.2',
     channel: 'unstable'
   });
 
@@ -29,6 +29,32 @@
     fetchTimeoutMs: 20 * 1000,
     autoSeenDelayMs: 1200
   });
+
+  // Backoff measured against this module's own rhythm, not a sibling's. A poll
+  // here is five to thirty minutes apart, so a seconds-scale backoff would be
+  // stepped straight over. What actually hammers a sick Lectio is not the poll
+  // timer at all: a failed check never reaches writeNumber(STORAGE.lastPoll),
+  // so lastPoll stops moving and every single return to the tab passes the
+  // visibilitychange test and starts another check, held back only by
+  // minRefreshGapMs. Two failed checks rather than three, because a check is
+  // already a burst of one request per watched week plus any extra source, and
+  // at the default ten-minute cadence a third round is twenty more minutes of
+  // it. The base is the fastest cadence the settings offer (5 minutes) - a
+  // shorter one would be a backoff the poll timer simply steps over - and the
+  // ceiling is the slowest (30 minutes), which is also EXTRA_SOURCE_MIN_GAP_MS.
+  // The ceiling is deliberately tighter than the siblings': a stale badge or an
+  // unlearned colour costs nothing for an hour, but this module's output is a
+  // cancellation you need before you leave the house.
+  const POLL_FAILURES_BEFORE_BACKOFF = 2;
+  const POLL_BACKOFF_BASE_MS = 5 * 60 * 1000;
+  const POLL_BACKOFF_CEILING_MS = 30 * 60 * 1000;
+
+  // A small random offset on the first check of a page view, so a class that
+  // all opens Lectio on the same bell does not fire the same burst at the same
+  // instant. Four seconds is several times the length of a healthy request and
+  // costs the user nothing visible, because the HUD renders from stored state
+  // long before the first check answers.
+  const FIRST_POLL_JITTER_MS = 4000;
 
   const DISPLAY_MODES = Object.freeze(['auto', 'dock', 'floating']);
   // Bumped when a stored setting needs rewriting rather than merely
@@ -190,7 +216,20 @@
     managerSeen: false,
     graceTimer: null,
     settingsRefreshTimer: null,
-    lastError: ''
+    lastError: '',
+
+    // Everything the safety net needs lives on this object, which is declared
+    // above the start block below - module-scope state declared further down,
+    // beside the functions that use it, would be read in its temporal dead
+    // zone on the cold-start path and throw. All of it lasts one page view:
+    // pagehide clears the two timers and sets suspended, and a bfcache restore
+    // puts them back. The backoff is in memory rather than stored because the
+    // hammering it damps happens inside a single page view, and a new page
+    // view has earned a fresh try.
+    suspended: false,
+    startTimer: null,
+    pollFailures: 0,
+    backoffUntil: 0
   };
 
   // The Manager announces itself by asking every module to register. Automatic
@@ -206,12 +245,26 @@
   window.addEventListener('lectio-manager:discover', handleDiscovery);
   window.addEventListener('lectio-manager:set-setting', handleManagerSettingsEvent);
   window.addEventListener('lectio-manager:dock:render-panel', handleDockPanelRender);
-  window.addEventListener('pagehide', () => {
+  // Deliberately not { once: true }, and deliberately split in two. A page
+  // frozen for the back/forward cache fires pagehide with persisted set and may
+  // be restored without this script ever running again, so tearing the module
+  // down there left a restored page permanently switched off - no poll timer
+  // and no dock item, for the rest of that page's life. That is the bug filed
+  // as #41 against Chairs Up, and this listener had it. A frozen page now only
+  // has its background checking suspended, and pageshow puts it back; a page
+  // that is genuinely going away is torn down exactly as before. One
+  // registration each, at module scope, so neither can accumulate.
+  window.addEventListener('pagehide', (event) => {
+    suspendPolling();
+
+    if (event && event.persisted) return;
+
     removeDockItem();
-    window.clearInterval(runtime.timer);
     window.clearTimeout(runtime.viewTimer);
     window.clearTimeout(runtime.graceTimer);
-  }, { once: true });
+    window.clearTimeout(runtime.settingsRefreshTimer);
+  });
+  window.addEventListener('pageshow', resumePolling);
 
   for (const eventName of [
     'lectio-manager:setting-change',
@@ -297,7 +350,15 @@
     installThemeObserver();
     renderHud();
 
-    void refresh({ reason: 'startup' });
+    // The first check of a page view is offset by a random fraction of a few
+    // seconds. Re-armable and single-shot: the previous timer is always
+    // cleared first, so no two can be outstanding, and pagehide clears it.
+    if (runtime.startTimer) window.clearTimeout(runtime.startTimer);
+    runtime.startTimer = window.setTimeout(() => {
+      runtime.startTimer = null;
+      if (!runtime.suspended) void refresh({ reason: 'startup' });
+    }, Math.floor(Math.random() * FIRST_POLL_JITTER_MS));
+
     restartPollTimer();
 
     document.addEventListener('visibilitychange', () => {
@@ -326,11 +387,61 @@
 
   function restartPollTimer() {
     if (runtime.timer) window.clearInterval(runtime.timer);
+    runtime.timer = null;
+
+    // A settings change or a cross-tab storage event can land after the page
+    // has been frozen or torn down. Neither may resurrect a timer; resuming
+    // is pageshow's job and it clears the flag before calling back in here.
+    if (runtime.suspended) return;
+
     runtime.timer = window.setInterval(() => {
       if (document.visibilityState === 'visible') {
         void refresh({ reason: 'interval' });
       }
     }, getPollMs());
+  }
+
+  // Suspending is not tearing down: everything here is reversible, because a
+  // page frozen for the back/forward cache may come back without this script
+  // ever running again.
+  function suspendPolling() {
+    runtime.suspended = true;
+
+    if (runtime.timer) {
+      window.clearInterval(runtime.timer);
+      runtime.timer = null;
+    }
+
+    if (runtime.startTimer) {
+      window.clearTimeout(runtime.startTimer);
+      runtime.startTimer = null;
+    }
+  }
+
+  function resumePolling(event) {
+    if (!event || !event.persisted || !runtime.suspended) return;
+
+    runtime.suspended = false;
+    restartPollTimer();
+  }
+
+  function notePollFailure() {
+    // A check the page's own freeze stopped is not Lectio failing, and must
+    // not push a healthy install into a backoff for being navigated away from.
+    if (runtime.suspended) return;
+
+    runtime.pollFailures += 1;
+    if (runtime.pollFailures < POLL_FAILURES_BEFORE_BACKOFF) return;
+
+    runtime.backoffUntil = Date.now() + Math.min(
+      POLL_BACKOFF_BASE_MS * Math.pow(2, runtime.pollFailures - POLL_FAILURES_BEFORE_BACKOFF),
+      POLL_BACKOFF_CEILING_MS
+    );
+  }
+
+  function clearPollBackoff() {
+    runtime.pollFailures = 0;
+    runtime.backoffUntil = 0;
   }
 
   function getPollMs() {
@@ -407,7 +518,10 @@
   }
 
   async function refresh({ reason = 'manual', force = false } = {}) {
-    if (runtime.inFlight) return;
+    // Never stack. A check already running is not joined and not queued behind
+    // - this tick simply does not happen. Nor does one on a page whose own
+    // teardown has suspended background work.
+    if (runtime.inFlight || runtime.suspended) return;
 
     const now = Date.now();
     const lastPoll = readNumber(STORAGE.lastPoll);
@@ -415,6 +529,13 @@
     if (!force && reason !== 'manual' && now - lastPoll < BASE_CONFIG.minRefreshGapMs) {
       return;
     }
+
+    // Somebody pressing Refresh, or changing what is watched, is asking for
+    // another go, so it clears the backoff rather than being swallowed by it.
+    // A backed-off background check returns before reading or writing
+    // anything, so the HUD goes on showing exactly what it was showing.
+    if (force || reason === 'manual') clearPollBackoff();
+    else if (now < runtime.backoffUntil) return;
 
     runtime.inFlight = true;
     runtime.lastError = '';
@@ -451,8 +572,13 @@
 
       saveState(runtime.state);
       writeNumber(STORAGE.lastPoll, now);
+
+      // Lectio answered with a timetable, so it is reachable and signed in.
+      // Whatever else the check found, the backoff goes.
+      clearPollBackoff();
     } catch (error) {
       runtime.lastError = friendlyError(error);
+      notePollFailure();
     } finally {
       runtime.inFlight = false;
       renderHud();
