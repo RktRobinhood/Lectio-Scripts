@@ -19,7 +19,12 @@
                 version: '1.0.0',
                 installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/manager/Lectio-Manager.user.js'
             },
-            modules: ['current', 'alpha', 'beta', 'gamma', 'delta'].map((id) => ({
+            // Ten outdated modules is reachable in practice and is what makes
+            // the badge two digits wide, which is the width #50 was filed about.
+            modules: [
+                'current', 'alpha', 'beta', 'gamma', 'delta',
+                'epsilon', 'zeta', 'eta', 'theta', 'iota', 'kappa', 'lambda'
+            ].map((id) => ({
                 id,
                 name: id[0].toUpperCase() + id.slice(1),
                 description: `Catalogue entry for ${id}.`,
@@ -110,9 +115,11 @@
                 assert(badge() === null, `The badge survived every module catching up: ${badge()}`);
                 assert(label() === 'Lectio Tools', `The gear's name kept a stale count: ${label()}`);
 
-                // 5. Both indicators at once. The problem mark (1.23.0) owns the
-                //    top corner and the count owns the bottom one, so neither
-                //    can hide the other, and the name carries both.
+                // 5. Both indicators at once. Since #50 the count owns the top
+                //    right - the prominent corner, and the one with room for a
+                //    number - and the problem mark (1.23.0) owns the bottom
+                //    one, so neither can hide the other and the name carries
+                //    both.
                 register('alpha', '1.0.0');
                 register('beta', '1.0.0');
                 register('gamma', '1.0.0');
@@ -129,34 +136,84 @@
                 const count = getComputedStyle(gear, '::before');
                 assert(mark.content !== 'none', 'The problem mark is not drawn');
                 assert(count.content.includes('3'), `The badge does not draw the count: ${count.content}`);
-                assert(parseFloat(mark.top) === 5 && parseFloat(count.bottom) === 3,
-                    `The two indicators are not in opposite corners: top ${mark.top}, bottom ${count.bottom}`);
+                // Chrome resolves the offset that was not written as well as
+                // the one that was, so which corner an indicator is in is the
+                // smaller of the two offsets, not whichever one is a number.
+                const corner = (style) => {
+                    const top = parseFloat(style.top);
+                    const bottom = parseFloat(style.bottom);
+                    if (Number.isFinite(top) && Number.isFinite(bottom)) return top < bottom ? 'top' : 'bottom';
+                    return Number.isFinite(top) ? 'top' : 'bottom';
+                };
+
+                assert(corner(count) === 'top',
+                    `The count is not in the top corner: top ${count.top}, bottom ${count.bottom}`);
+                assert(corner(mark) === 'bottom',
+                    `The problem mark is not in the bottom corner: top ${mark.top}, bottom ${mark.bottom}`);
                 assert(count.pointerEvents === 'none', 'The badge can swallow a click meant for the gear');
                 assert(size() === unbadgedSize, `Two indicators resized the gear: ${unbadgedSize} → ${size()}`);
+
+                // 5b. Legible, and legible at two digits. 11px was the font and
+                //     11px was the whole box before #50, which squeezed a
+                //     two-digit count against the rounded ends; the box has to
+                //     grow with the number rather than hold it.
+                const oneDigitWidth = parseFloat(count.width);
+                assert(parseFloat(count.height) >= 16,
+                    `The badge is too short to read: ${count.height}`);
+                assert(parseFloat(count.fontSize) >= 11,
+                    `The badge's text is too small to read: ${count.fontSize}`);
+
+                for (const id of ['epsilon', 'zeta', 'eta', 'theta', 'iota', 'kappa', 'lambda']) {
+                    register(id, '1.0.0');
+                }
+
+                assert(badge() === '10', `Ten outdated modules did not count as ten: ${badge()}`);
+
+                const wide = getComputedStyle(gear, '::before');
+                assert(wide.content.includes('10'), `The badge does not draw two digits: ${wide.content}`);
+                assert(parseFloat(wide.width) > oneDigitWidth,
+                    `A two-digit count is squeezed into the one-digit box: ${oneDigitWidth} → ${wide.width}`);
+                assert(size() === unbadgedSize, `A two-digit badge resized the gear: ${unbadgedSize} → ${size()}`);
 
                 // 6. Nothing threw while all of that happened with no panel.
                 assert(window.pageErrors.length === 0,
                     `The Manager threw before its panel existed: ${window.pageErrors.join(' | ')}`);
 
-                // 7. Opening the panel is having looked. The badge clears, and
-                //    what it counted is what the panel lists.
+                // 7. Opening the panel is looking, not installing. Before #50
+                //    the badge went out on this click - including a click for
+                //    something else entirely - and never came back for the same
+                //    outstanding update. It has to survive the panel.
                 gear.click();
                 assert(panelBuilt(), 'The first gear click did not build the panel');
-                assert(document.querySelectorAll('.lectio-manager-status-update').length === 3,
+                assert(document.querySelectorAll('.lectio-manager-status-update').length === 10,
                     'The badge counted something the panel does not show as an update');
-                assert(badge() === null, `The badge survived the panel being opened: ${badge()}`);
-                assert(label().includes('1 problem recorded'),
-                    `Clearing the badge threw away the problem mark's name: ${label()}`);
+                assert(badge() === '10', `Opening the panel cleared the badge: ${badge()}`);
+                assert(label().includes('10 updates available'),
+                    `Opening the panel dropped the count from the gear's name: ${label()}`);
 
-                // 8. Closing and reopening does not bring it back.
+                // 8. Closing and reopening still shows it, because nothing has
+                //    been updated.
                 gear.click();
                 gear.click();
-                assert(badge() === null, `A seen update badged again on reopen: ${badge()}`);
+                assert(badge() === '10', `The badge did not come back on reopen: ${badge()}`);
+                gear.click();
+                assert(badge() === '10', `Closing the panel cleared the badge: ${badge()}`);
 
-                // 9. A genuinely new update does badge again, after closing.
-                gear.click();
+                // 9. Resolution is what clears it, one module at a time.
+                register('alpha', '2.0.0');
+                assert(badge() === '9', `Updating one module did not take one off the count: ${badge()}`);
+
+                for (const id of ['beta', 'gamma', 'epsilon', 'zeta', 'eta', 'theta', 'iota', 'kappa', 'lambda']) {
+                    register(id, '2.0.0');
+                }
+
+                assert(badge() === null, `The badge survived every update being applied: ${badge()}`);
+                assert(label().includes('1 problem recorded') && !label().includes('update'),
+                    `The gear's name kept a stale count: ${label()}`);
+
+                // 9b. And a genuinely new update badges again.
                 register('delta', '1.0.0');
-                assert(badge() === '4', `A new update did not reappear on the gear: ${badge()}`);
+                assert(badge() === '1', `A new update did not reappear on the gear: ${badge()}`);
 
                 // 10. None of this touched the dock or the network.
                 assert(!document.querySelector('[data-dock-key]'), 'The update badge put something in the dock');

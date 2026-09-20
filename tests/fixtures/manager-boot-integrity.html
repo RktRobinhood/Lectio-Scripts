@@ -35,7 +35,7 @@
          *   2. Incompatible setup. The general assertions need storage that is
          *      complete and entirely valid - both catalogues, both refresh
          *      stamps, an installed registry, a problem log and its seen
-         *      marker, an updates-seen signature. The late-inject fixture
+         *      marker, a retired updates-seen signature. The late-inject fixture
          *      deliberately has none of that, and giving it some would change
          *      what its existing assertions mean.
          *   3. Two tests fail differently. If someone rewrites this one badly,
@@ -178,10 +178,11 @@
         };
 
         /*
-         * The updates-seen signature for exactly the update that is waiting.
-         * The gear must therefore stay unmarked for updates - which it can only
-         * do by having read this. A Manager that lost the marker falls back to
-         * the empty string and nags.
+         * lectioManager.updatesSeen.v1 is left here on purpose although 1.29.0
+         * stopped reading it (issue #50). A browser upgrading from 1.28.0 has
+         * it, and the count badge is now about what is outstanding rather than
+         * what has been looked at, so the waiting update has to be counted with
+         * this sitting in storage saying it was already shown.
          */
         const initialStorage = {
             'lectioManager.catalogue.v1': JSON.stringify(stableCatalogue),
@@ -362,11 +363,12 @@
             assert(storedLog.length === 2 && storedLog[0].code === 'lesson-blocks',
                 'The stored problem log did not survive boot');
 
-            // Updates-seen marker: an update is genuinely waiting, and this
-            // browser has already seen exactly it, so the gear stays unmarked.
-            assert(!('updateCount' in toggle.dataset),
-                `The stored updates-seen marker was lost while booting, so the gear nags about `
-                + `an update this browser has already been shown: ${toggle.dataset.updateCount}`);
+            // Update count: an update is genuinely waiting, and a retired
+            // updates-seen marker naming exactly it is still in storage. The
+            // badge counts what is outstanding, so it shows, and it shows off
+            // catalogue-versus-registration state read during boot.
+            assert(toggle.dataset.updateCount === '1',
+                `The waiting update was not counted on the gear at boot: ${toggle.dataset.updateCount}`);
 
             // Installed registry: the live registration refreshed its own row,
             // and the module that is not in either catalogue is still there.

@@ -74,6 +74,15 @@ test('manager records a bounded, redacted problem log before its panel exists', 
     await runFixture('manager-problem-log.html', 'lectio-manager-log-', '?phase=one', ['--virtual-time-budget=6000']);
 });
 
+// The state most browsers are in is the empty one, and it used to answer
+// "nothing has been recorded" above a full report preview and two live-looking
+// buttons, one of which emptied an already-empty list. The empty section is now
+// only the notice, a first entry brings the frame back with no reopen, and the
+// count on the collapsed summary finishes the trail the gear's mark starts.
+test('manager shows an empty problem log as one notice, and counts unseen entries on its summary', async () => {
+    await runFixture('manager-problem-log-empty.html', 'lectio-manager-log-empty-', '', ['--virtual-time-budget=6000']);
+});
+
 // The storage readout is the only place the Manager looks at data it does not
 // own, and the only place it can destroy any. The seam is what is checked: it
 // measures localStorage and takes everything else from a module's declaration,

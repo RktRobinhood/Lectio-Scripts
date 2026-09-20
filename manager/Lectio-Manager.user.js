@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.28.0
+// @version      1.29.0
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules, including their settings and shared dock controls.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
@@ -386,7 +386,7 @@
     // Kept in step with the @version header by scripts/check-versions.mjs. The
     // header is metadata Tampermonkey reads; this is the only copy the running
     // script can see, and it is what the self-update notice compares.
-    const MANAGER_VERSION = '1.28.0';
+    const MANAGER_VERSION = '1.29.0';
 
     const STABLE_CATALOGUE_URL =
         'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/catalogue/modules.json';
@@ -462,9 +462,10 @@
     const STORAGE_DOCK = 'lectioManager.dock.v1';
     const STORAGE_LOG = 'lectioManager.log.v1';
     const STORAGE_LOG_SEEN = 'lectioManager.logSeen.v1';
-    // The set of updates the panel has already shown, so the gear's count badge
-    // goes quiet once they have been looked at and comes back for a new one.
-    const STORAGE_UPDATES_SEEN = 'lectioManager.updatesSeen.v1';
+    // 1.29.0 removed lectioManager.updatesSeen.v1. It remembered which updates
+    // the panel had been open in front of, and that is what made the count
+    // badge clear itself on an unrelated gear click (issue #50). The key is
+    // left unread rather than migrated; nothing writes it any more.
 
     /*
      * PROBLEM LOG
@@ -655,9 +656,6 @@
     // be long before - or entirely without - a panel to render it into.
     let problemLog = null;
     let logSeenAt = null;
-    // Like the log's own seen marker: read from storage the first time it is
-    // wanted, which can be long before there is a panel to render anything in.
-    let updatesSeenSignature = null;
     let logCopiedTimer = null;
     let settingsFileCopiedTimer = null;
     let updatedLabelTimer = null;
@@ -1269,7 +1267,9 @@
         set('.lectio-manager-dock-reset', t('resetDockOrder'));
         set('.lectio-manager-prefs-warning', t('dockWarning'));
 
-        set('.lectio-manager-log-section > summary', t('problemLog'));
+        // The summary carries a count chip beside its label, so the label is
+        // its own span - writing the summary itself would delete the chip.
+        set('.lectio-manager-log-summary-label', t('problemLog'));
         set('.lectio-manager-log-preview-label', t('problemLogPreview'));
         set('.lectio-manager-log-copy', t('problemLogCopy'));
         set('.lectio-manager-log-clear', t('problemLogClear'));
@@ -2008,26 +2008,26 @@
      * them, rather than adding anything to the dock. One function owns both,
      * because they share one 44px button and one accessible name.
      *
-     * They compose by sitting in opposite corners: the problem mark keeps the
-     * top right corner 1.23.0 gave it, and the update count takes the bottom
-     * right, so neither can cover the other and both can show at once. Neither
-     * is colour-only - the count is a number, and both are named in the label
-     * below, which is the gear's accessible name as well as its tooltip.
+     * They compose by sitting in opposite corners, swapped in 1.29.0 (issue
+     * #50): the update count takes the top right, which is the prominent one
+     * and the one a number needs room in, and the problem mark takes the
+     * bottom right. Neither can cover the other and both can show at once.
+     * Neither is colour-only - the count is a number, and both are named in
+     * the label below, which is the gear's accessible name as well as its
+     * tooltip.
+     *
+     * The two clear on different events on purpose. A problem is a thing that
+     * happened and has been read, so opening the log section clears it. An
+     * update is a thing still outstanding, so nothing but installing it clears
+     * it - see waitingUpdateCount().
      */
     function updateLauncherIndicators() {
         if (!launcher?.toggle) {
             return;
         }
 
-        // An open panel lists every update this counts, so it is the user
-        // having looked. Marking here covers opening it, refreshing inside it,
-        // and switching channel in it, without any of those knowing about this.
-        if (elements && !elements.panel.hasAttribute('hidden')) {
-            rememberUpdatesSeen();
-        }
-
         const problems = unseenLogCount();
-        const updates = unseenUpdateCount();
+        const updates = waitingUpdateCount();
         const parts = [t('appTitle')];
 
         if (problems > 0) parts.push(t('problemLogUnseen', problems));
@@ -2086,34 +2086,17 @@
         return waiting.sort();
     }
 
-    function unseenUpdateCount() {
-        const waiting = availableUpdates();
-
-        if (!waiting.length) return 0;
-
-        return waiting.join(',') === loadUpdatesSeen() ? 0 : waiting.length;
-    }
-
-    function loadUpdatesSeen() {
-        if (updatesSeenSignature === null) {
-            updatesSeenSignature = String(GM_getValue(STORAGE_UPDATES_SEEN, '') || '');
-        }
-
-        return updatesSeenSignature;
-    }
-
-    function rememberUpdatesSeen() {
-        const signature = availableUpdates().join(',');
-
-        if (signature === loadUpdatesSeen()) return;
-
-        updatesSeenSignature = signature;
-
-        try {
-            GM_setValue(STORAGE_UPDATES_SEEN, signature);
-        } catch (_) {
-            // Not worth failing an open for.
-        }
+    /*
+     * Outstanding, not unseen. Until 1.29.0 this subtracted a remembered
+     * signature of what the panel had last been open in front of, which meant
+     * the badge went out the moment the gear was clicked for anything at all -
+     * settings, the problem log - and never came back for that same waiting
+     * update (issue #50). Looking at a list is not installing from it. The
+     * only thing that takes a module off this count is the module actually
+     * arriving at a version availableUpdates() no longer flags.
+     */
+    function waitingUpdateCount() {
+        return availableUpdates().length;
     }
 
     function logEntryKindLabel(kind) {
@@ -2138,6 +2121,28 @@
         return [entry.code, entry.message].filter(Boolean).join(': ');
     }
 
+    /*
+     * The missing middle of the chain (issue #44). The gear's mark says that
+     * something was recorded and the entries say what, but between them sat a
+     * collapsed summary indistinguishable from the ones either side of it, so
+     * the trail stopped one click short. The same count chip the gear wears
+     * for updates goes here, drawn in the problem colour instead of the
+     * accent, and it clears on the same toggle that clears the gear's mark.
+     * The number is language-neutral; the sentence for it is on the chip's own
+     * label, from problemLogUnseen, in whichever language is set.
+     */
+    function renderLogUnseenCount() {
+        const chip = elements?.logUnseen;
+        if (!chip) return;
+
+        const unseen = unseenLogCount();
+
+        chip.hidden = unseen === 0;
+        chip.textContent = unseen > 0 ? String(unseen) : '';
+        chip.title = unseen > 0 ? t('problemLogUnseen', unseen) : '';
+        chip.setAttribute('aria-label', chip.title);
+    }
+
     function renderProblemLog() {
         if (!elements?.logList) {
             return;
@@ -2146,6 +2151,15 @@
         const log = loadProblemLog();
 
         elements.logList.textContent = '';
+
+        // With nothing recorded, the notice is the section's whole answer. The
+        // preview, the two buttons and the privacy line are the frame around
+        // real entries and are hidden until there are some (issue #44) - a
+        // seven-row report full of headings under "nothing has been recorded"
+        // reads as though there is something to send, and Clear log looked
+        // like an action while emptying an already-empty list.
+        renderLogUnseenCount();
+        elements.logReportBlock.hidden = !log.length;
 
         if (!log.length) {
             const empty = document.createElement('div');
@@ -4390,15 +4404,19 @@
                         <small class="lectio-manager-prefs-warning">The dock only appears when a module is using it. Drag an icon, or press Ctrl with an arrow key, to reorder.</small>
                     </details>
                     <details class="lectio-manager-prefs-section lectio-manager-log-section">
-                        <summary>Problem log</summary>
+                        <summary>
+                            <span class="lectio-manager-log-summary-label">Problem log</span><span class="lectio-manager-log-unseen" hidden></span>
+                        </summary>
                         <div class="lectio-manager-log-list"></div>
-                        <label class="lectio-manager-log-preview-label" for="lectio-manager-log-report"></label>
-                        <textarea id="lectio-manager-log-report" class="lectio-manager-log-report" rows="7" readonly></textarea>
-                        <div class="lectio-manager-log-actions">
-                            <button type="button" class="lectio-manager-log-copy">Copy report</button>
-                            <button type="button" class="lectio-manager-log-clear">Clear log</button>
+                        <div class="lectio-manager-log-report-block" hidden>
+                            <label class="lectio-manager-log-preview-label" for="lectio-manager-log-report"></label>
+                            <textarea id="lectio-manager-log-report" class="lectio-manager-log-report" rows="7" readonly></textarea>
+                            <div class="lectio-manager-log-actions">
+                                <button type="button" class="lectio-manager-log-copy">Copy report</button>
+                                <button type="button" class="lectio-manager-log-clear">Clear log</button>
+                            </div>
+                            <small class="lectio-manager-prefs-warning lectio-manager-log-help"></small>
                         </div>
-                        <small class="lectio-manager-prefs-warning lectio-manager-log-help"></small>
                     </details>
                     <details class="lectio-manager-prefs-section lectio-manager-storage-section">
                         <summary>Storage</summary>
@@ -4735,6 +4753,8 @@
             settingsFileReview: root.querySelector('.lectio-manager-settings-file-review'),
             settingsFileApply: root.querySelector('.lectio-manager-settings-file-apply'),
             logList: root.querySelector('.lectio-manager-log-list'),
+            logReportBlock: root.querySelector('.lectio-manager-log-report-block'),
+            logUnseen: root.querySelector('.lectio-manager-log-unseen'),
             logReport: root.querySelector('.lectio-manager-log-report'),
             logCopy: root.querySelector('.lectio-manager-log-copy'),
             selfUpdate: root.querySelector('.lectio-manager-self-update'),
@@ -6478,12 +6498,18 @@
 
             /* The one global signal the problem log gets. It belongs on the
                gear rather than the dock: the dock is for what modules put
-               there, and this is the Manager talking about itself. */
+               there, and this is the Manager talking about itself.
+
+               Bottom right since 1.29.0 (issue #50). It gave up the prominent
+               corner to the update count, which needs the room a two-digit
+               number takes and is the one still waiting to be acted on; a
+               problem has already happened and its own number is one click
+               away on the Problem log summary. */
             #lectio-manager-toggle.has-problems::after {
                 content: '';
                 position: absolute;
-                top: 5px;
-                right: 5px;
+                bottom: 3px;
+                right: 3px;
                 width: 9px;
                 height: 9px;
                 border-radius: 50%;
@@ -6491,25 +6517,35 @@
                 border: 2px solid #ffffff;
             }
 
-            /* The opposite corner from the problem mark above, so a page with
-               both shows both. Absolute and pointer-events: none, so it neither
-               resizes the 44px gear nor takes a click away from it. Text and
-               surface are the one pair of theme colours guaranteed to contrast
-               (ADR-0006), used the other way round so the count reads as a
-               quiet chip rather than a second alert. */
+            /* The count chip, and the same chip the Problem log summary wears:
+               a ringed pill, filled with the surface colour and drawn in the
+               colour of whatever it is counting. Here that is the accent, so
+               it cannot vanish into the accent-coloured gear, and it is the
+               Manager's own outlined-control pairing - accent on surface, as
+               the log's buttons already use - rather than the text-on-surface
+               inversion 1.24.0 guessed at, which no theme is designed around
+               (ADR-0006).
+
+               18px tall with 5px of side padding, so two digits are legible
+               and unsquashed. Absolute and pointer-events: none, so it neither
+               resizes the 44px gear nor takes a click away from it; it sits in
+               the opposite corner from the problem mark, so a gear with both
+               shows both. */
             #lectio-manager-toggle[data-update-count]::before {
                 content: attr(data-update-count);
                 position: absolute;
-                bottom: 3px;
-                right: 3px;
-                min-width: 11px;
-                height: 11px;
-                padding: 0 3px;
-                border-radius: 9px;
-                border: 2px solid #ffffff;
-                background: var(--lectio-theme-text, #10201e);
-                color: var(--lectio-theme-surface, #ffffff);
-                font: 600 10px/11px Roboto, Arial, sans-serif;
+                top: -2px;
+                right: -2px;
+                box-sizing: content-box;
+                min-width: 8px;
+                height: 18px;
+                padding: 0 5px;
+                border-radius: 11px;
+                border: 2px solid var(--lectio-theme-accent, #0f6f6f);
+                background: var(--lectio-theme-surface, #ffffff);
+                color: var(--lectio-theme-accent, #0f6f6f);
+                font: 700 12px/18px Roboto, Arial, sans-serif;
+                font-variant-numeric: tabular-nums;
                 text-align: center;
                 pointer-events: none;
             }
@@ -6867,10 +6903,40 @@
                 padding: 4px;
             }
 
+            /* With the preview and the buttons gone this is the section, not a
+               caption above it, so it is sized to be read as the answer. */
             .lectio-manager-log-empty {
-                color: var(--lectio-theme-muted, #5e6870);
+                color: var(--lectio-theme-text, #2a4250);
+                font-size: 11px;
+                line-height: 1.4;
+                padding: 10px 4px;
+            }
+
+            /* The gear's count chip, indoors: same pill, same ring, drawn in
+               the problem colour instead of the accent, so the mark on the
+               gear and the count on the section read as one signal arriving
+               in two places rather than two inventions. */
+            .lectio-manager-log-unseen {
+                display: inline-block;
+                box-sizing: content-box;
+                vertical-align: 1px;
+                margin-left: 6px;
+                min-width: 8px;
+                padding: 0 5px;
+                border: 1px solid var(--lectio-theme-danger, #b42318);
+                border-radius: 9px;
+                background: var(--lectio-theme-surface, #ffffff);
+                color: var(--lectio-theme-danger, #b42318);
                 font-size: 10px;
-                padding: 4px 3px;
+                font-weight: 700;
+                line-height: 15px;
+                font-variant-numeric: tabular-nums;
+                text-align: center;
+            }
+
+            .lectio-manager-log-unseen[hidden],
+            .lectio-manager-log-report-block[hidden] {
+                display: none;
             }
 
             .lectio-manager-log-entry {

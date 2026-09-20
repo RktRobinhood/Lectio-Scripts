@@ -97,15 +97,28 @@
                     `The Danish name for the badge is wrong: ${label()}`);
                 assert(gear.title === label(), 'The tooltip and the accessible name disagree');
 
-                // Opening it lists both, and clears the gear.
+                // Opening it lists both, and leaves the gear alone: looking at
+                // an update is not installing it (issue #50).
                 gear.click();
                 const notice = document.querySelector('.lectio-manager-self-update');
                 assert(notice && !notice.hidden, 'The Manager self-update the badge counted is not shown');
                 assert(document.querySelectorAll('.lectio-manager-status-update').length === 1,
                     'The overlaid module the badge counted is not shown as an update');
-                assert(gear.getAttribute('data-update-count') === null,
-                    'The badge survived the panel being opened');
-                assert(label() === 'Lectio Tools', `The gear's name kept a stale count: ${label()}`);
+                assert(gear.getAttribute('data-update-count') === '2',
+                    'Opening the panel cleared the badge');
+                assert(label() === 'Lectio Tools — 2 opdateringer tilgængelige',
+                    `Opening the panel dropped the count from the gear's name: ${label()}`);
+
+                // Installing the overlay's copy is what takes it off the count.
+                // The Manager's own 9.9.9 is still waiting, so one is left.
+                window.dispatchEvent(new CustomEvent('lectio-module:register', {
+                    detail: { id: 'overlaid', name: 'Overlaid', version: '2.0.0', settingsSchema: [] }
+                }));
+
+                assert(gear.getAttribute('data-update-count') === '1',
+                    `Updating the overlaid module did not take it off the count: ${gear.getAttribute('data-update-count')}`);
+                assert(label() === 'Lectio Tools — 1 opdatering tilgængelig',
+                    `The Danish singular name for the badge is wrong: ${label()}`);
 
                 assert(networkCalls === 0, `The badge caused ${networkCalls} network requests`);
                 assert(!document.querySelector('[data-dock-key]'), 'The update badge put something in the dock');

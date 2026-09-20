@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio Manager problem-log empty-state fixture</title>
+</head>
+<body>
+    <script>
+        // Most browsers never record anything, so the empty state is the state
+        // this section is usually in - and until #44 it answered "nothing has
+        // been recorded" and then put a full report preview, a Copy report and
+        // a Clear log that emptied an already-empty list underneath the notice.
+        // What is checked here is that the empty section is only the notice,
+        // that a first entry brings the whole frame back without a reopen, and
+        // that the count on the collapsed summary finishes the chain the gear's
+        // mark starts.
+        const catalogue = {
+            schemaVersion: 1,
+            generatedAt: '2026-09-20T00:00:00.000Z',
+            manager: {
+                version: '1.0.0',
+                installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/manager/Lectio-Manager.user.js'
+            },
+            modules: [
+                {
+                    id: 'early-bird',
+                    name: 'Early Bird',
+                    description: 'Reports nothing at all, most days.',
+                    category: 'Interface',
+                    audience: ['student'],
+                    status: 'stable',
+                    version: '1.0.0',
+                    installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/EarlyBird.user.js'
+                }
+            ]
+        };
+
+        // Nothing under lectioManager.log.v1: a browser where nothing has ever
+        // gone wrong, which is the case the section is wrong about.
+        const storage = new Map([
+            ['lectioManager.catalogue.v1', JSON.stringify(catalogue)],
+            ['lectioManager.lastRefresh.v1', Date.now()],
+            ['lectioManager.updateTipDismissed.v1', true]
+        ]);
+
+        window.GM_getValue = (key, fallback) => storage.has(key) ? storage.get(key) : fallback;
+        window.GM_setValue = (key, value) => storage.set(key, value);
+        window.GM_xmlhttpRequest = () => {};
+
+        window.pageErrors = [];
+        window.addEventListener('error', (event) => window.pageErrors.push(String(event.message)));
+
+        function report(detail) {
+            window.dispatchEvent(new CustomEvent('lectio-module:report', { detail }));
+        }
+    </script>
+    <script src="../../manager/Lectio-Manager.user.js"></script>
+    <script>
+        function assert(condition, message) {
+            if (!condition) throw new Error(message);
+        }
+
+        const tick = () => new Promise((done) => setTimeout(done, 0));
+        const shown = (node) => Boolean(node) && node.getClientRects().length > 0;
+
+        window.addEventListener('load', async () => {
+            try {
+                const gear = document.querySelector('#lectio-manager-toggle');
+                assert(gear, 'The gear was not built');
+                assert(!gear.classList.contains('has-problems'),
+                    'The gear marked a problem on a browser with an empty log');
+
+                gear.click();
+                // The log lives in the header's preferences flyout, which has
+                // to be open for any of this to have a box on screen.
+                document.querySelector('.lectio-manager-channel-btn').click();
+
+                const section = document.querySelector('.lectio-manager-log-section');
+                const block = document.querySelector('.lectio-manager-log-report-block');
+                const chip = document.querySelector('.lectio-manager-log-unseen');
+                const notice = () => document.querySelector('.lectio-manager-log-empty');
+                assert(section && block && chip, 'The first gear click did not build the log view');
+
+                section.open = true;
+                await tick();
+
+                // 1. Empty: the notice is the whole section. No preview label,
+                //    no textarea, and neither button - a Clear log that clears
+                //    nothing is the one that reads most like an action.
+                assert(shown(notice()), 'The empty notice is not shown');
+                assert(notice().textContent === 'Nothing has been recorded on this browser.',
+                    `The empty notice is not the translated string: ${notice().textContent}`);
+                assert(block.hidden, 'The report block is rendered with nothing recorded');
+                assert(!shown(document.querySelector('.lectio-manager-log-report')),
+                    'The report textarea is shown with nothing recorded');
+                assert(!shown(document.querySelector('.lectio-manager-log-preview-label')),
+                    'The preview label is shown with nothing recorded');
+
+                const visibleButtons = [...section.querySelectorAll('button')].filter(shown);
+                assert(visibleButtons.length === 0,
+                    `The empty section still offers ${visibleButtons.length} button(s): ${
+                        visibleButtons.map((button) => button.textContent).join(', ')}`);
+
+                assert(!shown(chip), 'The summary carries a count with nothing recorded');
+
+                // 2. ADR-0013: both strings come from the table, and applyLanguage
+                //    runs over a section whose controls are hidden without
+                //    losing any of them.
+                const select = document.querySelector('.lectio-manager-language-select');
+                select.value = 'da';
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+
+                assert(notice().textContent === 'Der er ikke registreret noget i denne browser.',
+                    `The empty notice did not follow the language: ${notice().textContent}`);
+                assert([...section.querySelectorAll('button')].filter(shown).length === 0,
+                    'A language change brought the dead controls back');
+
+                select.value = 'en';
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+
+                // 3. Collapsed, so the count on the summary is the only thing
+                //    pointing here - which is the point of it.
+                section.open = false;
+                await tick();
+
+                // Opening the empty section marked it seen on this millisecond;
+                // an entry has to be later than that to be unseen.
+                await new Promise((done) => setTimeout(done, 20));
+
+                report({ moduleId: 'early-bird', kind: 'drift', code: 'lesson-blocks', found: 0 });
+
+                assert(!block.hidden, 'The first entry did not bring the report block back');
+                assert(!notice(), 'The empty notice survived the first entry');
+                assert(gear.classList.contains('has-problems'),
+                    'The gear does not show that something was recorded');
+                assert(shown(chip), 'The collapsed summary carries no count for an unseen entry');
+                assert(chip.textContent === '1', `The summary count is wrong: ${chip.textContent}`);
+                assert(chip.getAttribute('aria-label') === '1 problem recorded',
+                    `The summary count is not named: ${chip.getAttribute('aria-label')}`);
+
+                report({ moduleId: 'early-bird', kind: 'drift', code: 'day-header', found: 0 });
+                assert(chip.textContent === '2', `A second entry did not raise the count: ${chip.textContent}`);
+                assert(chip.getAttribute('aria-label') === '2 problems recorded',
+                    `The plural summary count is not named: ${chip.getAttribute('aria-label')}`);
+
+                // 4. Expanding clears the count and the gear's mark together,
+                //    on the one toggle handler that already did the second.
+                section.open = true;
+                await tick();
+
+                assert(!shown(chip), 'The summary kept its count after the section was opened');
+                assert(!gear.classList.contains('has-problems'),
+                    'The gear kept its mark after the log was opened');
+                assert(shown(document.querySelector('.lectio-manager-log-report')),
+                    'The report textarea did not come back with real entries');
+                assert([...section.querySelectorAll('button')].filter(shown).length === 2,
+                    'Copy report and Clear log did not come back with real entries');
+
+                // 5. Clearing returns the section to the empty state in place.
+                document.querySelector('.lectio-manager-log-clear').click();
+
+                assert(block.hidden, 'Clearing the log left the dead controls behind');
+                assert(shown(notice()), 'The cleared section does not show the empty notice');
+                assert(!shown(chip), 'The cleared section still carries a count');
+                assert([...section.querySelectorAll('button')].filter(shown).length === 0,
+                    'The cleared section still offers a button');
+
+                // 6. Nothing on the dock, and nothing thrown anywhere in that.
+                assert(!document.querySelector('[data-dock-key]'),
+                    'The problem log put something in the dock');
+                assert(window.pageErrors.length === 0,
+                    `The problem log view threw: ${window.pageErrors.join(' | ')}`);
+
+                document.documentElement.dataset.testResult = 'pass';
+            } catch (error) {
+                document.documentElement.dataset.testResult = `fail: ${error.message}`;
+            }
+        });
+    </script>
+</body>
+</html>
