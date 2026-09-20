@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio Manager problem-log fixture</title>
+</head>
+<body>
+    <script>
+        // The log has to be recording before anything is on screen - a module
+        // throwing as it starts up is the failure it exists for - and it has to
+        // be safe to paste into a public repository afterwards. Both halves are
+        // checked here, and the redaction half is checked with the kind of
+        // message a Lectio parser actually produces when it fails.
+        const catalogue = {
+            schemaVersion: 1,
+            generatedAt: '2026-09-20T00:00:00.000Z',
+            manager: {
+                version: '1.0.0',
+                installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/manager/Lectio-Manager.user.js'
+            },
+            modules: [
+                {
+                    id: 'early-bird',
+                    name: 'Early Bird',
+                    description: 'Reports before the panel has ever been built.',
+                    category: 'Interface',
+                    audience: ['student'],
+                    status: 'stable',
+                    version: '1.0.0',
+                    installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/EarlyBird.user.js'
+                }
+            ]
+        };
+
+        const storage = new Map([
+            ['lectioManager.catalogue.v1', JSON.stringify(catalogue)],
+            ['lectioManager.lastRefresh.v1', Date.now()],
+            ['lectioManager.updateTipDismissed.v1', true]
+        ]);
+
+        window.GM_getValue = (key, fallback) => storage.has(key) ? storage.get(key) : fallback;
+        window.GM_setValue = (key, value) => storage.set(key, value);
+        window.GM_xmlhttpRequest = () => {};
+
+        // A real Lectio parse failure quotes what it could not parse, so this
+        // carries a person's name, a message subject and a school-scoped URL
+        // with a student id on it - every kind of thing that must not survive.
+        const leaky = 'Kunne ikke læse rækken "Aflyst prøve på fredag – husk kapitel 4" for Anne Andersen ' +
+            'på https://www.lectio.dk/lectio/223/beskeder2.aspx?type=liste&elevid=4774957854 (HE80549259557)';
+
+        const mustNotSurvive = [
+            'Anne', 'Andersen', 'Aflyst', 'prøve', 'fredag', 'kapitel',
+            'lectio.dk', 'beskeder2', 'elevid', '4774957854', '223', '80549259557'
+        ];
+
+        window.pageErrors = [];
+        window.addEventListener('error', (event) => window.pageErrors.push(String(event.message)));
+
+        function unexpectedErrors() {
+            return window.pageErrors.filter((message) => !message.includes('Kunne ikke læse'));
+        }
+
+        function storedLog() {
+            return JSON.parse(storage.get('lectioManager.log.v1') || '[]');
+        }
+
+        function report(detail) {
+            window.dispatchEvent(new CustomEvent('lectio-module:report', { detail }));
+        }
+    </script>
+    <script src="../../manager/Lectio-Manager.user.js"></script>
+    <script>
+        function assert(condition, message) {
+            if (!condition) throw new Error(message);
+        }
+
+        // Still parsing, so init() has not run: no gear, no panel, no dock.
+        // Anything recorded here is recorded by the eager half alone.
+        const beforeAnything = {
+            gear: Boolean(document.querySelector('#lectio-manager-toggle')),
+            panel: Boolean(document.querySelector('#lectio-manager-panel'))
+        };
+
+        report({ moduleId: 'early-bird', kind: 'drift', code: 'lesson-blocks', found: 0 });
+        window.dispatchEvent(new ErrorEvent('error', { message: leaky, error: new TypeError(leaky) }));
+
+        const capturedEarly = storedLog();
+    </script>
+    <script>
+        window.addEventListener('load', async () => {
+            try {
+                // 1. Capture is eager: it beat the gear, the panel and init().
+                assert(!beforeAnything.gear, 'The gear existed before the Manager had finished parsing');
+                assert(!beforeAnything.panel, 'The panel existed before the Manager had finished parsing');
+                assert(capturedEarly.length === 2,
+                    `Capture did not work before anything was built: ${JSON.stringify(capturedEarly)}`);
+
+                const drift = capturedEarly[0];
+                assert(drift.kind === 'drift' && drift.moduleId === 'early-bird' &&
+                    drift.code === 'lesson-blocks' && drift.found === 0,
+                    `A module drift report was not recorded as sent: ${JSON.stringify(drift)}`);
+
+                // 2. Redaction. Nothing personal from that message survived
+                //    anywhere in the stored log.
+                const storedText = storage.get('lectioManager.log.v1');
+                for (const secret of mustNotSurvive) {
+                    assert(!storedText.includes(secret),
+                        `"${secret}" survived redaction into the stored log: ${storedText}`);
+                }
+
+                const caught = capturedEarly[1];
+                assert(caught.message.includes('<url>') && caught.message.includes('<text>') &&
+                    caught.message.includes('<name>'),
+                    `The redacted message kept no shape at all: ${caught.message}`);
+                assert(caught.message.startsWith('TypeError'),
+                    `The error type was lost, which is the part worth keeping: ${caught.message}`);
+
+                // 3. A module cannot put prose into the log even if it tries:
+                //    there is no field for a sentence, and a code with a space
+                //    in it is not a code.
+                report({
+                    moduleId: 'early-bird',
+                    kind: 'error',
+                    code: 'not a token',
+                    message: 'Anne Andersen skrev om prøven',
+                    found: 1
+                });
+
+                const attempted = storedLog().pop();
+                assert(attempted.message === '' && attempted.code === '',
+                    `A module smuggled free text into the log: ${JSON.stringify(attempted)}`);
+                assert(!storage.get('lectioManager.log.v1').includes('Andersen'),
+                    'A module-supplied message reached storage');
+
+                // 4. Nothing above threw while there was no panel to render into.
+                assert(unexpectedErrors().length === 0,
+                    `The Manager threw while capturing before its panel existed: ${unexpectedErrors().join(' | ')}`);
+                assert(!document.querySelector('.lectio-manager-log-section'),
+                    'The log view was built without a gear click');
+
+                // 5. The gear carries the only global signal, and the dock
+                //    gains nothing.
+                const gear = document.querySelector('#lectio-manager-toggle');
+                assert(gear.classList.contains('has-problems'),
+                    'The gear does not show that something was recorded');
+                assert(!document.querySelector('[data-dock-key]'),
+                    'The problem log put something in the dock');
+
+                // 6. Rendering is lazy: the first gear click is what builds it,
+                //    and everything captured before it is there.
+                gear.click();
+
+                const section = document.querySelector('.lectio-manager-log-section');
+                assert(section, 'The first gear click did not build the log view');
+
+                const rows = [...document.querySelectorAll('.lectio-manager-log-entry')];
+                assert(rows.length === 3, `The log view lost entries recorded before it existed: ${rows.length}`);
+                assert(rows[rows.length - 1].textContent.includes('lesson-blocks'),
+                    `A drift signal is not rendered generically: ${rows[rows.length - 1].textContent}`);
+                assert(rows[rows.length - 1].textContent.includes('Early Bird'),
+                    'The log view does not name the module that reported');
+
+                // 7. The report block answers the bug form's questions, and is
+                //    previewed as the exact text that gets copied.
+                const preview = document.querySelector('.lectio-manager-log-report').value;
+                for (const field of [
+                    'Affected script:', 'Release channel: Stable', 'Manager version: 1.23.0',
+                    'Browser:', 'Userscript manager:', 'Lectio school ID:', 'Lectio page:'
+                ]) {
+                    assert(preview.includes(field), `The report block is missing "${field}": ${preview}`);
+                }
+
+                for (const secret of mustNotSurvive.concat(['fixtures', 'file:', 'phase='])) {
+                    assert(!preview.includes(secret),
+                        `"${secret}" reached the block a user pastes into a public issue: ${preview}`);
+                }
+
+                // 8. Opening the section is what counts as having looked.
+                section.open = true;
+                await new Promise((done) => setTimeout(done, 0));
+                assert(!gear.classList.contains('has-problems'),
+                    'The gear kept its mark after the log was opened');
+
+                // 9. Bounded. Sixty distinct reports do not make sixty rows,
+                //    and a repeat is a counter rather than a row.
+                for (let index = 0; index < 60; index += 1) {
+                    report({ moduleId: 'early-bird', kind: 'drift', code: `probe-${index}`, found: 0 });
+                }
+
+                const bounded = storedLog();
+                assert(bounded.length === 25, `The log is not capped: ${bounded.length} entries`);
+                assert(bounded[bounded.length - 1].code === 'probe-59', 'The log dropped the newest entry, not the oldest');
+                assert(!JSON.stringify(bounded).includes('probe-1"'), 'The log kept an entry older than its cap');
+                assert(storage.get('lectioManager.log.v1').length < 20000,
+                    `The stored log is larger than a rolling log of 25 short entries should ever be: ${storage.get('lectioManager.log.v1').length}`);
+
+                for (let index = 0; index < 10; index += 1) {
+                    report({ moduleId: 'early-bird', kind: 'drift', code: 'repeated', found: 0 });
+                }
+
+                const afterRepeats = storedLog();
+                assert(afterRepeats.length === 25, 'A repeated report grew the log');
+                assert(afterRepeats[afterRepeats.length - 1].count === 10,
+                    `A repeated report was not folded into one row: ${JSON.stringify(afterRepeats[afterRepeats.length - 1])}`);
+
+                // 10. Clearing empties it, and the whole run added no errors.
+                document.querySelector('.lectio-manager-log-clear').click();
+                assert(storedLog().length === 0, 'Clearing the log left entries behind');
+                assert(document.querySelector('.lectio-manager-log-empty'), 'The cleared log view is not empty');
+                assert(unexpectedErrors().length === 0,
+                    `The problem log threw: ${unexpectedErrors().join(' | ')}`);
+
+                document.documentElement.dataset.testResult = 'pass';
+            } catch (error) {
+                document.documentElement.dataset.testResult = `fail: ${error.message}`;
+            }
+        });
+    </script>
+</body>
+</html>

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.22.2
+// @version      1.23.0
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules, including their settings and shared dock controls.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
@@ -126,7 +126,22 @@
             settingInfo: (label) => `What does “${label}” do?`,
             choose: 'Choose',
             run: 'Run',
-            reportIssue: 'Report a bug or idea'
+            reportIssue: 'Report a bug or idea',
+            problemLog: 'Problem log',
+            problemLogEmpty: 'Nothing has been recorded on this browser.',
+            problemLogHelp: 'Kept in this browser only, and never sent anywhere. Names, message text and web addresses are removed as it is written, but read it before you paste it into an issue.',
+            problemLogCopy: 'Copy report',
+            problemLogCopied: 'Copied',
+            problemLogClear: 'Clear log',
+            problemLogPreview: 'This is exactly what will be copied',
+            problemLogUnseen: (count) => `${count} problem${count === 1 ? '' : 's'} recorded`,
+            logKindError: 'Error',
+            logKindDrift: 'Not found',
+            logKindNotice: 'Note',
+            logDrift: (code, found) => `looked for ${code}, found ${found}`,
+            logRepeated: (count) => `×${count}`,
+            logManager: 'Lectio Manager',
+            logPage: 'This page'
         },
         da: {
             appTitle: 'Lectio Tools',
@@ -206,7 +221,22 @@
             settingInfo: (label) => `Hvad gør “${label}”?`,
             choose: 'Vælg',
             run: 'Kør',
-            reportIssue: 'Rapportér en fejl eller idé'
+            reportIssue: 'Rapportér en fejl eller idé',
+            problemLog: 'Fejllog',
+            problemLogEmpty: 'Der er ikke registreret noget i denne browser.',
+            problemLogHelp: 'Gemmes kun i denne browser og sendes aldrig nogen steder hen. Navne, beskedtekst og webadresser fjernes, mens loggen skrives, men læs den igennem, før du indsætter den i en fejlrapport.',
+            problemLogCopy: 'Kopiér rapport',
+            problemLogCopied: 'Kopieret',
+            problemLogClear: 'Ryd loggen',
+            problemLogPreview: 'Det her er præcis det, der bliver kopieret',
+            problemLogUnseen: (count) => `${count} problem${count === 1 ? '' : 'er'} registreret`,
+            logKindError: 'Fejl',
+            logKindDrift: 'Ikke fundet',
+            logKindNotice: 'Note',
+            logDrift: (code, found) => `ledte efter ${code}, fandt ${found}`,
+            logRepeated: (count) => `×${count}`,
+            logManager: 'Lectio Manager',
+            logPage: 'Denne side'
         }
     };
 
@@ -260,7 +290,7 @@
     // Kept in step with the @version header by scripts/check-versions.mjs. The
     // header is metadata Tampermonkey reads; this is the only copy the running
     // script can see, and it is what the self-update notice compares.
-    const MANAGER_VERSION = '1.22.2';
+    const MANAGER_VERSION = '1.23.0';
 
     const STABLE_CATALOGUE_URL =
         'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/catalogue/modules.json';
@@ -291,6 +321,10 @@
     const DOCK_REMOVE_EVENT = 'lectio-manager:dock:remove';
     const DOCK_ACTIVATE_EVENT = 'lectio-manager:dock:activate';
     const DOCK_RENDER_PANEL_EVENT = 'lectio-manager:dock:render-panel';
+    // Additive, and one-way: a module tells the Manager that something went
+    // wrong or that a selector it depends on matched nothing. Nothing answers,
+    // so a module firing this with no Manager installed simply does nothing.
+    const REPORT_EVENT = 'lectio-module:report';
 
     // Keep the original stable cache keys so existing users do not lose their
     // last-known-good production catalogue during this upgrade.
@@ -309,6 +343,38 @@
     const STORAGE_UPDATE_TIP_DISMISSED = 'lectioManager.updateTipDismissed.v1';
     const STORAGE_INSTALLED = 'lectioManager.installed.v1';
     const STORAGE_DOCK = 'lectioManager.dock.v1';
+    const STORAGE_LOG = 'lectioManager.log.v1';
+    const STORAGE_LOG_SEEN = 'lectioManager.logSeen.v1';
+
+    /*
+     * PROBLEM LOG
+     * -----------
+     * A rolling log of what went wrong, so a teacher can paste one block into a
+     * bug report instead of being asked to operate DevTools. It exists to make a
+     * report usable, and it is pasted into a public repository by people whose
+     * pages are full of real names - so the bound below is small and the
+     * redaction above it is deliberately blunt.
+     *
+     * Two rules hold the privacy side up, and neither is negotiable:
+     *
+     * 1. Nothing here ever leaves the browser. No fetch, no beacon, no image
+     *    ping - the only way anything reaches the network is a person copying
+     *    the previewed block and pasting it themselves.
+     * 2. Free prose only ever comes from code, never from a page. A module
+     *    reports a `code` token (no spaces, repository-authored) and a count;
+     *    it cannot hand the log a sentence, so it cannot hand it a name, a
+     *    message subject or a hold. The only free text stored is the message of
+     *    an error the Manager caught itself, and that goes through redactText()
+     *    first.
+     *
+     * Bounded on both axes: LOG_LIMIT entries, each field truncated, and a
+     * repeat of the newest entry bumps a counter instead of appending - so a
+     * parser throwing in a loop costs one row, not a thousand.
+     */
+    const LOG_LIMIT = 25;
+    const LOG_MESSAGE_LIMIT = 140;
+    const LOG_CODE_LIMIT = 48;
+    const LOG_REPEAT_LIMIT = 999;
 
     /*
      * The two fills are deliberately low. The dock is glass: most of what makes
@@ -350,6 +416,12 @@
      */
     let launcher = null;
     let lastErrorMessage = null;
+    // Capture is eager and rendering is lazy, so the log is state, not UI: it is
+    // read from storage the first time anything is recorded or shown, which may
+    // be long before - or entirely without - a panel to render it into.
+    let problemLog = null;
+    let logSeenAt = null;
+    let logCopiedTimer = null;
     let updatedLabelTimer = null;
     let currentView = 'installed';
     let sortMode = 'category';
@@ -378,6 +450,17 @@
     // ============================================================
     // BOOT
     // ============================================================
+
+    /*
+     * Capture starts here rather than in init(), because the failures worth
+     * recording happen before anyone has opened anything - a module throwing as
+     * it starts up is the case the log exists for. Three listeners, added once
+     * for the life of the page, never re-added and never per-item: nothing here
+     * accumulates across a navigation.
+     */
+    window.addEventListener('error', handleWindowError);
+    window.addEventListener('unhandledrejection', handleWindowRejection);
+    window.addEventListener(REPORT_EVENT, handleModuleReport);
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', init, { once: true });
@@ -534,6 +617,15 @@
 
             if (errors.length) {
                 console.warn(LOG, 'Catalogue refresh partially failed:', errors);
+                // The Manager's own most common failure, and one a user can do
+                // nothing about but report. The text is written by the code
+                // above, not read off a page, and is redacted regardless.
+                recordLogEntry({
+                    moduleId: 'manager',
+                    kind: 'error',
+                    code: 'catalogue-refresh',
+                    message: errors.join(' | ')
+                });
                 showError(
                     stableCatalogue
                         ? t('refreshFailedSome', errors.join(' | '))
@@ -804,6 +896,7 @@
         publishLanguage();
         applyStaticText();
         renderModuleList();
+        renderProblemLog();
         updateRefreshedLabel({ justUpdated: false });
         updateChannelUI();
         syncDockPreferenceControls();
@@ -860,7 +953,7 @@
             channelSelect.querySelector('option[value="unstable"]').textContent = t('unstable');
         }
 
-        set('.lectio-manager-prefs-section > summary', t('dock'));
+        set('.lectio-manager-dock-section > summary', t('dock'));
         set('.lectio-manager-dock-edge-label', t('screenEdge'));
         set('.lectio-manager-dock-align-label', t('positionOnEdge'));
         set('.lectio-manager-dock-size-label', t('iconSize'));
@@ -870,6 +963,12 @@
         set('.lectio-manager-dock-autohide-label', t('autoHide'));
         set('.lectio-manager-dock-reset', t('resetDockOrder'));
         set('.lectio-manager-prefs-warning', t('dockWarning'));
+
+        set('.lectio-manager-log-section > summary', t('problemLog'));
+        set('.lectio-manager-log-preview-label', t('problemLogPreview'));
+        set('.lectio-manager-log-copy', t('problemLogCopy'));
+        set('.lectio-manager-log-clear', t('problemLogClear'));
+        set('.lectio-manager-log-help', t('problemLogHelp'));
 
         const edgeSelect = root.querySelector('.lectio-manager-dock-edge');
         if (edgeSelect) {
@@ -913,6 +1012,10 @@
 
         const languageSelect = root.querySelector('.lectio-manager-language-select');
         if (languageSelect) languageSelect.value = language;
+
+        // Last, because it writes the gear's label over the one set above when
+        // there is something waiting in the log.
+        updateLauncherLogIndicator();
     }
 
     function normalizeReleaseChannel(value) {
@@ -1178,6 +1281,475 @@
         window.dispatchEvent(new CustomEvent(CLEAR_SETTING_PREVIEW_EVENT, {
             detail: { id: moduleId, key }
         }));
+    }
+
+    // ============================================================
+    // PROBLEM LOG: CAPTURE
+    // ============================================================
+
+    /*
+     * Everything free-text that reaches the log goes through here first.
+     *
+     * A parser usually fails while holding the text it could not parse, so an
+     * error message is exactly where a student's name, a message subject or a
+     * hold ends up. A log entry that is too vague costs one round of questions
+     * on an issue; one that is too specific cannot be taken back out of a public
+     * repository. So these rules are blunt, and over-redaction is the intended
+     * failure mode.
+     *
+     * In order: collapse whitespace; remove web addresses, Lectio paths and
+     * e-mail addresses whole; remove key=value pairs, so an id written out on
+     * its own does not survive its URL being stripped; replace any run of three
+     * or more digits, keeping up to three prefix letters, so HE80549259557 and
+     * 4774957854 both go while "found 0" stays; replace quoted prose, taking a
+     * quoted span with a space in it to be a sentence rather than a property
+     * name; replace runs of two or more capitalised words, which is what a
+     * person's name and a school's name both look like. Then truncate.
+     */
+    function redactText(value) {
+        if (typeof value !== 'string' || !value) {
+            return '';
+        }
+
+        let text = value.replace(/\s+/g, ' ').trim().slice(0, 400);
+
+        text = text.replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, '<url>');
+        text = text.replace(/\bwww\.\S+/gi, '<url>');
+        text = text.replace(/\/lectio\/\S*/gi, '<url>');
+        text = text.replace(/[^\s<>()"'`]+@[^\s<>()"'`]+\.[a-z]{2,}/gi, '<email>');
+        text = text.replace(/\b[A-Za-z_][A-Za-z0-9_]*=[^\s&|,;]+/g, '<param>');
+        text = text.replace(/\b([A-Za-z]{0,3})\d{3,}\b/g, '$1<id>');
+
+        text = text.replace(
+            /"([^"]{1,200})"|“([^”]{1,200})”|'([^']{1,200})'|«([^»]{1,200})»/g,
+            (match, double, curly, single, guillemet) => {
+                const inner = double ?? curly ?? single ?? guillemet ?? '';
+                return /\s/.test(inner) || inner.length > 32 ? '<text>' : match;
+            }
+        );
+
+        const nameWord = '\\p{Lu}[\\p{L}\\u2019\'-]*';
+        text = text.replace(new RegExp(`${nameWord}(?:\\s+${nameWord})+`, 'gu'), '<name>');
+
+        return text.length > LOG_MESSAGE_LIMIT
+            ? `${text.slice(0, LOG_MESSAGE_LIMIT - 1).trim()}…`
+            : text;
+    }
+
+    // Module ids and report codes are repository-authored tokens, so they are
+    // allowed through unchanged - but only if they really are tokens. Anything
+    // with a space in it is prose that got where it should not be.
+    function safeIdentifier(value, limit = LOG_CODE_LIMIT) {
+        const text = String(value ?? '').trim();
+        return /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(text) ? text.slice(0, limit) : '';
+    }
+
+    // The page type, never the URL: a Lectio address carries the school, and
+    // its query string carries whoever the page is about.
+    function pageType() {
+        const file = String(location.pathname || '').split('/').filter(Boolean).pop() || '';
+        return /^[A-Za-z0-9_-]{1,40}\.aspx$/.test(file) ? file : 'other';
+    }
+
+    // The school id is the one identifier the issue templates ask for.
+    function schoolId() {
+        const match = String(location.pathname || '').match(/^\/lectio\/(\d{1,8})(?:\/|$)/);
+        return match ? match[1] : '';
+    }
+
+    function loadProblemLog() {
+        if (problemLog) {
+            return problemLog;
+        }
+
+        problemLog = [];
+
+        try {
+            const parsed = JSON.parse(GM_getValue(STORAGE_LOG, '') || '[]');
+
+            if (Array.isArray(parsed)) {
+                // Re-normalized on the way back in as well as on the way out: a
+                // stored log is still input, and this is the cheapest place to
+                // be sure an older or hand-edited one cannot widen anything.
+                for (const stored of parsed.slice(-LOG_LIMIT)) {
+                    const entry = normalizeLogEntry(stored);
+                    if (entry) {
+                        entry.at = Number(stored.at) || entry.at;
+                        entry.count = Math.min(Math.max(Number(stored.count) || 1, 1), LOG_REPEAT_LIMIT);
+                        problemLog.push(entry);
+                    }
+                }
+            }
+        } catch (_) {
+            problemLog = [];
+        }
+
+        if (logSeenAt === null) {
+            logSeenAt = Number(GM_getValue(STORAGE_LOG_SEEN, 0)) || 0;
+        }
+
+        return problemLog;
+    }
+
+    function saveProblemLog() {
+        try {
+            GM_setValue(STORAGE_LOG, JSON.stringify(problemLog || []));
+        } catch (_) {
+            // A log that cannot be stored is not a reason to break the Manager.
+        }
+    }
+
+    function normalizeLogEntry(raw) {
+        if (!raw || typeof raw !== 'object') {
+            return null;
+        }
+
+        const kind = ['error', 'drift', 'notice'].includes(raw.kind) ? raw.kind : 'error';
+        const number = Number(raw.found);
+        const found = Number.isFinite(number) && number >= 0 ? Math.min(Math.round(number), 9999) : null;
+        const message = redactText(raw.message);
+        const code = safeIdentifier(raw.code);
+
+        if (!code && !message && found === null) {
+            return null;
+        }
+
+        return {
+            at: Date.now(),
+            kind,
+            moduleId: safeIdentifier(raw.moduleId, 40),
+            code,
+            found,
+            message,
+            where: pageType(),
+            count: 1
+        };
+    }
+
+    function logSignature(entry) {
+        return [entry.kind, entry.moduleId, entry.code, entry.found, entry.message, entry.where].join('|');
+    }
+
+    /*
+     * The one way anything enters the log. Wrapped whole, because this runs
+     * inside a window error handler: a log that throws while recording a throw
+     * would turn one broken module into a broken Manager.
+     */
+    function recordLogEntry(raw) {
+        try {
+            const entry = normalizeLogEntry(raw);
+            if (!entry) return;
+
+            const log = loadProblemLog();
+            const newest = log[log.length - 1];
+
+            if (newest && logSignature(newest) === logSignature(entry)) {
+                // A selector that matched nothing tends to match nothing again on
+                // the next mutation. One row, one counter.
+                newest.count = Math.min(newest.count + 1, LOG_REPEAT_LIMIT);
+                newest.at = entry.at;
+            } else {
+                log.push(entry);
+                while (log.length > LOG_LIMIT) log.shift();
+            }
+
+            saveProblemLog();
+            updateLauncherLogIndicator();
+            renderProblemLog();
+        } catch (_) {
+            // Deliberately silent.
+        }
+    }
+
+    function handleWindowError(event) {
+        recordLogEntry({
+            kind: 'error',
+            code: 'uncaught',
+            message: event?.error?.name
+                ? `${event.error.name}: ${event.message || ''}`
+                : event?.message
+        });
+    }
+
+    function handleWindowRejection(event) {
+        const reason = event?.reason;
+        recordLogEntry({
+            kind: 'error',
+            code: 'unhandled-rejection',
+            message: reason instanceof Error ? `${reason.name}: ${reason.message}` : String(reason ?? '')
+        });
+    }
+
+    /*
+     * A module's report. Every field is picked out by name and validated here -
+     * nothing is spread - so a module cannot put a sentence into the log even by
+     * accident: there is no field for one. What it can say is which token it
+     * looked for and how many it found, which is the whole of "expected lesson
+     * blocks on SkemaNy, found 0" without any of the page.
+     */
+    function handleModuleReport(event) {
+        const detail = event?.detail;
+        if (!detail || typeof detail !== 'object') return;
+
+        recordLogEntry({
+            moduleId: detail.moduleId,
+            kind: detail.kind,
+            code: detail.code,
+            found: detail.found
+        });
+    }
+
+    function unseenLogCount() {
+        // Only what this project is answerable for nags. An uncaught error is
+        // still recorded, but the Manager cannot tell whose script threw it -
+        // Lectio's own included - so it does not put a mark on the gear.
+        return loadProblemLog().filter((entry) => entry.moduleId && entry.at > (logSeenAt || 0)).length;
+    }
+
+    function markLogSeen() {
+        logSeenAt = Date.now();
+
+        try {
+            GM_setValue(STORAGE_LOG_SEEN, logSeenAt);
+        } catch (_) {
+            // Not worth failing an open for.
+        }
+
+        updateLauncherLogIndicator();
+    }
+
+    function clearProblemLog() {
+        problemLog = [];
+        saveProblemLog();
+        markLogSeen();
+        renderProblemLog();
+    }
+
+    // ============================================================
+    // PROBLEM LOG: PRESENT
+    // ============================================================
+
+    // The gear is built eagerly and the panel is not, so the only global signal
+    // the log has is this one - which is also where the repo wants it, rather
+    // than adding anything to the dock.
+    function updateLauncherLogIndicator() {
+        if (!launcher?.toggle) {
+            return;
+        }
+
+        const count = unseenLogCount();
+        const title = count > 0 ? `${t('appTitle')} — ${t('problemLogUnseen', count)}` : t('appTitle');
+
+        launcher.toggle.classList.toggle('has-problems', count > 0);
+        launcher.toggle.title = title;
+        launcher.toggle.setAttribute('aria-label', title);
+    }
+
+    function logEntryKindLabel(kind) {
+        if (kind === 'drift') return t('logKindDrift');
+        if (kind === 'notice') return t('logKindNotice');
+        return t('logKindError');
+    }
+
+    function logEntrySource(entry) {
+        if (!entry.moduleId) return t('logPage');
+        if (entry.moduleId === 'manager') return t('logManager');
+
+        const module = catalogue?.modules?.find((candidate) => candidate.id === entry.moduleId);
+        return module ? localizedField(module, 'name') : entry.moduleId;
+    }
+
+    function logEntryText(entry) {
+        if (entry.kind === 'drift') {
+            return t('logDrift', entry.code || '?', entry.found ?? 0);
+        }
+
+        return [entry.code, entry.message].filter(Boolean).join(': ');
+    }
+
+    function renderProblemLog() {
+        if (!elements?.logList) {
+            return;
+        }
+
+        const log = loadProblemLog();
+
+        elements.logList.textContent = '';
+
+        if (!log.length) {
+            const empty = document.createElement('div');
+            empty.className = 'lectio-manager-log-empty';
+            empty.textContent = t('problemLogEmpty');
+            elements.logList.appendChild(empty);
+        }
+
+        // Newest first on screen, because that is the one being asked about.
+        for (const entry of [...log].reverse()) {
+            const row = document.createElement('div');
+            row.className = 'lectio-manager-log-entry';
+            row.dataset.kind = entry.kind;
+
+            const head = document.createElement('div');
+            head.className = 'lectio-manager-log-entry-head';
+
+            const time = document.createElement('span');
+            time.className = 'lectio-manager-log-time';
+            time.textContent = formatTime(entry.at);
+            head.appendChild(time);
+
+            const source = document.createElement('strong');
+            source.textContent = logEntrySource(entry);
+            head.appendChild(source);
+
+            const kind = document.createElement('span');
+            kind.className = 'lectio-manager-log-kind';
+            kind.textContent = logEntryKindLabel(entry.kind);
+            head.appendChild(kind);
+
+            if (entry.count > 1) {
+                const repeat = document.createElement('span');
+                repeat.className = 'lectio-manager-log-count';
+                repeat.textContent = t('logRepeated', entry.count);
+                head.appendChild(repeat);
+            }
+
+            row.appendChild(head);
+
+            const body = document.createElement('div');
+            body.className = 'lectio-manager-log-body';
+            body.textContent = `${entry.where} — ${logEntryText(entry)}`;
+            row.appendChild(body);
+
+            elements.logList.appendChild(row);
+        }
+
+        // The preview is the copy: what is on screen here is the string the
+        // button puts on the clipboard, character for character.
+        elements.logReport.value = buildProblemReport();
+    }
+
+    function browserSummary() {
+        const agent = String(navigator.userAgent || '');
+
+        // Name and major version only. The full user-agent string is a
+        // fingerprint, and the bug form asks for neither more nor less.
+        for (const [pattern, name] of [
+            [/\bEdg\/(\d+)/, 'Microsoft Edge'],
+            [/\bOPR\/(\d+)/, 'Opera'],
+            [/\bFirefox\/(\d+)/, 'Firefox'],
+            [/\bChrome\/(\d+)/, 'Google Chrome'],
+            [/\bVersion\/(\d+)[.\d]* Safari\//, 'Safari']
+        ]) {
+            const match = agent.match(pattern);
+            if (match) return `${name} ${match[1]}`;
+        }
+
+        return 'unknown';
+    }
+
+    function userscriptHostSummary() {
+        if (typeof GM_info === 'undefined' || !GM_info) {
+            return 'unknown';
+        }
+
+        const handler = safeIdentifier(GM_info.scriptHandler, 32) || 'unknown';
+        const version = safeIdentifier(GM_info.version, 32);
+        return version ? `${handler} ${version}` : handler;
+    }
+
+    function moduleReportName(moduleId) {
+        const record = getModuleRecord(moduleId);
+        const module = catalogue?.modules?.find((candidate) => candidate.id === moduleId);
+        const name = module?.name || record?.name || moduleId;
+        const version = safeIdentifier(record?.version, 24);
+        return version ? `${name} (${moduleId}) v${version}` : `${name} (${moduleId})`;
+    }
+
+    /*
+     * The block a person pastes into the bug form. Written in English whatever
+     * the Manager's own language is, because the form it is going into is
+     * English - and every field here answers one of that form's questions.
+     */
+    function buildProblemReport() {
+        const log = loadProblemLog();
+        const blamed = [...new Set(log.map((entry) => entry.moduleId).filter((id) => id && id !== 'manager'))];
+
+        const lines = [
+            'Lectio Scripts problem report',
+            `Affected script: ${blamed.length ? blamed.map(moduleReportName).join(', ') : 'Lectio Manager'}`,
+            `Release channel: ${releaseChannel === 'unstable' ? 'Experimental' : 'Stable'}`,
+            `Manager version: ${MANAGER_VERSION}`,
+            `Browser: ${browserSummary()}`,
+            `Userscript manager: ${userscriptHostSummary()}`,
+            `Lectio school ID: ${schoolId() || 'unknown'}`,
+            `Lectio page: ${pageType()}`,
+            `Running on this page: ${[...detected.keys()].map(moduleReportName).join(', ') || 'none detected'}`,
+            '',
+            'Recent log, oldest first:'
+        ];
+
+        if (!log.length) {
+            lines.push('  (nothing recorded)');
+        }
+
+        for (const entry of log) {
+            const repeat = entry.count > 1 ? ` x${entry.count}` : '';
+            lines.push(`  ${formatTime(entry.at)} [${entry.kind}] ${entry.moduleId || 'page'} @ ${entry.where}: ${
+                entry.kind === 'drift'
+                    ? `looked for ${entry.code || '?'}, found ${entry.found ?? 0}`
+                    : [entry.code, entry.message].filter(Boolean).join(': ')
+            }${repeat}`);
+        }
+
+        lines.push(
+            '',
+            'Written by the Lectio Manager, stored in this browser only, and never sent anywhere.',
+            'Names, message text and web addresses are removed as it is written - please read it through anyway before posting.'
+        );
+
+        return lines.join('\n');
+    }
+
+    function copyProblemReport() {
+        const button = elements?.logCopy;
+        const text = elements?.logReport?.value || '';
+        if (!text) return;
+
+        const done = () => {
+            if (!button) return;
+            button.textContent = t('problemLogCopied');
+            window.clearTimeout(logCopiedTimer);
+            logCopiedTimer = window.setTimeout(() => {
+                button.textContent = t('problemLogCopy');
+            }, 2000);
+        };
+
+        // Clipboard only. There is no path from here to the network, and there
+        // must never be one.
+        try {
+            const written = navigator.clipboard?.writeText(text);
+
+            if (written?.then) {
+                written.then(done, () => copyProblemReportFallback(done));
+                return;
+            }
+        } catch (_) {
+            // Falls through to the selection below.
+        }
+
+        copyProblemReportFallback(done);
+    }
+
+    function copyProblemReportFallback(done) {
+        try {
+            elements.logReport.removeAttribute('readonly');
+            elements.logReport.select();
+            document.execCommand('copy');
+            elements.logReport.setAttribute('readonly', '');
+            done();
+        } catch (_) {
+            // The preview is still on screen and still selectable by hand.
+        }
     }
 
     // ============================================================
@@ -2144,6 +2716,7 @@
 
         buildPanel();
         applyStaticText();
+        renderProblemLog();
         renderModuleList();
         updateRefreshedLabel({ justUpdated: false });
         updateChannelUI();
@@ -2187,7 +2760,7 @@
                     </div>
                     <small id="lectio-manager-channel-help" class="lectio-manager-channel-help" hidden>A release channel decides which list of modules the Manager reads. <strong>Stable</strong> offers finished modules only. <strong>Experimental</strong> also offers modules that are still being built, so they can change or break without warning.</small>
                     <small class="lectio-manager-channel-note" hidden>Experimental also offers modules that are still being built and tested. Switching channel only changes what the Manager offers. It never installs, disables, or removes a userscript automatically.</small>
-                    <details class="lectio-manager-prefs-section">
+                    <details class="lectio-manager-prefs-section lectio-manager-dock-section">
                         <summary>Dock</summary>
                         <label class="lectio-manager-prefs-field">
                             <span class="lectio-manager-dock-edge-label">Screen edge</span>
@@ -2235,6 +2808,17 @@
                         </label>
                         <button type="button" class="lectio-manager-dock-reset">Reset dock order</button>
                         <small class="lectio-manager-prefs-warning">The dock only appears when a module is using it. Drag an icon, or press Ctrl with an arrow key, to reorder.</small>
+                    </details>
+                    <details class="lectio-manager-prefs-section lectio-manager-log-section">
+                        <summary>Problem log</summary>
+                        <div class="lectio-manager-log-list"></div>
+                        <label class="lectio-manager-log-preview-label" for="lectio-manager-log-report"></label>
+                        <textarea id="lectio-manager-log-report" class="lectio-manager-log-report" rows="7" readonly></textarea>
+                        <div class="lectio-manager-log-actions">
+                            <button type="button" class="lectio-manager-log-copy">Copy report</button>
+                            <button type="button" class="lectio-manager-log-clear">Clear log</button>
+                        </div>
+                        <small class="lectio-manager-prefs-warning lectio-manager-log-help"></small>
                     </details>
                 </div>
                 <div class="lectio-manager-help-panel" hidden>
@@ -2416,6 +3000,19 @@
             renderDock();
         });
 
+        // Opening the section is what counts as having looked: the mark on the
+        // gear clears here and nowhere else.
+        const logSection = root.querySelector('.lectio-manager-log-section');
+
+        logSection.addEventListener('toggle', () => {
+            if (!logSection.open) return;
+            markLogSeen();
+            renderProblemLog();
+        });
+
+        root.querySelector('.lectio-manager-log-copy').addEventListener('click', copyProblemReport);
+        root.querySelector('.lectio-manager-log-clear').addEventListener('click', clearProblemLog);
+
         if (!GM_getValue(STORAGE_UPDATE_TIP_DISMISSED, false)) {
             tipBanner.hidden = false;
         }
@@ -2491,6 +3088,10 @@
             list: root.querySelector('.lectio-manager-list'),
             viewHeading: root.querySelector('.lectio-manager-view-heading'),
             errorBox: root.querySelector('.lectio-manager-error'),
+            logSection,
+            logList: root.querySelector('.lectio-manager-log-list'),
+            logReport: root.querySelector('.lectio-manager-log-report'),
+            logCopy: root.querySelector('.lectio-manager-log-copy'),
             selfUpdate: root.querySelector('.lectio-manager-self-update'),
             selfUpdateText: root.querySelector('.lectio-manager-self-update-text'),
             selfUpdateLink: root.querySelector('.lectio-manager-self-update-link')
@@ -4162,6 +4763,7 @@
             }
 
             #lectio-manager-toggle {
+                position: relative;
                 width: 44px;
                 height: 44px;
                 border-radius: 50%;
@@ -4183,6 +4785,21 @@
                 stroke-width: 1.6;
                 stroke-linecap: round;
                 stroke-linejoin: round;
+            }
+
+            /* The one global signal the problem log gets. It belongs on the
+               gear rather than the dock: the dock is for what modules put
+               there, and this is the Manager talking about itself. */
+            #lectio-manager-toggle.has-problems::after {
+                content: '';
+                position: absolute;
+                top: 5px;
+                right: 5px;
+                width: 9px;
+                height: 9px;
+                border-radius: 50%;
+                background: var(--lectio-theme-danger, #b42318);
+                border: 2px solid #ffffff;
             }
 
             #lectio-manager-toggle:hover {
@@ -4527,6 +5144,97 @@
                 color: var(--lectio-theme-muted, #5e6870);
                 font-size: 10px;
                 line-height: 1.35;
+            }
+
+            .lectio-manager-log-list {
+                max-height: 150px;
+                overflow: auto;
+                border: 1px solid var(--lectio-theme-muted, #e2e9ed);
+                border-radius: 6px;
+                background: var(--lectio-theme-surface-alt, #f7fafb);
+                padding: 4px;
+            }
+
+            .lectio-manager-log-empty {
+                color: var(--lectio-theme-muted, #5e6870);
+                font-size: 10px;
+                padding: 4px 3px;
+            }
+
+            .lectio-manager-log-entry {
+                border-left: 3px solid var(--lectio-theme-muted, #cbd7d9);
+                padding: 3px 3px 3px 6px;
+                font-size: 10px;
+                line-height: 1.35;
+            }
+
+            .lectio-manager-log-entry + .lectio-manager-log-entry {
+                margin-top: 4px;
+            }
+
+            .lectio-manager-log-entry[data-kind='error'] {
+                border-left-color: var(--lectio-theme-danger, #b42318);
+            }
+
+            .lectio-manager-log-entry-head {
+                display: flex;
+                align-items: baseline;
+                gap: 5px;
+                color: var(--lectio-theme-text, #2a4250);
+            }
+
+            .lectio-manager-log-time,
+            .lectio-manager-log-kind,
+            .lectio-manager-log-count {
+                color: var(--lectio-theme-muted, #5e6870);
+                font-variant-numeric: tabular-nums;
+            }
+
+            .lectio-manager-log-body {
+                color: var(--lectio-theme-muted, #5e6870);
+                word-break: break-word;
+            }
+
+            .lectio-manager-log-preview-label {
+                display: block;
+                margin-top: 8px;
+                color: var(--lectio-theme-muted, #5e6870);
+                font-size: 10px;
+            }
+
+            /* Readable, and readable before it is copied: the point of showing
+               the block at all is that nobody pastes what they have not seen. */
+            .lectio-manager-log-report {
+                display: block;
+                width: 100%;
+                box-sizing: border-box;
+                margin-top: 3px;
+                border: 1px solid var(--lectio-theme-muted, #cbd7d9);
+                border-radius: 6px;
+                background: var(--lectio-theme-surface, #ffffff);
+                color: var(--lectio-theme-text, #10201e);
+                padding: 5px 6px;
+                font-family: ui-monospace, Consolas, monospace;
+                font-size: 10px;
+                line-height: 1.4;
+                resize: vertical;
+            }
+
+            .lectio-manager-log-actions {
+                display: flex;
+                gap: 6px;
+                margin-top: 7px;
+            }
+
+            .lectio-manager-log-actions button {
+                border: 1px solid var(--lectio-theme-accent, #0f6f6f);
+                border-radius: 6px;
+                background: var(--lectio-theme-surface, #ffffff);
+                color: var(--lectio-theme-accent, #0f6f6f);
+                padding: 4px 8px;
+                font: inherit;
+                font-size: 10px;
+                cursor: pointer;
             }
 
             .lectio-manager-dock-reset {

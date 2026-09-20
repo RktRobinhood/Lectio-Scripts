@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Module Skeleton
 // @namespace    https://github.com/RktRobinhood/Lectio-Scripts
-// @version      0.1.0
+// @version      0.2.0
 // @description  A complete, do-nothing module you copy to start a new one. Registers, renders one control of every type, themes itself, speaks both languages, and tears down cleanly.
 // @author       RktRobinhood
 // @match        https://www.lectio.dk/lectio/*
@@ -31,6 +31,7 @@
  *   - One setting of every control type the Manager renders
  *   - Colours through the --lectio-theme-* seam           ADR-0006
  *   - Optional dock item that fails quietly alone         ADR-0012
+ *   - Selector-drift reporting to the Manager             docs/manager-problem-log.md
  *   - Both languages inline, Danish by default            ADR-0013
  *   - Teardown of every listener, timer and DOM insertion
  *
@@ -49,7 +50,7 @@
     // next to this file; `node scripts/check-versions.mjs` enforces it.
     const MODULE_ID = 'module-skeleton';
     const MODULE_NAME = 'Lectio - Module Skeleton';
-    const MODULE_VERSION = '0.1.0';
+    const MODULE_VERSION = '0.2.0';
 
     const STYLE_ID = 'lectio-module-skeleton-styles';
     const SETTINGS_KEY = 'lectioModuleSkeleton.settings.v1';
@@ -378,8 +379,37 @@
         // TODO: your feature goes here. Read what you need off the page,
         // render your own elements, and respect settings.enabled.
 
+        // Lectio can move anything at any time, and a selector that quietly
+        // matches nothing looks exactly like a quiet day. Say so instead - but
+        // only from a page that really should have had some, or "found none" is
+        // noise rather than a signal.
+        if (/\/SkemaNy\.aspx$/i.test(location.pathname)) {
+            const blocks = document.querySelectorAll('a.s2skemabrik[data-tooltip]');
+            if (!blocks.length) reportToManager('drift', 'lesson-blocks', 0);
+        }
+
         renderDockPanel();
         registerDockItem();
+    }
+
+    /* ---------------------------------------------------------------- *
+     * Reporting to the Manager (docs/manager-problem-log.md)
+     *
+     * One event, one direction, no reply: with no Manager installed this
+     * lands on a window nobody is listening to, which is a no-op - the same
+     * "fails quietly" the dock section relies on.
+     *
+     * `code` is a token you wrote, never a string you read off the page. The
+     * Manager drops anything with a space in it, and there is deliberately no
+     * field for a message: this log gets pasted into a public repository, and
+     * a parser that fails is usually holding a name, a message subject or a
+     * hold at the time.
+     * ---------------------------------------------------------------- */
+
+    function reportToManager(kind, code, found) {
+        window.dispatchEvent(new CustomEvent('lectio-module:report', {
+            detail: { moduleId: MODULE_ID, kind, code, found }
+        }));
     }
 
     /* ---------------------------------------------------------------- *

@@ -72,6 +72,15 @@ test('manager builds its panel on first open, not on every page load', async () 
     await runFixture('manager-lazy-panel.html', 'lectio-manager-lazy-', '', ['--virtual-time-budget=6000']);
 });
 
+// The problem log is recorded before anything is on screen and pasted into a
+// public repository afterwards, so both ends are checked: that capture beats
+// the panel and cannot throw without one, that the log stays bounded, and that
+// a name, a message subject and a school-scoped URL in a captured error message
+// do not survive into what a user copies.
+test('manager records a bounded, redacted problem log before its panel exists', async () => {
+    await runFixture('manager-problem-log.html', 'lectio-manager-log-', '?phase=one', ['--virtual-time-budget=6000']);
+});
+
 // Nothing else can tell the Manager it is stale, so it reads its own catalogue
 // entry. The notice must appear only for a genuinely newer version behind an
 // install link on this repository's raw host.
