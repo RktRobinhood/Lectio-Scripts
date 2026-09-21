@@ -108,14 +108,24 @@
 
                 /* --- A stub Manager answers --------------------------- */
 
+                // A language change is answered with a fresh Registration in
+                // that language (issue #60): the schema's words are captured
+                // when it is announced, and re-announcing is what re-words the
+                // Manager's open settings view.
                 document.documentElement.dataset.lectioLanguage = 'en';
                 window.dispatchEvent(new CustomEvent('lectio-manager:language', { detail: { language: 'en' } }));
-                window.dispatchEvent(new CustomEvent('lectio-manager:discover'));
 
                 assert(window.registrations.length === 2,
-                    `Discovery should produce exactly one more registration, got ${window.registrations.length}`);
+                    `A language change should produce exactly one more registration, got ${window.registrations.length}`);
                 assert(window.registrations[1].settingsSchema[0].section === 'Skeleton',
                     'The module did not follow the Manager into English');
+
+                window.dispatchEvent(new CustomEvent('lectio-manager:discover'));
+
+                assert(window.registrations.length === 3,
+                    `Discovery should produce exactly one more registration, got ${window.registrations.length}`);
+                assert(window.registrations[2].settingsSchema[0].section === 'Skeleton',
+                    'Discovery after a language change did not answer in that language');
 
                 window.dispatchEvent(new CustomEvent('lectio-manager:set-setting', {
                     detail: { id: 'module-skeleton', key: 'scale', value: '130' }
