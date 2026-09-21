@@ -301,6 +301,30 @@ const scanPage = (raw, map, found) => {
     // one reading it in its temporal dead zone.
     let people = map.replacements.filter((entry) => entry.note === 'person name').length;
 
+    // A lesson tooltip is part structure and part prose. The structured lines
+    // are Lectio's own and are exactly what the parsers read, so they stay.
+    // Everything else on a tooltip is something a person typed - an activity
+    // title, a meeting, a homework line, sometimes another school's name - and
+    // tests/fixtures/pages/README.md says free text somebody wrote is replaced.
+    //
+    // Only lines with a space and at least ten characters. A bare "Fest",
+    // "Review" or "Information" is as likely to be Lectio's own furniture as
+    // anybody's writing, and these are substituted as plain strings across the
+    // whole page: replacing the word "Information" everywhere would corrupt
+    // the markup to no benefit.
+    const TOOLTIP_STRUCTURE = /^(?:Hold|Lærer|Lærere|Lokale|Lokaler|Elev|Elever|Note|Noter|Lektier|Ressourcer|Deltagere|Team|Fag|Aflyst|Ændret)\b|^\d{1,2}\/\d{1,2}-\d{4}|^\d{1,2}:\d{2}/;
+    let tooltipNote = map.replacements.filter((entry) => entry.note === 'tooltip text').length;
+    for (const match of html.matchAll(/data-tooltip=(['"])([\s\S]*?)\1/g)) {
+        for (const rawLine of decode(match[2]).split(/\r?\n/)) {
+            const line = rawLine.trim();
+            if (line.length < 10 || !line.includes(' ')) continue;
+            if (TOOLTIP_STRUCTURE.test(line)) continue;
+            if (known.has(line) || map.allowedText.includes(line)) continue;
+            tooltipNote += 1;
+            suggest(line, `Aktivitet ${tooltipNote}`, 'tooltip text');
+        }
+    }
+
     // Work backwards from the roll, not forwards from the name.
     //
     // The name net has now been widened three times against this one page:
@@ -555,7 +579,13 @@ const applyMechanical = (html) => stripModuleMarkup(html)
 const applyMap = (html, map) => {
     let output = substituteIds(html, map);
 
-    for (const entry of map.replacements) {
+    // Longest first. One note is routinely a prefix of another - "Feriefridag:
+    // AR, BV" sits inside "Feriefridag: AR, BV, BJ" - and replacing the short
+    // one first turns the long one into "Notetekst 3, BJ", which reads as
+    // redacted while still carrying the tail it was supposed to remove.
+    const ordered = [...map.replacements].sort((a, b) => b.find.length - a.find.length);
+
+    for (const entry of ordered) {
         if (entry.skip) continue;
 
         // Short strings are initials and hold codes, which turn up inside longer
