@@ -15,6 +15,18 @@
            without the safety net simply hangs, and every assertion below
            times out. */
         window.pageStartedAt = Date.now();
+
+        /* The module's start jitter is Math.random() * SCAN_START_JITTER_MS,
+           taken once when the scan is armed, and nothing else in the module
+           calls Math.random. Pinned to zero so the first scan is armed at
+           exactly SCAN_START_DELAY_MS: the two assertions on it below are
+           then statements about the module's constants and nothing else, and
+           the mutation that proves them still bite - the delay set to zero -
+           is caught on every run rather than on the one run in four where
+           the jitter happened to land under 600ms. (The request-slots fixture
+           pins it the same way, for its own reason.) */
+        Math.random = () => 0;
+
         window.fetchLog = [];
         window.maxConcurrentFetches = 0;
         /* Flipped by the assertions below between 'hang' and 'timetable'. Read
@@ -103,8 +115,48 @@
     <script src="/modules-unstable/Lectio-Subject-Colours.user.js"></script>
 
     <script>
+        /* When the module armed its first scan. Its <script> above is in the
+           body, so it sees document.readyState 'loading' and defers start()
+           to DOMContentLoaded; this listener is registered after the module's
+           own, so it runs in the same task, straight after start() has set
+           the scan timer, and no timer can fire in between. Everything
+           before this instant - parsing the page, fetching the module over
+           the test's own server, Chrome giving the renderer its first turn -
+           is the harness's time, not the module's, and it is what the old
+           ceiling was silently charging to the module: measured from
+           pageStartedAt, it went over on a loaded machine at 7026ms (issue
+           #57) and again at 6628ms in a later full-suite run, with nothing
+           wrong in the module either time. */
+        document.addEventListener('DOMContentLoaded', () => {
+            window.scanArmedAt = Date.now();
+        });
+
         const STORE_KEY = 'lectioSubjectColours.schedule.v1.223';
         const BACKOFF_KEY = 'lectioSubjectColours.scanBackoff.v1';
+
+        /* The module's own numbers, restated here rather than read out of it,
+           because the two assertions on the first scan are statements about
+           these and are written as these rather than as the sums they come
+           to. If one of them moves in the module, the assertion it feeds has
+           to be looked at again - that is the point of naming them. */
+        const SCAN_START_DELAY_MS = 1800;
+        /* There is no Manager on this page, so the module's request for a
+           turn (docs/manager-request-slots.md) is never answered and it goes
+           ahead when its own answer window runs out. Every first request here
+           therefore pays this on top of the start delay. */
+        const SLOT_ANSWER_MS = 1200;
+        /* What the ceiling allows on top of the constants it is made of: the
+           tasks between the scan timer firing, the slot timer firing and the
+           request starting, on a machine running the rest of the suite beside
+           this one. Chrome runs the page on a virtual clock, so the timers
+           themselves are exact; this is only the work in between them, and it
+           measured nothing at all - the span came out at 3000ms, give or take
+           a millisecond of rounding, on every one of 30 runs made six Chromes
+           at a time and 5 more made beside the catalogue-compat test (issue
+           #57); the load showed up only before the arming, at up to 1.5s.
+           Deliberately small next to SCAN_START_DELAY_MS, so the ceiling
+           still says something about the delay. */
+        const FIRST_SCAN_SLACK_MS = 700;
 
         const failures = [];
         const assert = (condition, message) => {
@@ -182,20 +234,46 @@
                 }).observe(block, { attributes: true });
             }
 
-            /* --- The first scan is jittered -------------------------------- */
+            /* --- The first scan is delayed, and by the module's numbers ----- */
 
             await waitFor(() => log.length >= 1, 'the first week request to start');
 
-            if (log.length >= 1) {
-                const startedAfter = log[0].startedAt - window.pageStartedAt;
+            assert(
+                typeof window.scanArmedAt === 'number',
+                'the fixture never saw DOMContentLoaded, so it has no instant to measure the first scan from'
+            );
 
+            if (log.length >= 1) {
+                /* Measured from the instant the module armed the scan, not
+                   from pageStartedAt: the harness's time before that instant
+                   is not the module's to answer for, and it is what varies
+                   with load. The failure message carries both spans so a
+                   future failure says which side of the arming it landed on. */
+                const armedAt = typeof window.scanArmedAt === 'number' ? window.scanArmedAt : window.pageStartedAt;
+                const startedAfter = log[0].startedAt - armedAt;
+                const armedAfter = armedAt - window.pageStartedAt;
+                const where = ' (the scan was armed ' + armedAfter + 'ms into the page)';
+
+                /* The floor is the module's start delay and nothing else. With
+                   the jitter pinned to zero above the timer is set to exactly
+                   this, and the request cannot come before the timer fires.
+                   The slot answer window sits on top of it in practice, but a
+                   Manager present and granting at once would take that away,
+                   so it is not part of the floor. This is the assertion that
+                   the module does not fire early, and it is unchanged. */
                 assert(
-                    startedAfter >= 1800,
-                    'the first scan started before the module\'s own start delay, after ' + startedAfter + 'ms'
+                    startedAfter >= SCAN_START_DELAY_MS,
+                    'the first scan started before the module\'s own start delay, after ' + startedAfter + 'ms' + where
                 );
+                /* The ceiling is the delay, then the unanswered slot request,
+                   plus the named allowance. Until issue #57 this was a bare
+                   6500ms measured from pageStartedAt: these same 1800 + 1200,
+                   plus the jitter's 2500 maximum, plus 1000 nobody had named -
+                   minus however long Chrome took to get the module running at
+                   all, which under suite load was the whole margin and more. */
                 assert(
-                    startedAfter <= 6500,
-                    'the first scan started far later than the delay plus its jitter, after ' + startedAfter + 'ms'
+                    startedAfter <= SCAN_START_DELAY_MS + SLOT_ANSWER_MS + FIRST_SCAN_SLACK_MS,
+                    'the first scan started far later than the delay plus the slot answer window, after ' + startedAfter + 'ms' + where
                 );
                 assert(
                     /\/SkemaNy\.aspx\?week=\d+$/.test(log[0].url),
