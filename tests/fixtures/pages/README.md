@@ -17,22 +17,31 @@ deleting a file.
 
 ## What is in the corpus
 
+Every page is exercised by `tests/real-pages.browser.test.js`; the last column
+says what each one is exercised *for*.
+
 | File | Page | Exercised by |
 | --- | --- | --- |
-| `aktivitetsforside.html` | One activity's front page (`aktivitet/aktivitetforside2.aspx`) | `tests/real-pages.browser.test.js` |
-| `skemany.html` | A teacher's own full week (`SkemaNy.aspx`), 30 lesson blocks, one cancelled | `tests/real-pages.browser.test.js` |
-| `opgaveliste.html` | The assignment list (`OpgaveListe.aspx`) | `tests/real-pages.browser.test.js` |
-| `dokumentoversigt.html` | The document tree (`DokumentOversigt.aspx`) | `tests/real-pages.browser.test.js` |
-| `fravaersangivelse.html` | Absence registration (`subnav/fravaerlaerer.aspx`) | `tests/real-pages.browser.test.js` |
+| `aktivitetsforside.html` | One activity's front page (`aktivitet/aktivitetforside2.aspx`): one lesson block plus one `.s2skemabrik` that is decoration | Subject Colours (decoration left alone); the tooltip shape every module reads; the twice-rendered card count |
+| `skemany.html` | A teacher's own full week (`SkemaNy.aspx`, 21–25 September 2026): 29 lesson blocks, 22 timed and 7 all-day, one cancelled, 7 rooms, 7 holds, one two-hold lesson, one title-keyed activity with no hold | Subject Colours (cancelled block unpainted, a recurring hold promoted, the no-hold cases by name); Chairs Up (15 roomed lessons read, the cancelled and unroomed ones not, a later booking respected); Change Radar's schedule parser (22 events); the raw camelCase `data-lectioContextCard` form |
+| `opgaveliste.html` | The assignment list (`OpgaveListe.aspx`): 25 assignments linked with `exeid=` | Change Radar `parseAssignments` — pinned at the 0 it currently returns, see #59 |
+| `dokumentoversigt.html` | The document tree (`DokumentOversigt.aspx`): 2 documents | Change Radar `parseDocuments` (2 of 2) |
+| `fravaersangivelse.html` | Absence registration (`subnav/fravaerlaerer.aspx`): 6 registrations linked with `ActivityAbsenceRegistration.aspx?id=`, no percentages; the page that renders every lesson block twice | Change Radar `parseAbsence` — pinned at the 0 it currently returns, see #59; Subject Colours keying one hold, not two, off a doubled block |
+| `forside.html` | The Forside (`forside.aspx`) with 4 unread messages: three links labelled `Beskeder`, one `4 ulæste` span, four message rows, today's 14 lesson blocks | Unread Message Notifications reading 4 off the live page without fetching it |
 
-The four pages after the first are what Change Radar had been parsing by
-pattern, against markup nobody in this repo had ever seen.
+The three list pages are what Change Radar had been parsing by pattern,
+against markup nobody in this repo had ever seen. Two of its three parsers
+turned out to see nothing at all on them; that is issue #59, and the tests pin
+the wrong answers until it is fixed.
 
 Still wanted:
 
-- The Forside with a non-zero unread count, for Unread Message Notifications,
-  whose selectors have only ever been confirmed against one school's rendering.
-- A student-role view of anything. Every page here is a teacher's.
+- A student-role view of anything. Every page here is a teacher's. In
+  particular `subnav/fravaerelev.aspx`, the student absence page Change Radar
+  also watches, and the student `OpgaveListe.aspx`, whose links may not be
+  `exeid=` either.
+- A Forside from a second school. The one here is school 223's, so Unread's
+  selectors are now confirmed against a real rendering, but still only one.
 
 ## Two ways to save, and only one of them the patterns knew
 
@@ -46,7 +55,10 @@ actually sent — `data-lectioContextCard='HE123'`, camelCased and single-quoted
 and `class='...'` single-quoted on four fifths of the page.
 
 The first page here was serialised; the next four were not, and every pattern
-in `redact-lectio-page.mjs` had been written against the first. The scan found
+in `redact-lectio-page.mjs` had been written against the first. The Forside
+was captured a third way — the server's own response for `forside.aspx`,
+fetched from the logged-in tab and saved as text — which is the same
+un-serialised form as the middle four, with no `_files/` folder at all. The scan found
 **0 of 117 context cards** and reported success. That is fixed, and the
 patterns now accept either form — but it is the reason to distrust a clean
 `--check` on the first page you save a new way.
@@ -179,4 +191,32 @@ a real page went through this:
   twice. A module that counts cards rather than distinct ids reads a two-hold
   lesson as four. Subject Colours already de-duplicates; the test asserts both
   the node count and the distinct count, so the day either changes, it says
-  which.
+  which. Not every page does this: the activity page and the absence page
+  double, `SkemaNy.aspx` does not, and both facts are pinned.
+
+Three more, from the pages that came after:
+
+- **"No hold card" is not "no hold".** Fifteen blocks on the saved week carry
+  no `HE` context card, and Subject Colours reads only one of them as
+  hold-less. The rest have a `Hold:` line in the tooltip naming a group
+  (`Alle Lærere`, every year group at once for the assembly), and the module
+  keys on those names. The genuinely hold-less activity — no card, no `Hold:`
+  line, an `Elev:` line instead — is a ten-minute student meeting, and it is
+  pinned by its `data-brikid`. If you need the no-hold case, that is the block.
+- **Lectio writes the unread count with no space before it.** On the Forside,
+  `Beskeder` and `4 ulæste` are adjacent spans, so the text of any ancestor
+  reads `Beskeder4 ulæste`. Unread's first pass, which walks up from a
+  `Beskeder` heading looking for `\s(\d+)\s+ulæste`, cannot match that; the
+  count comes from its second pass over short standalone elements. The module
+  is right on this page, but by its fallback, and the test says so.
+- **The harness's own scripts are in the DOM.** A postlude that searches
+  `document.body.textContent` finds its own source, including whatever word it
+  was asserting is absent. Search a clone with the `<script>` elements removed.
+
+To show that a test bites without touching a shared file, take a throwaway
+copy of the test, hook the branch that serves `/modules-unstable/...` and hand
+back `source.replace(...)` from memory. Done for three of these: Subject
+Colours without the `new Set` in `holdIdsOf` keys every doubled block as
+`h:HE…+HE…`, Unread with the Danish count pattern misspelled leaves the badge
+hidden, and Chairs Up looking for a room line Lectio does not write logs no
+room candidates at all.
