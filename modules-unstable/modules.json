@@ -61,15 +61,15 @@
         "teacher"
       ],
       "status": "unstable",
-      "version": "0.9.3",
-      "changelog": "An internal tidy-up so the module cannot trip over its own start-up order: the list of assignment status words now sits with the module's other constants. Nothing visible changes.",
+      "version": "0.9.4",
+      "changelog": "Automatic location now finds the Manager's dock whichever script starts first, so the radar no longer falls back to floating on a reload or the next page. And the floating radar's buttons, Settings among them, answer a click again.",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Change-Radar.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
       "i18n": {
         "da": {
           "name": "Lectio Ændringsradar",
           "description": "Eksperimentel Lectio-vagt med en kompakt radar-HUD i temaets farver. Du vælger selv, hvad den holder øje med - aflysninger, flytninger, lokaler, lærere og lektier i skemaet, plus valgfri overvågning af opgaver, fravær og dokumenter - plus kommende opgavefrister, der meldes, når de kommer inden for det valgte tidsrum - med hastestatus, styr på usete ændringer og en roterende lokal ændringslog.",
-          "changelog": "En intern oprydning, så modulet ikke kan snuble over sin egen opstartsrækkefølge: listen over opgavestatusord ligger nu sammen med modulets øvrige konstanter. Intet synligt ændrer sig."
+          "changelog": "Automatisk placering finder nu Managerens dock, uanset hvilket script starter først, så radaren ikke længere flyder igen efter en genindlæsning eller på næste side. Og den flydende radars knapper, Indstillinger iblandt, virker igen."
         }
       }
     },

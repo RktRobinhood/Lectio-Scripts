@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio Change Radar floating settings fixture</title>
+    <script>
+        /*
+         * The floating radar's Settings button did nothing for the mouse
+         * (issue #66). A pointer click focuses the button it lands on, so
+         * focusin fires between mousedown and mouseup; the HUD's focusin
+         * handler rebuilt the whole panel, the button under the pointer was
+         * replaced by a new node, and the click had no target left to fire on.
+         *
+         * A headless --dump-dom run has no pointer, so the fixture does what
+         * the pointer does in two halves: focus() the button (a real focus
+         * event, so focusin fires exactly as it does on mousedown), then
+         * check that the very same node is still in the document before
+         * click()ing it. The buggy build fails the first check; a synthetic
+         * click() straight after would have hidden the bug, because a
+         * listener on a detached node still runs.
+         *
+         * `manager=1` is the owner's case - the Manager installed and the
+         * radar set to Always floating; `manager=0` is the module on its own,
+         * where Automatic settles on floating after the grace window. Scripts
+         * are added after `load`, the way Tampermonkey injects them.
+         */
+        const params = new URLSearchParams(location.search);
+        const withManager = params.get('manager') !== '0';
+
+        const catalogue = {
+            schemaVersion: 1,
+            generatedAt: '2026-09-20T00:00:00.000Z',
+            modules: [{
+                id: 'change-radar',
+                name: 'Lectio Change Radar',
+                version: '0.4.0',
+                description: 'Test radar',
+                status: 'unstable',
+                installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Change-Radar.user.js'
+            }]
+        };
+        const storage = new Map([
+            ['lectioManager.catalogue.v1', JSON.stringify(catalogue)],
+            ['lectioManager.lastRefresh.v1', Date.now()],
+            ['lectioManager.updateTipDismissed.v1', true]
+        ]);
+
+        window.GM_getValue = (key, fallback) => storage.has(key) ? storage.get(key) : fallback;
+        window.GM_setValue = (key, value) => storage.set(key, value);
+        window.GM_xmlhttpRequest = () => {};
+        window.fetch = async (url) => ({
+            ok: true,
+            status: 200,
+            url: String(url),
+            text: async () => '<!doctype html><html><body></body></html>'
+        });
+
+        window.radarSettingsKey = 'lectioChangeRadar.v1.223.current-user.settings';
+        localStorage.removeItem(window.radarSettingsKey);
+        if (withManager) {
+            localStorage.setItem(window.radarSettingsKey, JSON.stringify({
+                schema: 2, displayMode: 'floating', pollMinutes: 10
+            }));
+        }
+
+        window.bootErrors = [];
+        window.addEventListener('error', (event) => window.bootErrors.push(String(event.message)));
+
+        function inject(src) {
+            return new Promise((resolveLoaded, rejectLoad) => {
+                const script = document.createElement('script');
+                script.src = src;
+                script.onload = resolveLoaded;
+                script.onerror = () => rejectLoad(new Error(`${src} did not load`));
+                document.head.appendChild(script);
+            });
+        }
+
+        window.addEventListener('load', async () => {
+            try {
+                if (withManager) await inject('/manager/Lectio-Manager.user.js');
+                await inject('/modules-unstable/Lectio-Change-Radar.user.js');
+            } catch (error) {
+                window.bootErrors.push(error.message);
+            }
+            window.setTimeout(runAssertions, 3500);
+        });
+    </script>
+</head>
+<body>
+    <main id="masterContent">Lectio fixture</main>
+    <script>
+        const assert = (condition, message) => {
+            if (!condition) throw new Error(message);
+        };
+
+        const actionButton = (root, label) =>
+            [...root.querySelectorAll('button.lcr-action')].find((button) => button.textContent === label);
+
+        function runAssertions() {
+            const result = document.createElement('pre');
+            result.id = 'test-result';
+
+            try {
+                assert(window.bootErrors.length === 0, `errors during boot: ${window.bootErrors.join(' | ')}`);
+
+                const root = document.getElementById('lectio-change-radar');
+                assert(root, `no floating radar (manager=${withManager ? 1 : 0})`);
+                assert(!document.querySelector('[data-dock-key="change-radar:radar"]'),
+                    'a floating radar also registered a dock item');
+                assert(!root.classList.contains('is-expanded'), 'the radar started out expanded');
+
+                // The pointer arrives: hover opens the panel (Open on hover is
+                // the default), and does so without rebuilding it.
+                const radarButton = document.getElementById('lectio-change-radar-button');
+                root.dispatchEvent(new Event('mouseenter'));
+                assert(root.classList.contains('is-expanded'), 'hovering did not open the panel');
+                assert(radarButton.isConnected, 'hovering rebuilt the HUD under the pointer');
+                assert(radarButton.getAttribute('aria-expanded') === 'true', 'aria-expanded did not follow the hover');
+
+                const settings = actionButton(root, 'Settings');
+                assert(settings, 'the floating panel has no Settings button');
+
+                // What a mouse click does first: focus lands on the button.
+                settings.focus();
+                assert(settings.isConnected,
+                    'focus landing on Settings rebuilt the panel, so the button under the pointer was replaced before the click could fire');
+                assert(root.classList.contains('is-expanded'), 'focus inside the panel closed it');
+
+                // Then the click.
+                settings.click();
+                assert(root.querySelector('.lcr-settings'), 'clicking Settings did not open the settings panel');
+                assert(root.querySelector('.lcr-panel-heading strong')?.textContent === 'Change Radar settings',
+                    `the panel heading did not switch to settings: ${root.querySelector('.lcr-panel-heading strong')?.textContent}`);
+                assert(root.querySelectorAll('.lcr-setting-row').length > 5, 'the settings panel rendered no settings');
+                assert(root.querySelector('.lcr-setting-control')?.value === (withManager ? 'floating' : 'auto'),
+                    'the Radar location control did not show the stored choice');
+                assert(root.classList.contains('is-expanded'), 'opening settings closed the panel');
+
+                // The pointer leaves; settings pinned the panel open, so the
+                // person can go on reading it.
+                root.dispatchEvent(new Event('mouseleave'));
+                assert(root.classList.contains('is-expanded'), 'the pinned settings panel closed when the pointer left');
+                assert(root.querySelector('.lcr-settings'), 'the settings panel was lost when the pointer left');
+
+                // Done takes the same path back, focus first.
+                const done = actionButton(root, 'Done');
+                assert(done, 'the settings panel has no Done button');
+                done.focus();
+                assert(done.isConnected, 'focus landing on Done rebuilt the panel under the pointer');
+                done.click();
+                assert(!root.querySelector('.lcr-settings'), 'Done did not close the settings panel');
+                assert(root.querySelector('#lectio-change-radar-list'), 'the change log did not come back after Done');
+
+                if (withManager) {
+                    assert(document.getElementById('lectio-manager-root'), 'Test setup: the Manager is not on the page');
+                }
+
+                result.dataset.testResult = 'pass';
+                result.textContent = 'PASS';
+            } catch (error) {
+                result.dataset.testResult = 'fail';
+                result.textContent = `FAIL: ${error.message}`;
+            }
+
+            document.body.appendChild(result);
+        }
+    </script>
+</body>
+</html>

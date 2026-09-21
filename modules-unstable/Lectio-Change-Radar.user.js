@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Change Radar
 // @namespace    https://github.com/RktRobinhood/Lectio-Scripts
-// @version      0.9.3
+// @version      0.9.4
 // @description  Watches Lectio for the changes you choose to track - timetable, assignments, absence, documents - and keeps a compact recent-change HUD.
 // @author       RktRobinhood
 // @match        https://www.lectio.dk/lectio/*
@@ -20,7 +20,7 @@
     id: 'change-radar',
     aliases: ['schedule-change-radar', 'lectio-change-radar', 'change-log'],
     name: 'Lectio Change Radar',
-    version: '0.9.3',
+    version: '0.9.4',
     channel: 'unstable'
   });
 
@@ -218,6 +218,14 @@
     status: 'lectio-change-radar-status'
   });
 
+  // The Manager builds this element during its own boot, before it fires its
+  // one start-up Discovery, and never removes it. It is read here and never
+  // touched: it is how Automatic knows the dock is on the page when the
+  // Manager was evaluated first, because Tampermonkey injects both scripts at
+  // document-idle in an order nothing controls, and a Discovery fired before
+  // this module was listening is simply never heard (issue #66).
+  const MANAGER_DOCK_ROOT_ID = 'lectio-manager-dock-root';
+
   const schoolId = getSchoolId();
   if (!schoolId) return;
 
@@ -284,9 +292,11 @@
     slotsUnanswered: false
   };
 
-  // The Manager announces itself by asking every module to register. Automatic
-  // mode waits that long before falling back to a floating radar, so a page with
-  // the Manager installed does not flash a floating HUD that then jumps away.
+  // The Manager announces itself by asking every module to register, and that
+  // is the only signal there is when it is evaluated after this module. Automatic
+  // mode waits this long for it before falling back to a floating radar, so a
+  // page with the Manager installed does not flash a floating HUD that then
+  // jumps away. (The other order needs no wait: see MANAGER_DOCK_ROOT_ID.)
   const MANAGER_GRACE_MS = 2500;
   const loadedAt = Date.now();
 
@@ -2138,27 +2148,44 @@
     root.id = UI.root;
     root.setAttribute('aria-label', 'Lectio Change Radar');
 
+    // Hover and focus open and close the panel; they must not rebuild it. A
+    // pointer click focuses the button it lands on, so focusin fires between
+    // mousedown and mouseup - and a rebuild there replaces that button with a
+    // new node, so the click has no target left and never fires. That is why
+    // Settings, and every other button in the floating panel, did nothing
+    // for the mouse (issue #66).
     root.addEventListener('mouseenter', () => {
       if (!runtime.settings.hoverOpen) return;
-      runtime.hovered = true;
-      renderHud();
+      setHovered(true);
     });
-    root.addEventListener('mouseleave', () => {
-      runtime.hovered = false;
-      renderHud();
-    });
-    root.addEventListener('focusin', () => {
-      runtime.hovered = true;
-      renderHud();
-    });
+    root.addEventListener('mouseleave', () => setHovered(false));
+    root.addEventListener('focusin', () => setHovered(true));
     root.addEventListener('focusout', (event) => {
-      if (!root.contains(event.relatedTarget)) {
-        runtime.hovered = false;
-        renderHud();
-      }
+      if (!root.contains(event.relatedTarget)) setHovered(false);
     });
 
     document.body.appendChild(root);
+  }
+
+  function setHovered(hovered) {
+    if (runtime.hovered === hovered) return;
+    runtime.hovered = hovered;
+    syncExpanded();
+  }
+
+  // The one piece of renderHud() that hover and focus need: the open/closed
+  // state, on the existing nodes, without replacing any of them.
+  function syncExpanded() {
+    const root = document.getElementById(UI.root);
+    if (!root) return;
+
+    const expanded = runtime.pinned || runtime.hovered;
+    root.classList.toggle('is-expanded', expanded);
+    document.getElementById(UI.button)?.setAttribute('aria-expanded', String(expanded));
+
+    const history = runtime.state?.history || [];
+    const status = getRadarState(history, readNumber(STORAGE.lastViewed));
+    scheduleAutoSeen(expanded && !runtime.settingsOpen, status.unseen);
   }
 
   function radarSvg() {
@@ -2178,14 +2205,34 @@
     window.clearTimeout(runtime.graceTimer);
     runtime.graceTimer = null;
     registerWithManager();
+
+    // A radar still waiting for this answer moves into the dock now, and one
+    // already there re-registers its item, which the dock contract asks for on
+    // every Discovery. Neither may wait for the next poll to redraw it.
+    if (resolveDisplayMode() === 'dock') renderHud();
   }
 
-  // 'auto' resolves to the dock once the Manager has spoken, and to the floating
-  // radar once it is clear no Manager is going to. 'waiting' is that short gap.
+  /*
+   * Whether the Manager is on this page. Discovery is the answer when the
+   * Manager is evaluated after this module; when it was evaluated first, its
+   * Discovery has already fired into a page with no listener for it, so the
+   * dock root it built during that same boot is the answer instead. Either
+   * one settles it for the life of the page.
+   */
+  function managerOnPage() {
+    if (!runtime.managerSeen && document.getElementById(MANAGER_DOCK_ROOT_ID)) {
+      runtime.managerSeen = true;
+    }
+    return runtime.managerSeen;
+  }
+
+  // 'auto' resolves to the dock whenever the Manager is on the page, and to the
+  // floating radar once it is clear no Manager is going to be. 'waiting' is that
+  // short gap.
   function resolveDisplayMode() {
     const mode = runtime.settings.displayMode;
     if (mode === 'dock' || mode === 'floating') return mode;
-    if (runtime.managerSeen) return 'dock';
+    if (managerOnPage()) return 'dock';
     return Date.now() - loadedAt < MANAGER_GRACE_MS ? 'waiting' : 'floating';
   }
 

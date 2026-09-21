@@ -112,10 +112,12 @@ Each opening receives a disposable mount node. It is disconnected when that pane
 
 A module that had its own floating control before the dock existed keeps that control as a fallback, because the module must still work installed on its own. The recommended default is an `auto` setting rather than a fixed choice:
 
-- `auto` — the dock once `lectio-manager:discover` has fired, the module's own floating control once it is clear none will;
+- `auto` — the dock whenever the Manager is on the page, the module's own floating control once it is clear it is not;
 - `dock` and `floating` — explicit overrides for people who want one or the other regardless.
 
-Discovery arrives a moment after page load, so resolving `auto` straight to `floating` would show a floating control that immediately jumps into the dock. Hold the decision for a short grace window (2.5s in Subject Colours and Change Radar), render nothing until it closes, and re-render once either Discovery fires or the window expires. Clear the timer on `pagehide`.
+Discovery alone cannot tell a module whether the Manager is on the page. Tampermonkey injects the Manager and every module at `document-idle` in an order nothing controls, and the Manager fires its one start-up `lectio-manager:discover` synchronously during its own evaluation — so a module evaluated *after* the Manager has no listener attached when that event goes out, and never hears it (issue #66). The Manager builds its dock root, `#lectio-manager-dock-root`, during that same boot, before Discovery, and never removes it. A module resolving `auto` should treat that element's presence as the Manager being on the page — reading it, never touching it — and keep listening for Discovery, which covers the other order.
+
+When neither is there yet, Discovery may still arrive a moment after page load, so resolving `auto` straight to `floating` would show a floating control that immediately jumps into the dock. Hold the decision for a short grace window (2.5s in Subject Colours and Change Radar), render nothing until it closes, and re-render once either Discovery fires or the window expires — including moving a control that was waiting into the dock the moment Discovery fires, rather than on some later redraw. Clear the timer on `pagehide`.
 
 ## Ordering and cleanup
 

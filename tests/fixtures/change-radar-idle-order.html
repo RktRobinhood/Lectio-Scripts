@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio Change Radar idle-injection fixture</title>
+    <script>
+        /*
+         * Tampermonkey injects the Manager and every module at document-idle,
+         * one after another, in an order nothing controls. Each script's boot
+         * block then runs init() during the file's own evaluation, and the
+         * Manager's init() fires its one start-up lectio-manager:discover
+         * right there - so a module evaluated after the Manager has no
+         * listener attached when it goes out, and never hears it.
+         *
+         * change-radar-dock.html cannot see that: it loads both files with
+         * <script> tags in the head, while the document is still parsing, so
+         * both defer init() to DOMContentLoaded and the module's listener is
+         * in place before the Manager's deferred Discovery fires. This fixture
+         * adds the scripts after `load`, the way Tampermonkey does, in the
+         * order the query string names, and asserts that Automatic lands in
+         * the dock either way (issue #66). `stored` is the settings record a
+         * previous page view left behind, so a reload after the migration
+         * wrote 'auto', or after the person chose the dock or the floating
+         * radar, is one more run of this same page.
+         */
+        const params = new URLSearchParams(location.search);
+        const order = params.get('order') || 'manager-first';
+        const stored = params.get('stored') || '';
+
+        const catalogue = {
+            schemaVersion: 1,
+            generatedAt: '2026-09-20T00:00:00.000Z',
+            modules: [{
+                id: 'change-radar',
+                name: 'Lectio Change Radar',
+                version: '0.4.0',
+                description: 'Test radar',
+                status: 'unstable',
+                installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Change-Radar.user.js'
+            }]
+        };
+        const storage = new Map([
+            ['lectioManager.catalogue.v1', JSON.stringify(catalogue)],
+            ['lectioManager.lastRefresh.v1', Date.now()],
+            ['lectioManager.updateTipDismissed.v1', true]
+        ]);
+
+        window.GM_getValue = (key, fallback) => storage.has(key) ? storage.get(key) : fallback;
+        window.GM_setValue = (key, value) => storage.set(key, value);
+        window.GM_xmlhttpRequest = () => {};
+        window.fetch = async (url) => ({
+            ok: true,
+            status: 200,
+            url: String(url),
+            text: async () => '<!doctype html><html><body></body></html>'
+        });
+
+        // Served from /lectio/223/ with no laererid or elevid, so the module
+        // scopes its storage to school 223, current-user.
+        window.radarSettingsKey = 'lectioChangeRadar.v1.223.current-user.settings';
+        localStorage.removeItem(window.radarSettingsKey);
+        if (stored) {
+            localStorage.setItem(window.radarSettingsKey, JSON.stringify({
+                schema: 2, displayMode: stored, pollMinutes: 10
+            }));
+        }
+
+        window.bootErrors = [];
+        window.addEventListener('error', (event) => window.bootErrors.push(String(event.message)));
+
+        window.registrations = new Map();
+        window.addEventListener('lectio-module:register', (event) => {
+            window.registrations.set(event.detail.id, event.detail);
+        });
+
+        // How many Discoveries had already gone out when the module's script
+        // was added. This is what makes the manager-first run a real
+        // reproduction rather than a lucky pass: it must be at least one.
+        window.discoveries = 0;
+        window.discoveriesBeforeModule = null;
+        window.addEventListener('lectio-manager:discover', () => { window.discoveries += 1; });
+
+        const scripts = {
+            manager: '/manager/Lectio-Manager.user.js',
+            module: '/modules-unstable/Lectio-Change-Radar.user.js'
+        };
+
+        function inject(name) {
+            return new Promise((resolveLoaded, rejectLoad) => {
+                if (name === 'module') window.discoveriesBeforeModule = window.discoveries;
+                const script = document.createElement('script');
+                script.src = scripts[name];
+                script.onload = resolveLoaded;
+                script.onerror = () => rejectLoad(new Error(`${scripts[name]} did not load`));
+                document.head.appendChild(script);
+            });
+        }
+
+        window.addEventListener('load', async () => {
+            try {
+                const sequence = order === 'module-first' ? ['module', 'manager'] : ['manager', 'module'];
+                for (const name of sequence) await inject(name);
+            } catch (error) {
+                window.bootErrors.push(error.message);
+            }
+            // Past the module's 2.5s Manager grace window, so a radar that was
+            // going to fall back to floating has done so by now.
+            window.setTimeout(runAssertions, 3500);
+        });
+    </script>
+</head>
+<body>
+    <main id="masterContent">Lectio fixture</main>
+    <script>
+        const assert = (condition, message) => {
+            if (!condition) throw new Error(message);
+        };
+
+        function runAssertions() {
+            const result = document.createElement('pre');
+            result.id = 'test-result';
+
+            try {
+                assert(window.bootErrors.length === 0, `errors during boot: ${window.bootErrors.join(' | ')}`);
+
+                if (order === 'module-first') {
+                    assert(window.discoveriesBeforeModule === 0,
+                        `Test setup: module-first should see no Discovery before the module (${window.discoveriesBeforeModule})`);
+                } else {
+                    assert(window.discoveriesBeforeModule >= 1,
+                        `Test setup: manager-first should have fired Discovery before the module was added (${window.discoveriesBeforeModule})`);
+                }
+
+                const expectedSetting = stored || 'auto';
+                const registration = window.registrations.get('change-radar');
+                assert(registration, 'Change Radar did not register with the Manager');
+                assert(registration.currentValues.displayMode === expectedSetting,
+                    `Radar location reported to the Manager was ${registration.currentValues.displayMode}, expected ${expectedSetting}`);
+
+                // The setting a previous page view stored survives this one
+                // untouched; what was wrong in #66 was never the stored value.
+                // A fresh install has nothing stored and writes nothing.
+                const record = JSON.parse(localStorage.getItem(window.radarSettingsKey) || 'null');
+                if (stored) {
+                    assert(record && record.displayMode === stored,
+                        `the stored radar location did not persist across the reload: ${JSON.stringify(record)}`);
+                    assert(record.schema === 2, 'the stored record lost its schema stamp');
+                } else {
+                    assert(!record || record.displayMode === 'auto',
+                        `a fresh install had a radar location written for it: ${JSON.stringify(record)}`);
+                }
+
+                const floating = document.getElementById('lectio-change-radar');
+                const dockItem = document.querySelector('[data-dock-key="change-radar:radar"]');
+                const dock = document.getElementById('lectio-manager-dock-root');
+                assert(dock, 'Test setup: the Manager built no dock root');
+
+                if (expectedSetting === 'floating') {
+                    // An explicit choice is honoured with the Manager present.
+                    assert(floating, 'Always floating did not render the floating radar');
+                    assert(!dockItem, 'Always floating still put an item in the dock');
+                } else {
+                    assert(!floating,
+                        `${order}, ${expectedSetting}: the radar fell back to floating on a page with the Manager`);
+                    assert(dockItem,
+                        `${order}, ${expectedSetting}: the radar did not reach the dock`);
+                    assert(!dock.hidden, 'the dock stayed hidden after the radar registered');
+                }
+
+                result.dataset.testResult = 'pass';
+                result.textContent = 'PASS';
+            } catch (error) {
+                result.dataset.testResult = 'fail';
+                result.textContent = `FAIL: ${error.message}`;
+            }
+
+            document.body.appendChild(result);
+        }
+    </script>
+</body>
+</html>

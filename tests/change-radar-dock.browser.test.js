@@ -1,20 +1,25 @@
 const { createServer } = require('node:http');
 const { readFile } = require('node:fs/promises');
-const { extname, join, resolve } = require('node:path');
+const { extname, resolve } = require('node:path');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { chromeEnvironment, createProfile, releaseProfile, runChrome } = require('./chrome-harness');
 
 const repositoryRoot = resolve(__dirname, '..');
 
-test('Change Radar can move between its floating HUD and the shared Manager dock', async () => {
+/*
+ * Serves a fixture at /lectio/223/<name> - the school-scoped path the module
+ * reads its school id from - and everything else straight out of the
+ * repository, so the fixture loads the real Manager and the real module.
+ */
+async function runFixture(fixtureName, { query = '', chromeArgs = [] } = {}) {
     const profileDirectory = await createProfile('lectio-change-radar-dock-');
-    const fixture = resolve(__dirname, 'fixtures', 'change-radar-dock.html');
     const server = createServer(async (request, response) => {
         try {
             const pathname = new URL(request.url, 'http://localhost').pathname;
-            const file = pathname === '/lectio/223/change-radar-dock.html'
-                ? fixture
+            const fixture = pathname.match(/^\/lectio\/223\/([\w.-]+\.html)$/);
+            const file = fixture
+                ? resolve(__dirname, 'fixtures', fixture[1])
                 : resolve(repositoryRoot, pathname.replace(/^\/+/, ''));
             const body = await readFile(file);
             const contentType = extname(file) === '.js' ? 'text/javascript' : 'text/html';
@@ -35,14 +40,66 @@ test('Change Radar can move between its floating HUD and the shared Manager dock
             '--disable-gpu',
             `--user-data-dir=${profileDirectory}`,
             '--dump-dom',
-            `http://127.0.0.1:${port}/lectio/223/change-radar-dock.html`
+            ...chromeArgs,
+            `http://127.0.0.1:${port}/lectio/223/${fixtureName}${query}`
         ], { env: chromeEnvironment(profileDirectory) });
 
         const result = stdout.match(/data-test-result="([^"]*)"/)?.[1];
         const detail = stdout.match(/<pre id="test-result"[^>]*>([^<]*)<\/pre>/)?.[1];
-        assert.equal(result, 'pass', detail || result || stdout);
+        assert.equal(result, 'pass', `${fixtureName}${query}: ${detail || result || stdout}`);
     } finally {
         await new Promise((resolveClose) => server.close(resolveClose));
         await releaseProfile(profileDirectory);
     }
+}
+
+// The idle-injection fixtures add the scripts after `load` and assert 3.5s
+// later, past the module's 2.5s Manager grace window; the budget lets
+// headless Chrome run that clock forward instead of waiting it out.
+const pastGraceWindow = { chromeArgs: ['--virtual-time-budget=8000'] };
+
+test('Change Radar can move between its floating HUD and the shared Manager dock', async () => {
+    await runFixture('change-radar-dock.html');
+});
+
+/*
+ * Issue #66. Tampermonkey injects the Manager and the module at document-idle
+ * in an order nothing controls, and the Manager's one start-up Discovery is
+ * fired during its own evaluation - so with the Manager first, the module
+ * never hears it. Automatic must land in the dock in both orders, and a
+ * stored choice must come back the same on the next page view.
+ */
+test('Automatic lands in the dock when the Manager is injected first', async () => {
+    await runFixture('change-radar-idle-order.html', { query: '?order=manager-first', ...pastGraceWindow });
+});
+
+test('Automatic lands in the dock when the module is injected first', async () => {
+    await runFixture('change-radar-idle-order.html', { query: '?order=module-first', ...pastGraceWindow });
+});
+
+test('A stored Automatic survives a reload and still lands in the dock', async () => {
+    await runFixture('change-radar-idle-order.html', { query: '?order=manager-first&stored=auto', ...pastGraceWindow });
+});
+
+test('A stored dock choice survives a reload in either injection order', async () => {
+    await runFixture('change-radar-idle-order.html', { query: '?order=manager-first&stored=dock', ...pastGraceWindow });
+    await runFixture('change-radar-idle-order.html', { query: '?order=module-first&stored=dock', ...pastGraceWindow });
+});
+
+test('A stored floating choice is honoured with the Manager present', async () => {
+    await runFixture('change-radar-idle-order.html', { query: '?order=manager-first&stored=floating', ...pastGraceWindow });
+});
+
+/*
+ * Issue #66, second half: the floating panel's buttons answered no mouse
+ * click, because focus landing on one rebuilt the panel between mousedown
+ * and mouseup. With the Manager present and the radar set to floating, and
+ * with the module on its own.
+ */
+test('The floating radar\'s Settings button opens its settings when the Manager is present', async () => {
+    await runFixture('change-radar-floating-settings.html', { query: '?manager=1', ...pastGraceWindow });
+});
+
+test('The floating radar\'s Settings button opens its settings without the Manager', async () => {
+    await runFixture('change-radar-floating-settings.html', { query: '?manager=0', ...pastGraceWindow });
 });
