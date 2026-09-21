@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio English Mode pattern fixture</title>
+    <script>
+        /*
+         * Issue #61. The pattern-level gaps the Sept 21 audit found on the
+         * Study Plan, Annual Summary and Time Tracking screens, each in the
+         * DOM shape the live page uses, driven through the copy of English
+         * Mode under test (served at /modules-unstable/ by the test). The
+         * Google fallback is stubbed to answer "GOOGLE::<source>" and to
+         * record what it was asked, so a string that was meant to resolve
+         * locally and did not is visible twice over: in its rendering and in
+         * the request log.
+         */
+        window.googleRequests = [];
+
+        window.GM_getValue = (key, fallback) => key === 'lectioEnglish.mode' ? 'en' : fallback;
+        window.GM_setValue = () => {};
+        window.GM_xmlhttpRequest = (details) => {
+            const source = decodeURIComponent((details.url.match(/[?&]q=([^&]*)/) || [])[1] || '');
+            window.googleRequests.push(source);
+            setTimeout(() => {
+                details.onload({
+                    status: 200,
+                    responseText: JSON.stringify([[[`GOOGLE::${source}`, source, null, null, 10]], null, 'da'])
+                });
+            }, 0);
+        };
+    </script>
+</head>
+<body>
+    <!--
+        The Annual Summary sub-navigation, as the live page renders it: the
+        accesskey letter in its own span, mid-word for three of the tabs and
+        leading for the other two, with the whitespace the markup carries.
+        Pushed below the top 300px so repairNavigation(), which owns the real
+        top-nav rows, does not rewrite these anchors itself.
+    -->
+    <div style="height: 400px"></div>
+    <div id="subnav">
+        <a id="tab-aars" href="#">
+            <span class="shortcutletter">Å</span>rsopgørelse
+        </a>
+        <a id="tab-time" href="#"><span class="shortcutletter">T</span>imeberegning</a>
+        <a id="tab-eks" href="#">Eks.<span class="shortcutletter">B</span>elastning</a>
+        <a id="tab-tids" href="#">Tids<span class="shortcutletter">r</span>egistrering</a>
+    </div>
+
+    <!-- The #20 shape must keep working: a leading letter with nothing before it. -->
+    <a id="editBtn" href="#"><span class="ls-fonticon ls-fonticon-fill">edit</span><span class="shortcutletter">R</span>ediger</a>
+
+    <!-- The Time Tracking start control on the global nav, title read off the live DOM (line break included). -->
+    <a id="tt-start" href="#" title="Starter ny tidsregistrering og sætter starttid til nu. &#10;Posten kan efterfølgende redigeres på Tidsregistreringssiden.">radio_button_checked</a>
+
+    <!-- Create Lesson's Modul row. -->
+    <select id="modul-select">
+        <option id="modul">1. modul kl. 08:15-09:25</option>
+    </select>
+
+    <!-- Annual Summary's period select. -->
+    <select id="period-select">
+        <option id="p-school">Skoleåret 26/27</option>
+        <option id="p-second">Andet halvår 2026</option>
+        <option id="p-first">Første halvår 2027</option>
+        <option id="p-fin">Finansåret 2026</option>
+    </select>
+
+    <table>
+        <tbody>
+            <!-- Study Plan calendar month labels and footer. -->
+            <tr><td id="month-okt">okt. 2026</td><td id="month-maj">maj. 2027</td></tr>
+            <tr><td id="total">Total: 10,5 t.</td><td id="norm">Norm: 32 t.</td></tr>
+            <!-- Class codes with aktivitet, from the Annual Summary and the Study Plan. -->
+            <tr><td id="cc-dash">1i - aktivitet</td><td id="cc-slash">1i aktivitet/4</td><td id="cc-cap">2i Aktivitet</td></tr>
+            <!-- Near misses: the same words without the shape each rule requires. -->
+            <tr><td id="nm-hours">Total: 10,5 t</td><td id="nm-month">okt 2026</td><td id="nm-t-text">Test t. 5</td></tr>
+            <tr><td id="nm-year">Skoleåret er slut</td><td id="nm-activity">Frivillig aktivitet</td><td id="nm-kl">Kl. 08:15</td></tr>
+        </tbody>
+    </table>
+
+    <pre id="detail"></pre>
+
+    <script src="/modules-unstable/Lectio-English-Mode.user.js"></script>
+    <script>
+        const report = [];
+        function assert(condition, message) {
+            if (!condition) throw new Error(message);
+        }
+        const delay = (ms) => new Promise((done) => setTimeout(done, ms));
+        async function waitFor(condition, limit) {
+            const deadline = Date.now() + limit;
+            while (Date.now() < deadline) {
+                if (condition()) return true;
+                await delay(25);
+            }
+            return false;
+        }
+        const text = (id) => document.getElementById(id).textContent.trim();
+        const shortcut = (id) => document.getElementById(id).querySelector('.shortcutletter').textContent;
+
+        function check() {
+            // 1. Shortcut letter mid-word and leading.
+            assert(text('tab-tids') === 'Time Tracking', `Time Tracking tab: "${text('tab-tids')}"`);
+            assert(shortcut('tab-tids') === 'r', `Time Tracking tab kept its Alt+R letter: "${shortcut('tab-tids')}"`);
+            assert(text('tab-aars') === 'Annual Summary', `Annual Summary tab: "${text('tab-aars')}"`);
+            assert(shortcut('tab-aars') === 'A', `Annual Summary tab shortcut letter: "${shortcut('tab-aars')}"`);
+            assert(text('tab-eks') === 'Exam Load', `Exam Load tab: "${text('tab-eks')}"`);
+            assert(shortcut('tab-eks') === 'E', `Exam Load tab shortcut letter: "${shortcut('tab-eks')}"`);
+            assert(text('tab-time') === 'Hour Calculation', `Hour Calculation tab: "${text('tab-time')}"`);
+            // Only the letter span and the text after it: the icon ligature
+            // "edit" before them is an anchor's text and the stub rewrites it.
+            const editSpan = document.getElementById('editBtn').querySelector('.shortcutletter');
+            const editLabel = editSpan.textContent + editSpan.nextSibling.nodeValue;
+            assert(editLabel === 'Edit', `Edit button (issue #20 shape): "${editLabel}"`);
+
+            // 2. kl. between the period and the time.
+            assert(text('modul') === '1st period 08:15-09:25', `Modul row: "${text('modul')}"`);
+
+            // 3. Month abbreviations.
+            assert(text('month-okt') === 'Oct 2026', `Month okt.: "${text('month-okt')}"`);
+            assert(text('month-maj') === 'May 2027', `Month maj.: "${text('month-maj')}"`);
+
+            // 4. Hours.
+            assert(text('total') === 'Total: 10,5 h', `Study Plan total: "${text('total')}"`);
+            assert(text('norm') === 'Norm: 32 h', `Study Plan norm: "${text('norm')}"`);
+
+            // 5. Period names.
+            assert(text('p-school') === 'School year 26/27', `School year: "${text('p-school')}"`);
+            assert(text('p-second') === 'Second half 2026', `Second half: "${text('p-second')}"`);
+            assert(text('p-first') === 'First half 2027', `First half: "${text('p-first')}"`);
+            assert(text('p-fin') === 'Financial year 2026', `Financial year: "${text('p-fin')}"`);
+
+            // 6. The Time Tracking start tooltip.
+            const title = document.getElementById('tt-start').getAttribute('title');
+            assert(title === 'Starts a new time registration with the start time set to now. The entry can be edited afterwards on the Time Tracking page.',
+                `Time Tracking start tooltip: "${title}"`);
+
+            // 7. Class codes with aktivitet.
+            assert(text('cc-dash') === '1i - Activity', `Class code with dash: "${text('cc-dash')}"`);
+            assert(text('cc-slash') === '1i Activity/4', `Class code with slash: "${text('cc-slash')}"`);
+            assert(text('cc-cap') === '2i Activity', `Class code capitalised: "${text('cc-cap')}"`);
+        }
+
+        function checkNearMisses() {
+            // Strings with no recognisable Danish word stay exactly as they were.
+            for (const [id, original] of [
+                ['nm-hours', 'Total: 10,5 t'],
+                ['nm-month', 'okt 2026'],
+                ['nm-t-text', 'Test t. 5'],
+                ['nm-kl', 'Kl. 08:15']
+            ]) {
+                assert(text(id) === original, `near miss changed: "${original}" became "${text(id)}"`);
+            }
+            // Strings that do carry Danish go to the fallback untouched by the local pass.
+            for (const [id, original] of [
+                ['nm-year', 'Skoleåret er slut'],
+                ['nm-activity', 'Frivillig aktivitet']
+            ]) {
+                assert(text(id) === original || text(id) === `GOOGLE::${original}`,
+                    `near miss altered locally: "${original}" became "${text(id)}"`);
+            }
+        }
+
+        function checkFallbackLog() {
+            const shouldStayLocal = [
+                'Tidsregistrering', 'Årsopgørelse', 'Eks.Belastning', 'Timeberegning', 'Rediger',
+                '1. modul kl. 08:15-09:25', 'okt. 2026', 'maj. 2027', 'Total: 10,5 t.', 'Norm: 32 t.',
+                'Skoleåret 26/27', 'Andet halvår 2026', 'Første halvår 2027', 'Finansåret 2026',
+                'Starter ny tidsregistrering og sætter starttid til nu. Posten kan efterfølgende redigeres på Tidsregistreringssiden.',
+                '1i - aktivitet', '1i aktivitet/4', '2i Aktivitet',
+                // Fragments the shortcut-letter join writes must not be sent as words of their own.
+                'Time T', 'acking', 'nnual Summary', 'xam Load', 'our Calculation', 'dit'
+            ];
+            for (const source of shouldStayLocal) {
+                assert(!window.googleRequests.includes(source), `sent to the fallback instead of resolving locally: "${source}"`);
+            }
+        }
+
+        window.addEventListener('load', async () => {
+            try {
+                const settled = await waitFor(() => {
+                    try { check(); return true; } catch { return false; }
+                }, 5000);
+                if (!settled) check();
+
+                // Give the fallback stub and the mutation observer time to
+                // overwrite anything they were going to, then check again.
+                await delay(500);
+                check();
+                checkNearMisses();
+                checkFallbackLog();
+
+                report.push(`fallback requests: ${window.googleRequests.length}`);
+                report.push('result: pass');
+                document.getElementById('detail').textContent = report.join('\n');
+                document.documentElement.dataset.testResult = 'pass';
+            } catch (error) {
+                report.push(`fallback requests: ${JSON.stringify(window.googleRequests)}`);
+                report.push(`result: fail: ${error.message}`);
+                document.getElementById('detail').textContent = report.join('\n');
+                document.documentElement.dataset.testResult = `fail: ${error.message}`;
+            }
+        });
+    </script>
+</body>
+</html>

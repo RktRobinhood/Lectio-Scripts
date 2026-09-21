@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio English Mode
 // @namespace    lectio-english-mode
-// @version      1.11.1
+// @version      1.11.2
 // @description  Context-aware English layer for Lectio with instant core UI translation, persistent cache and Google fallback.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-start
@@ -66,7 +66,7 @@
     (function registerWithLectioManager() {
         const MODULE_ID = 'english-mode';
         const MODULE_NAME = 'Lectio English Mode';
-        const MODULE_VERSION = '1.11.1';
+        const MODULE_VERSION = '1.11.2';
 
         function announce() {
             const storedMode = GM_getValue(STORAGE_MODE, MODE_DA);
@@ -876,6 +876,15 @@
             'Ekstra timer': 'Extra Hours',
             'Eks.Belastning': 'Exam Load',
             'Tidsregistrering': 'Time Tracking',
+            /*
+             * The start-registration control in the global nav,
+             * on every teacher page. Read off the live DOM at
+             * school 223 (issue #61); the source carries a line
+             * break after the first sentence, which normalize()
+             * collapses to the space used here.
+             */
+            'Starter ny tidsregistrering og sætter starttid til nu. Posten kan efterfølgende redigeres på Tidsregistreringssiden.':
+                'Starts a new time registration with the start time set to now. The entry can be edited afterwards on the Time Tracking page.',
             'Min periode': 'My Period',
             'Budgetteret': 'Budgeted',
             'Realiseret': 'Actual',
@@ -1008,6 +1017,29 @@
             lør: 'Sat',
             sø: 'Sun',
             søn: 'Sun'
+        });
+
+    /*
+     * Danish month abbreviations as the Study Plan calendar
+     * writes them ("okt. 2026", "maj. 2027"). They carry no
+     * word hasDanish() recognises, so they never reached the
+     * fallback and stayed Danish outright (issue #61).
+     */
+    const SHORT_MONTHS =
+        Object.freeze({
+            jan: 'Jan',
+            feb: 'Feb',
+            mar: 'Mar',
+            apr: 'Apr',
+            maj: 'May',
+            jun: 'Jun',
+            jul: 'Jul',
+            aug: 'Aug',
+            sep: 'Sep',
+            sept: 'Sep',
+            okt: 'Oct',
+            nov: 'Nov',
+            dec: 'Dec'
         });
 
     /*
@@ -2205,6 +2237,19 @@
                     } period`
             );
 
+        /*
+         * "1. modul kl. 08:15-09:25" (the Modul row of Create
+         * Lesson) used to leave the pattern pass as "1st period
+         * kl. 08:15-09:25". Drop the "kl." only when it sits
+         * between the period just written above and a clock
+         * time (issue #61).
+         */
+        result =
+            result.replace(
+                /\bperiod kl\.\s*(?=\d{1,2}[:.]\d{2})/g,
+                'period '
+            );
+
         result =
             result.replace(
                 /\bUge\s+(\d{1,2})\b/gi,
@@ -2316,6 +2361,81 @@
                     /\bmundtlig\b/gi,
                     'oral'
                 );
+
+        /*
+         * Study Plan calendar month labels: "okt. 2026" ->
+         * "Oct 2026". Only an abbreviation with its trailing
+         * dot and a four-digit year after it (issue #61).
+         */
+        result =
+            result.replace(
+                /(^|\s)(jan|feb|mar|apr|maj|jun|jul|aug|sept?|okt|nov|dec)\.\s+(?=\d{4}\b)/gi,
+                (
+                    _,
+                    lead,
+                    month
+                ) =>
+                    `${lead}${
+                        SHORT_MONTHS[
+                            month.toLowerCase()
+                        ]
+                    } `
+            );
+
+        /*
+         * The hour abbreviation "t." (timer) after a number,
+         * as in the Study Plan footer "Total: 10,5 t." and
+         * "Norm: 32 t.". Only the number-space-"t." shape, at
+         * the end or before punctuation, so a "t." anywhere in
+         * ordinary text is untouched (issue #61).
+         */
+        result =
+            result.replace(
+                /(\d)\s+t\.(?=$|[\s,;:)])/g,
+                '$1 h'
+            );
+
+        /*
+         * Annual Summary period names. The year varies, so
+         * these cannot be exact entries; each rule needs the
+         * period word and the year shape together (issue #61).
+         */
+        result =
+            result
+                .replace(
+                    /\bSkoleåret\s+(?=\d{2,4}\/\d{2,4}\b)/gi,
+                    'School year '
+                )
+                .replace(
+                    /\bAndet halvår\s+(?=\d{4}\b)/gi,
+                    'Second half '
+                )
+                .replace(
+                    /\bFørste halvår\s+(?=\d{4}\b)/gi,
+                    'First half '
+                )
+                .replace(
+                    /\bFinansåret\s+(?=\d{4}\b)/gi,
+                    'Financial year '
+                );
+
+        /*
+         * A class code followed by "aktivitet" ("1i - aktivitet",
+         * "1i aktivitet/4", "2i Aktivitet") is the name Lectio
+         * gives a class's non-lesson activities. It used to go
+         * to the fallback on the strength of "aktivitet" and
+         * rely on postCorrect() to repair the class code
+         * afterwards. The whole string must be exactly that
+         * shape - digits, one to three letters, a separator,
+         * the word, an optional "/N" - so nothing else matches
+         * (issue #61). Capitalised as postCorrect() already
+         * renders it.
+         */
+        result =
+            result.replace(
+                /^(\d{1,2}\p{L}{1,3})( - | )aktivitet(\/\d+)?$/iu,
+                '$1$2Activity$3'
+            );
 
         return {
             text: result,
@@ -3574,6 +3694,41 @@
         }
     }
 
+    /*
+     * Writes a fragment of an already-translated word into a
+     * text node and records it as final, so processText() does
+     * not take "acking" or "T" for a Danish string of its own
+     * and send it to the fallback.
+     */
+    function pinTextNode(node, value) {
+        node.nodeValue = value;
+
+        const state =
+            textStateFor(node);
+
+        state.source = value;
+        state.rendered = value;
+        state.final = value;
+        state.pending = null;
+    }
+
+    /*
+     * Lectio wraps a keyboard accesskey letter in
+     * <span class="shortcutletter">, so a label is two or three
+     * nodes and no single one of them matches its dictionary
+     * entry. Issue #20 handled the leading letter
+     * ("<span>R</span>ediger"); the Annual Summary tabs put it
+     * mid-word ("Tids<span>r</span>egistrering",
+     * "Eks.<span>B</span>elastning") and the personal nav does
+     * the same ("Bes<span>k</span>eder"), so the text node
+     * before the span is part of the word too (issue #61).
+     *
+     * The English is redistributed so the span keeps the
+     * accesskey letter where it occurs in the English word
+     * ("Time T", "r", "acking" for Alt+R), and keeps the first
+     * character when the letter does not occur at all, as the
+     * #20 shape did.
+     */
     function fixShortcutLetterSplit(element) {
         const letterSpan =
             element.querySelector(
@@ -3591,28 +3746,103 @@
             return;
         }
 
+        const lead =
+            letterSpan.previousSibling;
+
+        const head =
+            lead &&
+            lead.nodeType === Node.TEXT_NODE
+                ? lead
+                : null;
+
         const letter =
             normalize(letterSpan.textContent);
 
         const remainder =
             normalize(rest.nodeValue);
 
+        const start =
+            head
+                ? normalize(head.nodeValue)
+                : '';
+
         if (!letter || !remainder) {
             return;
         }
 
-        const translated =
-            exactCore(letter + remainder);
+        let translated =
+            start
+                ? exactCore(
+                    start + letter + remainder
+                )
+                : null;
+
+        const usesHead =
+            translated !== null;
+
+        if (translated === null) {
+            translated =
+                exactCore(letter + remainder);
+        }
 
         if (!translated) {
             return;
         }
 
-        letterSpan.textContent =
-            translated.slice(0, 1);
+        let at =
+            translated
+                .toLowerCase()
+                .indexOf(
+                    letter.toLowerCase()
+                );
 
-        rest.nodeValue =
-            translated.slice(1);
+        /*
+         * The letter can only move into the text before the
+         * span when that text is part of the same word.
+         */
+        if (
+            at < 0 ||
+            (
+                at > 0 &&
+                !usesHead
+            )
+        ) {
+            at = 0;
+        }
+
+        if (usesHead) {
+            pinTextNode(
+                head,
+
+                (
+                    head.nodeValue
+                        .match(/^\s*/)?.[0] ||
+                    ''
+                ) +
+                translated.slice(0, at)
+            );
+        }
+
+        letterSpan.textContent =
+            translated.slice(at, at + 1);
+
+        if (letterSpan.firstChild) {
+            pinTextNode(
+                letterSpan.firstChild,
+                letterSpan.firstChild.nodeValue
+            );
+        }
+
+        pinTextNode(
+            rest,
+
+            translated.slice(at + 1) +
+            (
+                rest.nodeValue
+                    .match(/\s*$/)?.[0] ||
+                ''
+            )
+        );
     }
 
     function processElement(element) {
