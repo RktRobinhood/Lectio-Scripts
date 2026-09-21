@@ -20,18 +20,60 @@ deleting a file.
 | File | Page | Exercised by |
 | --- | --- | --- |
 | `aktivitetsforside.html` | One activity's front page (`aktivitet/aktivitetforside2.aspx`) | `tests/real-pages.browser.test.js` |
+| `skemany.html` | A teacher's own full week (`SkemaNy.aspx`), 30 lesson blocks, one cancelled | `tests/real-pages.browser.test.js` |
+| `opgaveliste.html` | The assignment list (`OpgaveListe.aspx`) | `tests/real-pages.browser.test.js` |
+| `dokumentoversigt.html` | The document tree (`DokumentOversigt.aspx`) | `tests/real-pages.browser.test.js` |
+| `fravaersangivelse.html` | Absence registration (`subnav/fravaerlaerer.aspx`) | `tests/real-pages.browser.test.js` |
 
-Still wanted, in rough order of how much they would earn (see issue #23):
+The four pages after the first are what Change Radar had been parsing by
+pattern, against markup nobody in this repo had ever seen.
 
-- `SkemaNy.aspx` for a full week, including a cancelled activity (`s2cancelled`
-  / `Aflyst!`), a lesson belonging to more than one hold, and an activity with
-  no hold at all. This is the page Subject Colours, Chairs Up and Change Radar
-  all lean on hardest, and nothing here covers it yet.
-- `OpgaveListe.aspx`, `subnav/fravaerelev.aspx` (or `fravaerlaerer.aspx`) and
-  `DokumentOversigt.aspx` — Change Radar parses all three by pattern, against
-  markup nobody in this repo has ever seen.
+Still wanted:
+
 - The Forside with a non-zero unread count, for Unread Message Notifications,
   whose selectors have only ever been confirmed against one school's rendering.
+- A student-role view of anything. Every page here is a teacher's.
+
+## Two ways to save, and only one of them the patterns knew
+
+`SkemaNy.aspx?week=NNYYYY` works; adding `&nosubnav=1` returns a Lectio error
+page, whatever AGENTS.md says.
+
+More importantly: **how you save changes the markup you get.** Chrome's
+"Webpage, Complete" serialises the live DOM, which lowercases attribute names
+and rewrites every quote to `"`. A page saved any other way keeps what Lectio
+actually sent — `data-lectioContextCard='HE123'`, camelCased and single-quoted,
+and `class='...'` single-quoted on four fifths of the page.
+
+The first page here was serialised; the next four were not, and every pattern
+in `redact-lectio-page.mjs` had been written against the first. The scan found
+**0 of 117 context cards** and reported success. That is fixed, and the
+patterns now accept either form — but it is the reason to distrust a clean
+`--check` on the first page you save a new way.
+
+## What a clean --check did not catch
+
+All of these got through a run that printed `5 page(s) clean`, and all are
+fixed now. They are recorded because each one was invisible to the single
+pattern that was looking, and the next gap will be too:
+
+- **Initials are not always upper case.** `Matthew Travers (Tr)` did not match
+  `[A-ZÆØÅ]{2,4}`, so a teacher's full name survived — and `--check` hunts for
+  survivors with the same pattern, so it confirmed the page clean.
+- **`\w` is ASCII.** `Hana Cárska`, `Tadeás Jan Novák`, `Gadus-Baraknoyi
+  András`. This is an IB school; a class roll is full of them.
+- **Students are not written like staff.** They are `Navn (1i 03)` — class and
+  roll, not initials — and `OpgaveListe.aspx` puts an entire class in one
+  `title=` attribute. 145 of them, with nothing looking for that shape.
+
+The name net was widened three times against one page before the lesson took:
+it is no longer the only net. A `(1i 03)` token is unambiguous, so whatever
+text precedes one is now redacted whatever it looks like. Over-redacting a
+roster is harmless; the alternative is not.
+
+**Verify independently.** Every one of these leaks passed the gate because the
+gate reuses the scan's patterns. After `--check`, look for the real values
+yourself with something that shares no code with the script.
 
 ## Capturing a page
 
