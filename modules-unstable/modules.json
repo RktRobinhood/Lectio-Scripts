@@ -61,15 +61,15 @@
         "teacher"
       ],
       "status": "unstable",
-      "version": "0.9.1",
-      "changelog": "Change Radar's dock tooltip now follows the language you chose in the Lectio Manager, in Danish as well as English.",
+      "version": "0.9.2",
+      "changelog": "Assignment and absence watching now actually see the rows on your Lectio pages; both were read with the wrong link names, so nothing was ever reported. A deadline is read from the Frist column, and a count is no longer taken for a grade.",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Change-Radar.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
       "i18n": {
         "da": {
           "name": "Lectio Ændringsradar",
           "description": "Eksperimentel Lectio-vagt med en kompakt radar-HUD i temaets farver. Du vælger selv, hvad den holder øje med - aflysninger, flytninger, lokaler, lærere og lektier i skemaet, plus valgfri overvågning af opgaver, fravær og dokumenter - plus kommende opgavefrister, der meldes, når de kommer inden for det valgte tidsrum - med hastestatus, styr på usete ændringer og en roterende lokal ændringslog.",
-          "changelog": "Ændringsradarens tekst i dokken følger nu det sprog, du har valgt i Lectio Manager - både dansk og engelsk."
+          "changelog": "Opgave- og fraværsovervågning ser nu faktisk rækkerne på dine Lectio-sider; begge blev læst med forkerte linknavne, så intet blev meldt. En frist læses fra Frist-kolonnen, og et antal forveksles ikke længere med en karakter."
         }
       }
     },

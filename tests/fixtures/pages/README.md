@@ -24,15 +24,18 @@ says what each one is exercised *for*.
 | --- | --- | --- |
 | `aktivitetsforside.html` | One activity's front page (`aktivitet/aktivitetforside2.aspx`): one lesson block plus one `.s2skemabrik` that is decoration | Subject Colours (decoration left alone); the tooltip shape every module reads; the twice-rendered card count |
 | `skemany.html` | A teacher's own full week (`SkemaNy.aspx`, 21–25 September 2026): 29 lesson blocks, 22 timed and 7 all-day, one cancelled, 7 rooms, 7 holds, one two-hold lesson, one title-keyed activity with no hold | Subject Colours (cancelled block unpainted, a recurring hold promoted, the no-hold cases by name); Chairs Up (15 roomed lessons read, the cancelled and unroomed ones not, a later booking respected); Change Radar's schedule parser (22 events); the raw camelCase `data-lectioContextCard` form |
-| `opgaveliste.html` | The assignment list (`OpgaveListe.aspx`): 25 assignments linked with `exeid=` | Change Radar `parseAssignments` — pinned at the 0 it currently returns, see #59 |
+| `opgaveliste.html` | The assignment list (`OpgaveListe.aspx`): 25 assignments linked with `exeid=`, every one with a deadline, the week column spanning rows | Change Radar `parseAssignments` (25 of 25; the deadline read off the Frist column, a count of students not read as a grade, a rowspan-shortened row still lined up with the header) |
 | `dokumentoversigt.html` | The document tree (`DokumentOversigt.aspx`): 2 documents | Change Radar `parseDocuments` (2 of 2) |
-| `fravaersangivelse.html` | Absence registration (`subnav/fravaerlaerer.aspx`): 6 registrations linked with `ActivityAbsenceRegistration.aspx?id=`, no percentages; the page that renders every lesson block twice | Change Radar `parseAbsence` — pinned at the 0 it currently returns, see #59; Subject Colours keying one hold, not two, off a doubled block |
+| `fravaersangivelse.html` | Absence registration (`subnav/fravaerlaerer.aspx`): 6 registrations linked with `ActivityAbsenceRegistration.aspx?id=`, no percentages; the page that renders every lesson block twice | Change Radar `parseAbsence` (6 of 6, each titled by its lesson block read once, no percentage records); Subject Colours keying one hold, not two, off a doubled block |
 | `forside.html` | The Forside (`forside.aspx`) with 4 unread messages: three links labelled `Beskeder`, one `4 ulæste` span, four message rows, today's 14 lesson blocks | Unread Message Notifications reading 4 off the live page without fetching it |
 
 The three list pages are what Change Radar had been parsing by pattern,
 against markup nobody in this repo had ever seen. Two of its three parsers
-turned out to see nothing at all on them; that is issue #59, and the tests pin
-the wrong answers until it is fixed.
+turned out to see nothing at all on them (issue #59): the query keys they
+matched, `exerciseid=` and `absenseId=`, were a hand-written fixture's guesses,
+and the pages link with `exeid=` and `ActivityAbsenceRegistration.aspx?id=`.
+The tests pinned those 0s until the parsers were fixed, and now pin 25 and 6
+with the shape of a record from each page.
 
 Still wanted:
 

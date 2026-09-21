@@ -555,11 +555,13 @@ test('Subject Colours promotes a hold that recurs inside the real week to a clas
  *
  * Each page's own test states what a human reading it can see, and states the
  * query-string shape its rows are actually linked with. The module test that
- * follows then runs the real Change Radar over all three at once. Two of the
- * three answers it gives are wrong, and are pinned as wrong - see issue #59.
+ * follows then runs the real Change Radar over all three at once and pins what
+ * it reads off each - the counts, and the shape of a record from every page.
+ * Two of the three parsers read nothing at all until issue #59, because they
+ * were written against key names the pages do not use.
  */
 
-test('the real assignment list has 25 assignments and no exerciseid anywhere', async () => {
+test('the real assignment list has 25 assignments linked with exeid, and no exerciseid', async () => {
     const { result, detail } = await runAgainstPage({
         page: 'opgaveliste.html',
         path: '/lectio/223/OpgaveListe.aspx',
@@ -571,21 +573,38 @@ test('the real assignment list has 25 assignments and no exerciseid anywhere', a
                 .filter(Boolean))];
             check(exe.length === 25, 'expected 25 distinct exeid assignment links, got ' + exe.length);
 
-            // The shape Change Radar's parseAssignments looks for. It is not
-            // here, and never was - see issue #59.
+            // The key parseAssignments was first written against (issue #59).
+            // It is not on this page; the parser accepts both, and this is
+            // here so that the day a page does carry it, the test says which.
             check(hrefs.filter((href) => /exerciseid=/i.test(href)).length === 0,
-                'the page now carries exerciseid links after all; issue #59 needs re-reading');
+                'the page now carries exerciseid links; say so in tests/fixtures/pages/README.md');
 
             const headers = [...document.querySelectorAll('th')].map((cell) => cell.textContent.trim());
             for (const column of ['Hold', 'Opgavetitel', 'Frist']) {
                 check(headers.includes(column), 'no ' + column + ' column: ' + JSON.stringify(headers));
             }
+            check(!headers.some((header) => /karakter|grade/i.test(header)),
+                'the teacher list now has a grade column, so the no-grade assertion on its records needs revisiting: ' +
+                    JSON.stringify(headers));
 
             // The deadline format the parser's own date pattern is written
-            // against, on the rows that carry one.
+            // against. Every assignment row carries one, in its Frist cell -
+            // matched cell by cell, as the parser does, because a row's joined
+            // textContent runs "Test24/9-2026" together and a word boundary
+            // then finds only the 7 rows whose note happens to end in
+            // punctuation.
             const deadlines = [...document.querySelectorAll('tr')]
-                .filter((row) => /\\b\\d{1,2}\\/\\d{1,2}-\\d{4}\\b/.test(row.textContent));
-            check(deadlines.length === 7, 'expected 7 rows carrying a d/m-yyyy deadline, got ' + deadlines.length);
+                .filter((row) => [...row.querySelectorAll('td')]
+                    .some((cell) => /^\\d{1,2}\\/\\d{1,2}-\\d{4} \\d{2}:\\d{2}$/.test(cell.textContent.trim())));
+            check(deadlines.length === 25,
+                'expected all 25 rows to carry a d/m-yyyy hh:mm deadline, got ' + deadlines.length);
+
+            // The week column spans rows, so a later row of a week has one
+            // cell fewer than the header has columns. A parser counting cells
+            // from the left reads the wrong column on those rows.
+            const spanned = [...document.querySelectorAll('td[rowspan]')]
+                .filter((cell) => Number(cell.getAttribute('rowspan')) > 1).length;
+            check(spanned > 0, 'the week column no longer spans rows, so the rowspan case is untested here');
 
             publish();
         `
@@ -608,9 +627,11 @@ test('the real absence page has 6 registrations, no absenseId and no percentages
             check(registrations.length === 6,
                 'expected 6 distinct absence registrations to fill in, got ' + registrations.length);
 
-            // Both halves of Change Radar's parseAbsence, and neither is here.
+            // The key parseAbsence was first written against (issue #59). It
+            // is not on this page; the parser accepts both. The percentages
+            // its second half reads are a student page's, and this is not one.
             check(hrefs.filter((href) => /absenseId=/i.test(href)).length === 0,
-                'the page now carries absenseId links after all; issue #59 needs re-reading');
+                'the page now carries absenseId links; say so in tests/fixtures/pages/README.md');
             const percentages = (document.body.textContent || '').match(/\\d+(?:[,.]\\d+)?\\s?%/g) || [];
             check(percentages.length === 0,
                 'the teacher absence page now shows percentages after all: ' + percentages.join(', '));
@@ -653,31 +674,27 @@ test('the real document tree has 2 documents behind documentid links', async () 
     assert.equal(result, 'pass', detail || result || 'no result reported');
 });
 
-test('Change Radar, run over all four real pages, captures only the documents', async () => {
+test('Change Radar, run over all four real pages, reads every list', async () => {
     /*
      * The real module, not its parsers lifted out of it: settings answered
      * through the key it asks for, its own startup poll, its own fetch, its
      * own DOMParser, and its own captured state read back out of its own
      * localStorage entry. Every page it goes for is served untouched.
      *
-     * Two of the three answers below are WRONG, and are pinned as wrong on
-     * purpose. See issue #59:
+     * Until issue #59 two of the three parsers read nothing here, and this
+     * test pinned the 0s: parseAssignments harvested on exerciseid= where the
+     * real OpgaveListe.aspx links with exeid=, and parseAbsence on absenseId=
+     * where the real subnav/fravaerlaerer.aspx links with
+     * ActivityAbsenceRegistration.aspx?id=. Both are read now, and what is
+     * pinned is the exact count off each page plus the shape of a record -
+     * never "at least something", which would let either key drift again.
      *
-     *   - parseAssignments harvests on [?&]exerciseid=, and the real
-     *     OpgaveListe.aspx links its 25 assignments with exeid=.
-     *   - parseAbsence harvests on [?&]absenseId=, and the real
-     *     subnav/fravaerlaerer.aspx links its 6 registrations with
-     *     ActivityAbsenceRegistration.aspx?id=.
-     *
-     * Neither is softened to "at least something". They are pinned at the 0
-     * they really return, with the number a human sees named beside them, so
-     * that fixing the parsers BREAKS this test and the fix has to come back
-     * here and change 0 to 25 and 0 to 6. An expectation loose enough to
-     * tolerate both answers would let the bug back in.
-     *
-     * looksLikeParseFailure cannot catch either of these: it only carries a
+     * looksLikeParseFailure could not catch the original: it only carries a
      * capture forward when a source that used to see >= 3 rows suddenly sees
-     * none, and a parser that has never seen a row never trips it.
+     * none, and a parser that has never seen a row never trips it. So the
+     * module now reports drift to the Manager's problem log when a page that
+     * is plainly the list yields no rows - and on these pages, which parse,
+     * it must report nothing at all.
      */
     const { result, detail } = await runAgainstPage({
         page: 'fravaersangivelse.html',
@@ -691,6 +708,8 @@ test('Change Radar, run over all four real pages, captures only the documents', 
         virtualTimeMs: 60000,
         prelude: `
             localStorage.clear();
+            window.__radarReports = [];
+            window.addEventListener('lectio-module:report', (event) => window.__radarReports.push(event.detail || {}));
 
             // The module keys its storage on the school and the account it
             // detects off the page, so the settings key is not known here.
@@ -747,17 +766,87 @@ test('Change Radar, run over all four real pages, captures only the documents', 
                     'a document record lost its filename: ' +
                         Object.values(documents).map((record) => record.title).join(', '));
 
-                // Assignments: WRONG. 25 on the page, 0 captured. Issue #59.
-                check(countOf('assignments') === 0,
-                    'parseAssignments now returns ' + countOf('assignments') + ' records where it ' +
-                    'returned 0 against 25 visible assignments. If issue #59 has been fixed, this ' +
-                    'expectation should become 25 - change it, do not revert the fix.');
+                // Assignments: 25 records for the 25 exeid= rows.
+                const assignments = (sources.assignments && sources.assignments.records) || {};
+                const assignmentIds = Object.keys(assignments).sort();
+                const assignmentRecords = Object.values(assignments);
+                check(assignmentIds.length === 25,
+                    'expected 25 assignment records off the real OpgaveListe, got ' + assignmentIds.length);
+                check(assignmentIds.every((id) => /^EX7\\d{7}$/.test(id)),
+                    'an assignment id is not EX + the redacted 7xxxxxxx run: ' + assignmentIds.join(','));
+                check(assignmentIds[0] === 'EX70000052' && assignmentIds[24] === 'EX70000076',
+                    'assignment ids drifted: ' + assignmentIds[0] + ' .. ' + assignmentIds[24]);
 
-                // Absence: WRONG. 6 registrations on the page, 0 captured. Issue #59.
-                check(countOf('absence') === 0,
-                    'parseAbsence now returns ' + countOf('absence') + ' records where it returned 0 ' +
-                    'against 6 visible registrations. If issue #59 has been fixed, this expectation ' +
-                    'should become 6 - change it, do not revert the fix.');
+                // One record in full. Its deadline is the Frist cell, its
+                // context carries the hold, and its url is the row's own link.
+                const first = assignments.EX70000052 || {};
+                check(first.title === 'Assignment 1', 'first assignment title: ' + first.title);
+                check(first.dueDate === '2026-09-03' && first.dueTime === '12:00',
+                    'first assignment should be due 2026-09-03 12:00 off the Frist column, got ' +
+                        first.dueDate + ' ' + first.dueTime);
+                check(/1a Fag1 HL/.test(first.context || ''),
+                    'first assignment context should carry its hold, got: ' + first.context);
+                check(/\\/lectio\\/223\\/fravaer_indtastskriftlig\\.aspx\\?exeid=70000052/.test(first.url || ''),
+                    'first assignment url: ' + first.url);
+
+                // Every row on the saved list has a title and a Frist.
+                check(assignmentRecords.every((record) => record.title),
+                    'an assignment record has no title: ' +
+                        assignmentRecords.filter((record) => !record.title).map((record) => record.id).join(','));
+                check(assignmentRecords.every((record) =>
+                        /^\\d{4}-\\d{2}-\\d{2}$/.test(record.dueDate) && /^\\d{2}:\\d{2}$/.test(record.dueTime)),
+                    'a record came back without the deadline its row carries: ' +
+                        assignmentRecords.filter((record) => !record.dueDate).map((record) => record.id).join(','));
+                check(assignmentRecords.filter((record) => record.title === 'Midterm test').length === 4,
+                    'expected 4 rows titled Midterm test, got ' +
+                        assignmentRecords.filter((record) => record.title === 'Midterm test').length);
+
+                // The rowspan case: EX70000055 is a later row of week 39 and
+                // has no week cell of its own, so it is one cell short of the
+                // header. Its deadline is still read from the Frist column.
+                const spanned = assignments.EX70000055 || {};
+                check(spanned.title === 'Test' && spanned.dueDate === '2026-09-24' && spanned.dueTime === '22:00',
+                    'the rowspan-shortened row should still read Test, due 2026-09-24 22:00, got: ' +
+                        spanned.title + ' ' + spanned.dueDate + ' ' + spanned.dueTime);
+
+                // A count is not a grade. EX70000053 has 7 in its "Ikke
+                // afleveret" column and 7 is on the 7-point scale; the teacher
+                // list has no Karakter column and no status words, so no record
+                // may carry a status at all.
+                check(assignmentRecords.every((record) => record.status === ''),
+                    'a record on the teacher list carries a status, so a count was read as a grade: ' +
+                        JSON.stringify(assignmentRecords.filter((record) => record.status)
+                            .map((record) => [record.id, record.status])));
+
+                // Absence: 6 registration records for the 6
+                // ActivityAbsenceRegistration.aspx?id= rows, titled by their
+                // lesson block - read once, although the page renders every
+                // block twice - and no percentages, because this page has none.
+                const absence = (sources.absence && sources.absence.records) || {};
+                const absenceIds = Object.keys(absence).sort();
+                check(absenceIds.join(',') ===
+                        'ABSENCE70000025,ABSENCE70000182,ABSENCE70000183,ABSENCE70000184,ABSENCE70000185,ABSENCE70000186',
+                    'expected the 6 registrations off the real absence page, got: ' + absenceIds.join(','));
+                check(Object.values(absence).every((record) => record.type === 'registration'),
+                    'the teacher absence page has no percentages, yet a record is not a registration: ' +
+                        JSON.stringify(Object.values(absence).filter((record) => record.type !== 'registration')
+                            .map((record) => [record.id, record.type])));
+                check(Object.values(absence).every((record) =>
+                        /\\/lectio\\/223\\/ActivityAbsenceRegistration\\.aspx\\?id=\\d+/.test(record.url || '')),
+                    'a registration lost its link: ' +
+                        Object.values(absence).map((record) => record.url).join(' '));
+
+                const registration = absence.ABSENCE70000182 || {};
+                check(/^fr 28\\/8 2\\. modul - 1a aktivitet\\/4 . AA . 229$/.test(registration.title || ''),
+                    'a registration should be titled by its lesson block, read once, got: ' + registration.title);
+                check(!/2\\. modul[\\s\\S]*2\\. modul/.test(registration.detail || ''),
+                    'a registration detail reads the twice-rendered block twice: ' + registration.detail);
+                check(/^35 · /.test(registration.detail || '') && /Angiv frav/.test(registration.detail || ''),
+                    'a registration detail should carry the week and the link text, got: ' + registration.detail);
+
+                // Every page parsed, so nothing may have been reported as drift.
+                check(window.__radarReports.length === 0,
+                    'the parsers read every page, yet the module reported: ' + JSON.stringify(window.__radarReports));
 
                 publish();
             }, 30000);

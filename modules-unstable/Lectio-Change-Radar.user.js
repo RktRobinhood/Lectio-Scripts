@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Change Radar
 // @namespace    https://github.com/RktRobinhood/Lectio-Scripts
-// @version      0.9.1
+// @version      0.9.2
 // @description  Watches Lectio for the changes you choose to track - timetable, assignments, absence, documents - and keeps a compact recent-change HUD.
 // @author       RktRobinhood
 // @match        https://www.lectio.dk/lectio/*
@@ -20,7 +20,7 @@
     id: 'change-radar',
     aliases: ['schedule-change-radar', 'lectio-change-radar', 'change-log'],
     name: 'Lectio Change Radar',
-    version: '0.9.1',
+    version: '0.9.2',
     channel: 'unstable'
   });
 
@@ -1076,18 +1076,91 @@
   // --- Sources beyond the timetable -----------------------------------------
   //
   // The timetable parser can lean on a known element (a.s2skemabrik[data-tooltip]).
-  // These three pages are list views whose exact column layout is not pinned down
-  // anywhere in this repo, so they are read by pattern rather than by position:
+  // These three pages are list views, read by pattern rather than by position:
   // a row is interesting when it links to something carrying a stable Lectio id,
   // and its fields are recognised by shape (a d/m-yyyy date, a percentage, a
-  // status word, a 7-point grade) wherever they happen to sit. That survives a
-  // column being added or reordered, and when it does stop matching it yields
-  // nothing rather than nonsense, which looksLikeParseFailure then absorbs.
+  // status word) wherever they happen to sit. That survives a column being added
+  // or reordered. Where the table names its columns, the named column wins over
+  // the pattern - the deadline is read from the Frist column, and a grade only
+  // ever from a Karakter column - because the teacher's real OpgaveListe (in
+  // tests/fixtures/pages/, issue #59) has a column of counts that share their
+  // digits with the 7-point scale.
+  //
+  // When a parser stops matching it yields nothing rather than nonsense, and
+  // looksLikeParseFailure absorbs that - but only for a source that used to see
+  // rows. A parser that has never seen a row looks like a quiet week, which is
+  // how both key names below were wrong for as long as the feature existed
+  // (issue #59). So each parser also reports drift to the Manager's problem
+  // log for the one unambiguous case: the page is plainly the right list, has
+  // data rows, and none of them was read.
 
   const ASSIGNMENT_STATUS_PATTERN = /^(?:Afleveret|Ikke afleveret|Mangler|Afventer|Venter|Afsluttet|Godkendt|Ikke godkendt|Handed in|Not handed in|Missing|Awaiting|Closed|Approved|Not approved)$/i;
 
+  // A Lectio table row's cells lined up with its header, rowspan and colspan
+  // resolved. OpgaveListe groups rows by week with a rowspan on the week cell,
+  // so the later rows of a week have one td fewer than the header has columns,
+  // and "the fifth cell" is the wrong column on those rows. A spanning cell is
+  // repeated into every slot it covers. HTMLTableElement.rows and row.cells stop
+  // at this table's own sections, so a nested table is one cell, not many rows.
+  function tableGrid(table) {
+    const grid = new Map();
+    const spans = [];
+
+    for (const row of Array.from(table.rows)) {
+      const cells = [];
+      let column = 0;
+
+      const place = (cell) => {
+        cells[column] = cell;
+        column += 1;
+      };
+      const carrySpans = () => {
+        while (spans[column] && spans[column].remaining > 0) {
+          spans[column].remaining -= 1;
+          place(spans[column].cell);
+        }
+      };
+
+      for (const cell of Array.from(row.cells)) {
+        carrySpans();
+        const colSpan = Math.max(1, Number(cell.colSpan) || 1);
+        const rowSpan = Math.max(1, Number(cell.rowSpan) || 1);
+        for (let index = 0; index < colSpan; index += 1) {
+          if (rowSpan > 1) spans[column] = { cell, remaining: rowSpan - 1 };
+          place(cell);
+        }
+      }
+      carrySpans();
+
+      grid.set(row, cells);
+    }
+
+    return grid;
+  }
+
+  function tableHeaders(table, grid) {
+    for (const row of Array.from(table.rows)) {
+      const cells = grid.get(row) || [];
+      if (!cells.some((cell) => cell && cell.tagName === 'TH')) continue;
+      return cells.map((cell) => cleanText(cell ? cell.textContent : ''));
+    }
+
+    return [];
+  }
+
+  // A lesson block renders its contents twice, once .OnlyDesktop and once
+  // .OnlyMobile, so a cell holding one reads doubled unless one copy is dropped.
+  function cellText(cell) {
+    if (!cell.querySelector('.OnlyMobile')) return cleanText(cell.textContent || '');
+
+    const copy = cell.cloneNode(true);
+    for (const mobile of copy.querySelectorAll('.OnlyMobile')) mobile.remove();
+    return cleanText(copy.textContent || '');
+  }
+
   function harvestRows(doc, match) {
     const rows = {};
+    const tables = new Map();
 
     for (const row of doc.querySelectorAll('tr')) {
       let id = '';
@@ -1107,32 +1180,89 @@
 
       if (!id || rows[id]) continue;
 
+      // The row's cells by named column, when the table names them. A table
+      // with no header row yields no columns, and the readers fall back to
+      // recognising fields by shape.
+      const table = row.closest('table');
+      if (table && !tables.has(table)) {
+        const grid = tableGrid(table);
+        tables.set(table, { grid, headers: tableHeaders(table, grid) });
+      }
+      const { grid, headers } = tables.get(table) || { grid: new Map(), headers: [] };
+      const columns = headers.length
+        ? (grid.get(row) || []).map((cell, index) => ({
+          header: headers[index] || '',
+          text: cell ? cellText(cell) : ''
+        }))
+        : [];
+
       const cells = Array.from(row.querySelectorAll('td'))
-        .map((cell) => cleanText(cell.textContent || ''))
+        .map(cellText)
         .filter(Boolean);
 
-      rows[id] = { id, title: title || cells[0] || '', cells, url };
+      rows[id] = { id, title: title || cells[0] || '', cells, columns, url, element: row };
     }
 
     return rows;
   }
 
+  // The text under the first header matching `pattern`, or null when the table
+  // has no such column - which is different from the column being empty.
+  function findColumn(row, pattern) {
+    const column = (row.columns || []).find((entry) => pattern.test(entry.header));
+    return column ? column.text : null;
+  }
+
+  // The unambiguous case for drift: a table headed like the list this parser
+  // reads, with data rows in it, and none of them harvested. An empty list has
+  // no data rows and says nothing; a page that is not the list has no such
+  // header. Either way nothing is reported, which is the fail-closed side.
+  function looksLikeListPage(doc, headerPattern) {
+    for (const header of doc.querySelectorAll('th')) {
+      if (!headerPattern.test(cleanText(header.textContent || ''))) continue;
+
+      const table = header.closest('table');
+      if (!table) continue;
+
+      const dataRows = Array.from(table.rows).filter((row) =>
+        Array.from(row.cells).filter((cell) => cell.tagName === 'TD').length >= 3);
+      if (dataRows.length) return true;
+    }
+
+    return false;
+  }
+
   function parseAssignments(doc) {
     const records = {};
+
+    // The teacher's OpgaveListe links every assignment with exeid=, read off a
+    // real page (issue #59). exerciseid= was the guess before that page was
+    // seen; it is kept because no student list is in the corpus yet and the
+    // two views need not link the same way.
     const rows = harvestRows(doc, (href) => {
-      const match = href.match(/[?&]exerciseid=(\d+)/i);
+      const match = href.match(/[?&](?:exeid|exerciseid)=(\d+)/i);
       return match ? `EX${match[1]}` : '';
     });
 
+    if (!Object.keys(rows).length && looksLikeListPage(doc, /opgavetitel|assignment/i)) {
+      reportToManager('drift', 'assignment-rows', 0);
+    }
+
     for (const row of Object.values(rows)) {
-      const due = findRowDateTime(row.cells);
+      // With a Frist column, only that column is a deadline: the note column
+      // sits before it on the real page and is free text somebody wrote, which
+      // can carry a date of its own. Without one, the first date-shaped cell.
+      const deadlineCell = findColumn(row, /frist|deadline/i);
+      const due = findRowDateTime(deadlineCell == null ? row.cells : [deadlineCell]);
+      const grade = findAssignmentGrade(row);
+
       records[row.id] = {
         id: row.id,
         title: row.title || 'Assignment',
         dueDate: due.dateIso,
         dueTime: due.time,
-        status: findAssignmentStatus(row.cells),
-        context: findAssignmentContext(row.cells, row.title),
+        status: findAssignmentStatus(row.cells, grade),
+        context: findAssignmentContext(row.cells, row.title, grade),
         url: row.url
       };
     }
@@ -1154,16 +1284,19 @@
     return { dateIso: '', time: '' };
   }
 
-  // A grade is matched against the closed 7-point scale rather than "a number in
-  // a cell", so a room number or a count of anything cannot be read as one.
-  function findAssignmentStatus(cells) {
-    const parts = [];
+  // A grade is read only from a column headed Karakter/Grade, and only when it
+  // is on the closed 7-point scale. The scale shares its tokens with small
+  // counts: the teacher's list has a column of how many students have not
+  // handed in, and 7 of 80 read as "Grade 7" until the column was named. No
+  // header, no grade.
+  function findAssignmentGrade(row) {
+    const cell = findColumn(row, /karakter|grade/i);
+    return cell != null && GRADE_TOKENS.includes(cell) ? cell : '';
+  }
 
-    for (const cell of cells) {
-      if (ASSIGNMENT_STATUS_PATTERN.test(cell)) parts.push(cell);
-      else if (GRADE_TOKENS.includes(cell)) parts.push(`Grade ${cell}`);
-    }
-
+  function findAssignmentStatus(cells, grade) {
+    const parts = cells.filter((cell) => ASSIGNMENT_STATUS_PATTERN.test(cell));
+    if (grade) parts.push(`Grade ${grade}`);
     return parts.join(' · ');
   }
 
@@ -1171,12 +1304,12 @@
   // accounted for - the class and the expected hours, on the lists seen so far.
   // Taking the remainder rather than named columns means the radar shows what
   // the assignment page shows without claiming to know its layout.
-  function findAssignmentContext(cells, title) {
+  function findAssignmentContext(cells, title, grade) {
     const parts = cells.filter((cell) => {
       if (!cell || cell === title) return false;
       if (/\b\d{1,2}\/\d{1,2}-\d{4}\b/.test(cell)) return false;
       if (ASSIGNMENT_STATUS_PATTERN.test(cell)) return false;
-      return !GRADE_TOKENS.includes(cell);
+      return !grade || cell !== grade;
     });
 
     return truncate(parts.join(' · '), 60);
@@ -1185,18 +1318,28 @@
   function parseAbsence(doc) {
     const records = {};
 
-    // Individual registrations link to the day-based absence view. That URL was
-    // read off a real Lectio page, so it is the firmest handle on this page.
+    // A registration links to ActivityAbsenceRegistration.aspx?id=<n>, read off
+    // the real teacher page (issue #59) and matched on the page name as well as
+    // the parameter, because a bare id= is on half of Lectio's links. absenseId=
+    // was the guess before that page was seen, and stays accepted.
     const rows = harvestRows(doc, (href) => {
-      const match = href.match(/[?&]absenseId=(\d+)/i);
+      const match = href.match(/ActivityAbsenceRegistration\.aspx\?(?:[^#]*?&)?id=(\d+)/i) ||
+        href.match(/[?&]absenseId=(\d+)/i);
       return match ? `ABSENCE${match[1]}` : '';
     });
 
     for (const row of Object.values(rows)) {
+      // The row's lesson block is what the reader sees; the link text on the
+      // teacher page is "Angiv fravær" on every row and names the action, not
+      // the lesson. The block's first copy is read so the doubled page reads
+      // once.
+      const brick = row.element.querySelector('.s2skemabrik[data-tooltip]');
+      const blockTitle = cleanText((brick && (brick.querySelector('.s2skemabrikcontent') || brick).textContent) || '');
+
       records[row.id] = {
         id: row.id,
         type: 'registration',
-        title: row.title || row.cells[0] || 'Absence registration',
+        title: blockTitle || row.title || row.cells[0] || 'Absence registration',
         detail: row.cells.slice(0, 4).join(' · '),
         url: row.url
       };
@@ -1204,6 +1347,15 @@
 
     // Per-class percentages: any row carrying a hold context card and at least
     // one percentage. Keying on the card means a reordered table is not news.
+    //
+    // This half is written for the student page, subnav/fravaerelev.aspx, which
+    // lists each hold with its absence percentage - the "Percentage changes"
+    // setting is a student's. The teacher page (subnav/fravaerlaerer.aspx, the
+    // one in tests/fixtures/pages/) is a list of lessons awaiting registration
+    // and carries no percentage anywhere, so this finds nothing there, by
+    // design. No student page has been seen yet (issue #59), so it stays as
+    // written and fails closed rather than being reworked against a page
+    // nobody has looked at.
     for (const row of doc.querySelectorAll('tr')) {
       const card = row.querySelector('[data-lectiocontextcard]');
       const cells = Array.from(row.querySelectorAll('td')).map((cell) => cleanText(cell.textContent || ''));
@@ -1223,6 +1375,16 @@
         detail: percents.map((value) => value.replace(/\s+/g, '')).join(' / '),
         url: ''
       };
+    }
+
+    // Drift, on the one shape known for certain: the teacher page is a table
+    // headed Aktivitet whose rows hold lesson blocks. Blocks in the rows of
+    // such a table and nothing read is the parser missing them, not a quiet
+    // week. A page with neither says nothing.
+    if (!Object.keys(records).length &&
+        looksLikeListPage(doc, /^(?:aktivitet|activity)$/i) &&
+        doc.querySelector('tr .s2skemabrik[data-tooltip]')) {
+      reportToManager('drift', 'absence-rows', 0);
     }
 
     return records;

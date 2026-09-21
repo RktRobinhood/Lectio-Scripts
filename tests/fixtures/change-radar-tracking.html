@@ -15,6 +15,12 @@
         // Round 0 is the baseline every later round is compared against.
         let round = 0;
 
+        // What the module tells the Manager's problem log, if one were here.
+        window.reports = [];
+        window.addEventListener('lectio-module:report', (event) => {
+            window.reports.push(event.detail || {});
+        });
+
         const lesson = (room, homework) => {
             const tooltip = [
                 'Matematik A',
@@ -31,9 +37,25 @@
                 '</td></tr></table></body></html>';
         };
 
-        const assignmentRow = (id, title, due, status) =>
-            '<tr><td><a href="/lectio/223/ElevAflevering.aspx?exerciseid=' + id + '&amp;elevid=1">' + title + '</a></td>' +
-            '<td>3a DA</td><td>' + due + '</td><td>' + status + '</td></tr>';
+        // The real OpgaveListe links its rows with exeid= (issue #59, read off
+        // tests/fixtures/pages/opgaveliste.html); exerciseid= was the guess
+        // before that page was seen and is still accepted, so one row here
+        // keeps that shape. The table names its columns the way the real one
+        // does, so the deadline is read from Frist rather than from the note
+        // beside it - which carries a date of its own on purpose - and the
+        // grade only from Karakter.
+        const assignmentLink = (id, legacy) => legacy
+            ? '/lectio/223/ElevAflevering.aspx?exerciseid=' + id + '&amp;elevid=1'
+            : '/lectio/223/fravaer_indtastskriftlig.aspx?exeid=' + id + '&amp;prevurl=OpgaveListe.aspx';
+
+        const assignmentHeader =
+            '<tr><th>Uge</th><th>Hold</th><th>Opgavetitel</th><th>Opgavenote</th><th>Frist</th>' +
+            '<th>Status</th><th>Karakter</th></tr>';
+
+        const assignmentRow = ({ id, title, due, status, note = '', grade = '', legacy = false }) =>
+            '<tr><td>40</td><td>3a DA</td>' +
+            '<td><a href="' + assignmentLink(id, legacy) + '">' + title + '</a></td>' +
+            '<td>' + note + '</td><td>' + due + '</td><td>' + status + '</td><td>' + grade + '</td></tr>';
 
         const pad2 = (value) => String(value).padStart(2, '0');
         const addDays = (date, days) => {
@@ -58,11 +80,60 @@
         window.horizonProbe = addDays(startOfIsoWeek(new Date()), 17);
 
         const assignments = () => {
-            const probe = assignmentRow(103, 'Rapport', lectioDate(window.horizonProbe) + ' 23:59', 'Ikke afleveret');
+            // The drift round: the list is plainly the list - headed, with a
+            // data row - but its links carry neither key the parser knows.
+            if (round >= 7) {
+                return '<!doctype html><html><body><table>' + assignmentHeader +
+                    '<tr><td>40</td><td>3a DA</td>' +
+                    '<td><a href="/lectio/223/ElevAflevering.aspx?assignment=101">Essay 1</a></td>' +
+                    '<td></td><td>1/10-2030 23:59</td><td>Ikke afleveret</td><td></td></tr>' +
+                    '</table></body></html>';
+            }
+
+            const probe = assignmentRow({
+                id: 103, title: 'Rapport', due: lectioDate(window.horizonProbe) + ' 23:59', status: 'Ikke afleveret'
+            });
+            const essay1 = (due) => assignmentRow({
+                id: 101, title: 'Essay 1', due, status: 'Ikke afleveret', note: 'Se planen fra 1/1-2030', grade: '7'
+            });
             const rows = round === 0
-                ? assignmentRow(101, 'Essay 1', '01/10-2030 23:59', 'Ikke afleveret') + probe
-                : assignmentRow(101, 'Essay 1', '05/10-2030 23:59', 'Ikke afleveret') +
-                  assignmentRow(102, 'Essay 2', '12/10-2030 23:59', 'Ikke afleveret') + probe;
+                ? essay1('01/10-2030 23:59') + probe
+                : essay1('05/10-2030 23:59') +
+                  assignmentRow({ id: 102, title: 'Essay 2', due: '12/10-2030 23:59', status: 'Ikke afleveret', legacy: true }) +
+                  probe;
+
+            return '<!doctype html><html><body><table>' + assignmentHeader + rows + '</table></body></html>';
+        };
+
+        // The absence page a student sees, which is the one the percentage
+        // half of the parser is written for: registrations linked the way the
+        // real teacher page links them (ActivityAbsenceRegistration.aspx?id=,
+        // issue #59), one in the older absenseId= shape, and a per-hold
+        // percentage row. A bare id= on some other page must not be read as a
+        // registration, which is what the drift round checks.
+        const absenceLink = (id, legacy) => legacy
+            ? '/lectio/223/fravaer_elev.aspx?absenseId=' + id
+            : '/lectio/223/ActivityAbsenceRegistration.aspx?id=' + id + '&amp;prevurl=subnav%2ffravaerelev.aspx';
+
+        const absenceRow = (id, title, legacy = false) =>
+            '<tr><td>40</td><td><a href="' + absenceLink(id, legacy) + '">' + title + '</a></td><td>3a MA</td></tr>';
+
+        const percentRow = (percent) =>
+            '<tr><td><span data-lectiocontextcard="HE9000001">3a MA</span></td><td>' + percent + '</td></tr>';
+
+        const absence = () => {
+            if (round >= 7) {
+                return '<!doctype html><html><body><table><tr><th>Uge</th><th>Aktivitet</th><th></th></tr>' +
+                    '<tr><td>40</td><td><a class="s2skemabrik s2normal" data-tooltip="1/10-2030 08:00 til 09:30\nHold: 3a MA">' +
+                    '<span class="s2skemabrikcontent">3a MA</span></a></td>' +
+                    '<td><a href="/lectio/223/somewhere_else.aspx?id=9">Angiv fravær</a></td></tr>' +
+                    '</table></body></html>';
+            }
+
+            const rows = absenceRow(201, 'Fravær 1/10') +
+                absenceRow(202, 'Fravær 2/10', true) +
+                (round >= 6 ? absenceRow(203, 'Fravær 3/10') : '') +
+                percentRow(round >= 6 ? '3,1%' : '2,5%');
 
             return '<!doctype html><html><body><table>' + rows + '</table></body></html>';
         };
@@ -81,6 +152,7 @@
             let body = '<!doctype html><html><body></body></html>';
             if (/SkemaNy\.aspx/i.test(text)) body = schedule();
             else if (/OpgaveListe\.aspx/i.test(text)) body = assignments();
+            else if (/fravaer(?:elev|laerer)\.aspx/i.test(text)) body = absence();
 
             return { ok: true, status: 200, url: text, text: async () => body };
         };
@@ -123,13 +195,23 @@
 
         const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+        // A wait that runs out stops the run: every later round is compared
+        // against the one that never arrived, and would only spend the page's
+        // time budget on failures that say nothing new.
         const waitFor = async (predicate, label) => {
             for (let attempt = 0; attempt < 120; attempt += 1) {
                 if (predicate()) return true;
                 await wait(50);
             }
-            failures.push('timed out waiting for ' + label);
-            return false;
+            throw new Error('timed out waiting for ' + label);
+        };
+
+        const finish = () => {
+            const output = document.createElement('pre');
+            output.id = 'test-result';
+            output.textContent = failures.length ? failures.join(' | ') : 'pass';
+            document.body.dataset.testResult = failures.length ? 'fail' : 'pass';
+            document.body.appendChild(output);
         };
 
         // Changing any tracker re-checks on a 600ms debounce, so setting the
@@ -141,6 +223,8 @@
         };
 
         const kinds = () => readHistory().map((item) => item.kind);
+        const sourceRecords = (key) => (readSnapshot()?.sources?.[key]?.records) || {};
+        const reportCodes = () => window.reports.map((report) => report.kind + ':' + report.code);
 
         (async () => {
             // --- Round 0: baseline.
@@ -164,6 +248,24 @@
             assert(
                 !window.fetchLog.some((url) => /fravaer|DokumentOversigt/i.test(url)),
                 'no request should be made for a source that is switched off'
+            );
+
+            // The named columns, read as named: the deadline is the Frist
+            // cell and not the date in the note beside it, and the grade is
+            // the Karakter cell.
+            const essay1 = baseline?.sources?.assignments?.records?.EX101;
+            assert(
+                essay1?.dueDate === '2030-10-01' && essay1?.dueTime === '23:59',
+                'Essay 1 should take its deadline from the Frist column, not the note, got: ' +
+                    essay1?.dueDate + ' ' + essay1?.dueTime
+            );
+            assert(
+                essay1?.status === 'Ikke afleveret · Grade 7',
+                'Essay 1 should carry its status word and the Karakter cell as a grade, got: ' + essay1?.status
+            );
+            assert(
+                !/1\/1-2030/.test(essay1?.context || '') && /3a DA/.test(essay1?.context || ''),
+                'the context should carry the hold and not the note\'s date, got: ' + essay1?.context
             );
 
             // --- Round 1: homework moves while room tracking is switched off.
@@ -219,7 +321,13 @@
                 'a deadline entry should name both deadlines, got: ' + deadlineEntry?.detail
             );
 
+            // Essay 2 is the row still linked the old way, exerciseid=; it is
+            // the new assignment this round, so the legacy key is what found it.
             const newAssignment = readHistory().find((item) => item.kind === 'assignment');
+            assert(
+                newAssignment?.title === 'Essay 2',
+                'the exerciseid= row should still be read as an assignment, got: ' + newAssignment?.title
+            );
             assert(
                 newAssignment?.eventDate === '2030-10-12',
                 'an assignment should carry its deadline as the event date so the urgency window can use it, got: ' + newAssignment?.eventDate
@@ -249,6 +357,86 @@
                 'a deadline should announce itself once, not on every later check'
             );
 
+            // --- Round 5: absence switched on. Its first read is a baseline:
+            // both registration link shapes and the percentage row, no news.
+            round = 5;
+            clockOffset += 31 * 60 * 1000;
+            setTrackers({ trackAbsence: true });
+            await waitFor(() => Object.keys(sourceRecords('absence')).length > 0, 'the absence baseline');
+
+            const absenceBaseline = sourceRecords('absence');
+            assert(
+                Object.keys(absenceBaseline).sort().join(',') === 'ABSENCE201,ABSENCE202,ABSPCTHE9000001',
+                'the absence baseline should hold the ActivityAbsenceRegistration.aspx?id= row, the ' +
+                    'absenseId= row and the percentage row, got: ' + Object.keys(absenceBaseline).sort().join(',')
+            );
+            assert(
+                absenceBaseline.ABSENCE201?.type === 'registration' && absenceBaseline.ABSENCE201?.title === 'Fravær 1/10',
+                'a registration should be titled by its link when the row has no lesson block, got: ' +
+                    JSON.stringify(absenceBaseline.ABSENCE201)
+            );
+            assert(
+                absenceBaseline.ABSPCTHE9000001?.type === 'percent' && absenceBaseline.ABSPCTHE9000001?.detail === '2,5%',
+                'the percentage row should be keyed on its hold card, got: ' + JSON.stringify(absenceBaseline.ABSPCTHE9000001)
+            );
+            assert(
+                !kinds().includes('absence'),
+                'a first absence read is a baseline, not news'
+            );
+
+            // --- Round 6: a registration appears and the percentage moves,
+            // with the percentage tracker switched on.
+            round = 6;
+            clockOffset += 31 * 60 * 1000;
+            setTrackers({ trackAbsencePercent: true });
+            await waitFor(() => kinds().includes('absence'), 'the absence news');
+
+            const absenceEntries = readHistory().filter((item) => item.kind === 'absence');
+            assert(
+                absenceEntries.some((item) => item.title === 'Fravær 3/10' && /New absence registration/.test(item.detail || '')),
+                'the new registration should be reported, got: ' + JSON.stringify(absenceEntries.map((item) => [item.title, item.detail]))
+            );
+            assert(
+                absenceEntries.some((item) => /2,5% -> 3,1%/.test(item.detail || '')),
+                'the moved percentage should be reported, got: ' + JSON.stringify(absenceEntries.map((item) => [item.title, item.detail]))
+            );
+
+            // --- Round 7: both list pages come back plainly themselves but
+            // with no row the parsers recognise. That is not a quiet week: each
+            // parser tells the Manager it looked and found nothing, and the
+            // last good capture is kept rather than everything vanishing.
+            assert(
+                window.reports.length === 0,
+                'nothing should have been reported while the pages parsed, got: ' + reportCodes().join(' ')
+            );
+
+            round = 7;
+            clockOffset += 31 * 60 * 1000;
+            setTrackers({ trackLessonNotes: true });
+            await waitFor(
+                () => reportCodes().includes('drift:assignment-rows') && reportCodes().includes('drift:absence-rows'),
+                'both drift reports'
+            );
+
+            assert(
+                window.reports.every((report) => report.moduleId === 'change-radar' && report.found === 0),
+                'a drift report names the module and says it found nothing, got: ' + JSON.stringify(window.reports)
+            );
+            assert(
+                Object.keys(sourceRecords('assignments')).length === 3,
+                'a list that stopped parsing should keep its last good capture, got ' +
+                    Object.keys(sourceRecords('assignments')).length + ' assignments'
+            );
+            assert(
+                Object.keys(sourceRecords('absence')).length === 4,
+                'an absence page that stopped parsing should keep its last good capture, got ' +
+                    Object.keys(sourceRecords('absence')).length + ' records'
+            );
+            assert(
+                !Object.keys(sourceRecords('absence')).includes('ABSENCE9'),
+                'a bare id=9 on a page that is not ActivityAbsenceRegistration.aspx was read as a registration'
+            );
+
             // --- Switching a source off must stop it being fetched at all.
             const beforeOff = window.fetchLog.filter((url) => /OpgaveListe/i.test(url)).length;
             clockOffset += 31 * 60 * 1000;
@@ -263,13 +451,9 @@
                 !readSnapshot()?.sources?.assignments,
                 'a source switched off should be dropped from the snapshot'
             );
-
-            const output = document.createElement('pre');
-            output.id = 'test-result';
-            output.textContent = failures.length ? failures.join(' | ') : 'pass';
-            document.body.dataset.testResult = failures.length ? 'fail' : 'pass';
-            document.body.appendChild(output);
-        })();
+        })().catch((error) => {
+            failures.push(String((error && error.message) || error));
+        }).then(finish);
     </script>
 </body>
 </html>
