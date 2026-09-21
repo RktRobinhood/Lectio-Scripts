@@ -121,3 +121,17 @@ test('a copy whose shortcut-letter join ignores the text before the span is caug
     assert.match(result, /^fail/, `the mutated module passed the fixture: ${detail}`);
     assert.match(detail, /Time Tracking tab: "Tids/, detail);
 });
+
+// Issue #63: the label-before-figure rule with its lookup removed, so every
+// label is written back as it was. "Arbejde: 232,7, ..." carries no word the
+// fallback gate recognises, so nothing else can rescue it, and the fixture
+// must name the breakdown cell.
+test('a copy whose label-before-figure rule no longer looks labels up is caught', async () => {
+    const { result, detail } = await runPatternFixture(replacing(
+        'exactCore(label) ??\n                        label',
+        'label'
+    ));
+
+    assert.match(result, /^fail/, `the mutated module passed the fixture: ${detail}`);
+    assert.match(detail, /Time Tracking breakdown: "Arbejde: 232,7/, detail);
+});

@@ -80,6 +80,36 @@
         </tbody>
     </table>
 
+    <!--
+        Issue #63: what the rendered pass found with English Mode running.
+        The weekday cell carries the leading &nbsp; the live Time Tracking
+        table has; the tooltips are the live title attributes verbatim.
+    -->
+    <h1 id="hold-plan">Holdet 1i TOK/4 - Studieplan Kalender</h1>
+    <h1 id="hold-list">Holdet 1i TOK/4 - Forløbsliste</h1>
+    <table>
+        <tbody>
+            <tr><td id="wd-mon"><div>&nbsp;Mandag</div></td><td id="wd-fri">Fredag</td><td id="month-juli">Juli 2026</td><td id="month-august">August 2026</td></tr>
+            <tr>
+                <td id="tt-breakdown">Arbejde: 232,7, Barns sygdom: 7,4, Ferie: 185,0, Sygdom: 14,8</td>
+                <td id="tt-excl">Timer uden ferie/helligdage: 254,9</td>
+                <td id="tt-saldo" title="Registreret: 439,9 Forventet: 429,2 Saldo: 10,7">10,7</td>
+            </tr>
+        </tbody>
+    </table>
+    <span id="dagsnorm" title="Dagsnorm: 7,4">7,4</span>
+    <span id="budget" title="Budgetterede timer: 0 + 0 Realiserede timer: 4,4 + 0 + 0">Total</span>
+    <span id="agreed" title="Aftalt timetal i alt 26/27: 1694,6 Periode: 3/7-26 - 2/7-27 (365 dage) Antal kalenderdage 26/27: 365 Aftalt timetal i perioden: 1694,6 / 365 * 365 = 1694,60 Aftalt timetal i alt: 1694,60">Aftalt timetal</span>
+    <span id="kred" title="Lærerkred. - Summen af afholdte og planlagte moduler med læreren.">LærerKred</span>
+    <span id="vis-tip" title="Visning:&#10;&#9;&#9;- Forløb og opgaver. Viser hold med mindst én opgave eller forløb.&#10;&#9;&#9;- Kun opgaver: Viser hold, som har mindst én opgave.">Vis:</span>
+    <span id="footer-now">21/9-2026  kl. 21:00</span>
+    <a id="version-link" href="#" title="Se versioninformation">Lectio version 24.035</a>
+    <a id="mere" href="#">Mere</a>
+    <a id="tidsreg" href="#">Tidsreg.</a>
+    <div id="quicknav" title="Hurtignavigering"></div>
+    <img id="unmark" alt="Afmarkér alle">
+    <span id="no-credit">Der er ingen lærere at kreditere</span>
+
     <pre id="detail"></pre>
 
     <script src="/modules-unstable/Lectio-English-Mode.user.js"></script>
@@ -98,6 +128,7 @@
             return false;
         }
         const text = (id) => document.getElementById(id).textContent.trim();
+        const titleOf = (id) => document.getElementById(id).getAttribute('title');
         const shortcut = (id) => document.getElementById(id).querySelector('.shortcutletter').textContent;
 
         function check() {
@@ -141,6 +172,38 @@
             assert(text('cc-dash') === '1i - Activity', `Class code with dash: "${text('cc-dash')}"`);
             assert(text('cc-slash') === '1i Activity/4', `Class code with slash: "${text('cc-slash')}"`);
             assert(text('cc-cap') === '2i Activity', `Class code capitalised: "${text('cc-cap')}"`);
+
+            // 8. Issue #63: the class-page headings through the " - " rule.
+            assert(text('hold-plan') === 'Class 1i TOK/4 - Course Plan Calendar', `class Study Plan heading: "${text('hold-plan')}"`);
+            assert(text('hold-list') === 'Class 1i TOK/4 - Unit List', `class Unit List heading: "${text('hold-list')}"`);
+
+            // 9. Weekdays that looksLikeName() used to take for names, and full months.
+            assert(text('wd-mon') === 'Monday', `Time Tracking weekday: "${text('wd-mon')}"`);
+            assert(text('wd-fri') === 'Friday', `Time Tracking weekday: "${text('wd-fri')}"`);
+            assert(text('month-juli') === 'July 2026', `Time Tracking month: "${text('month-juli')}"`);
+
+            // 10. A label before a figure, in text and in a tooltip, figures untouched.
+            assert(text('tt-breakdown') === 'Work: 232,7, Child Sick Leave: 7,4, Holiday: 185,0, Sick Leave: 14,8', `Time Tracking breakdown: "${text('tt-breakdown')}"`);
+            assert(text('tt-excl') === 'Hours excluding holidays/public holidays: 254,9', `Time Tracking hours excluding: "${text('tt-excl')}"`);
+            assert(titleOf('tt-saldo') === 'Registered: 439,9 Expected: 429,2 Balance: 10,7', `Time Tracking balance tooltip: "${titleOf('tt-saldo')}"`);
+            assert(titleOf('dagsnorm') === 'Daily norm: 7,4', `Dagsnorm tooltip: "${titleOf('dagsnorm')}"`);
+            assert(titleOf('budget') === 'Budgeted hours: 0 + 0 Actual hours: 4,4 + 0 + 0', `Budgeted hours tooltip: "${titleOf('budget')}"`);
+            assert(titleOf('agreed') === 'Agreed hours in total 26/27: 1694,6 Period: 3/7-26 - 2/7-27 (365 days) Number of calendar days 26/27: 365 Agreed hours in the period: 1694,6 / 365 * 365 = 1694,60 Agreed hours in total: 1694,60',
+                `Agreed hours tooltip: "${titleOf('agreed')}"`);
+
+            // 11. Exact entries for tooltips the fallback got wrong or never reached.
+            assert(titleOf('kred') === 'Teacher credit - the sum of held and planned periods with the teacher.', `LærerKred tooltip: "${titleOf('kred')}"`);
+            assert(titleOf('vis-tip') === 'Show: - Units and Assignments. Shows classes with at least one assignment or unit. - Assignments only: Shows classes with at least one assignment.', `Vis tooltip: "${titleOf('vis-tip')}"`);
+            assert(titleOf('version-link') === 'Show version information', `version tooltip: "${titleOf('version-link')}"`);
+            assert(titleOf('quicknav') === 'Quick navigation', `quick navigation tooltip: "${titleOf('quicknav')}"`);
+            assert(document.getElementById('unmark').getAttribute('alt') === 'Deselect all', `Afmarkér alle: "${document.getElementById('unmark').getAttribute('alt')}"`);
+            assert(text('no-credit') === 'There are no teachers to credit', `credit table empty state: "${text('no-credit')}"`);
+
+            // 12. The footer and the words looksLikeName() skipped.
+            assert(text('footer-now') === '21/9-2026 at 21:00', `footer time: "${text('footer-now')}"`);
+            assert(text('version-link') === 'Lectio version 24.035', `version line: "${text('version-link')}"`);
+            assert(text('mere') === 'More', `Mere: "${text('mere')}"`);
+            assert(text('tidsreg') === 'Time reg.', `Tidsreg.: "${text('tidsreg')}"`);
         }
 
         function checkNearMisses() {
@@ -149,7 +212,9 @@
                 ['nm-hours', 'Total: 10,5 t'],
                 ['nm-month', 'okt 2026'],
                 ['nm-t-text', 'Test t. 5'],
-                ['nm-kl', 'Kl. 08:15']
+                ['nm-kl', 'Kl. 08:15'],
+                // Issue #63: a month that is the same word in English, and a label the dictionary does not know.
+                ['month-august', 'August 2026']
             ]) {
                 assert(text(id) === original, `near miss changed: "${original}" became "${text(id)}"`);
             }
@@ -171,7 +236,13 @@
                 'Starter ny tidsregistrering og sætter starttid til nu. Posten kan efterfølgende redigeres på Tidsregistreringssiden.',
                 '1i - aktivitet', '1i aktivitet/4', '2i Aktivitet',
                 // Fragments the shortcut-letter join writes must not be sent as words of their own.
-                'Time T', 'acking', 'nnual Summary', 'xam Load', 'our Calculation', 'dit'
+                'Time T', 'acking', 'nnual Summary', 'xam Load', 'our Calculation', 'dit',
+                // Issue #63: resolved locally now, and the version line is an identifier.
+                'Holdet 1i TOK/4 - Studieplan Kalender', 'Holdet 1i TOK/4 - Forløbsliste', 'Mandag', 'Fredag', 'Juli 2026',
+                'Arbejde: 232,7, Barns sygdom: 7,4, Ferie: 185,0, Sygdom: 14,8', 'Timer uden ferie/helligdage: 254,9',
+                'Registreret: 439,9 Forventet: 429,2 Saldo: 10,7', 'Dagsnorm: 7,4', 'Budgetterede timer: 0 + 0 Realiserede timer: 4,4 + 0 + 0',
+                'Lærerkred. - Summen af afholdte og planlagte moduler med læreren.', '21/9-2026 kl. 21:00', 'Lectio version 24.035',
+                'Mere', 'Tidsreg.', 'Hurtignavigering', 'Se versioninformation', 'Afmarkér alle', 'Der er ingen lærere at kreditere'
             ];
             for (const source of shouldStayLocal) {
                 assert(!window.googleRequests.includes(source), `sent to the fallback instead of resolving locally: "${source}"`);

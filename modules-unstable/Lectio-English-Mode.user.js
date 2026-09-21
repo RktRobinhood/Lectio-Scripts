@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio English Mode
 // @namespace    lectio-english-mode
-// @version      1.11.3
+// @version      1.11.4
 // @description  Context-aware English layer for Lectio with instant core UI translation, persistent cache and Google fallback.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-start
@@ -66,7 +66,7 @@
     (function registerWithLectioManager() {
         const MODULE_ID = 'english-mode';
         const MODULE_NAME = 'Lectio English Mode';
-        const MODULE_VERSION = '1.11.3';
+        const MODULE_VERSION = '1.11.4';
 
         /*
          * The settings panel's own words, in both languages (ADR-0013). The
@@ -1034,7 +1034,59 @@
             'Studievejledning': 'Student Counselling',
             'Tjenestefri': 'Leave of Absence',
             'Privat Aftale': 'Private Appointment',
-            'Private aftaler kan ikke ses af andre': 'Private appointments cannot be seen by others'
+            'Private aftaler kan ikke ses af andre': 'Private appointments cannot be seen by others',
+
+            /*
+             * What the rendered-English pass over the same screens found
+             * (issue #63, English Mode running as a teacher at school 223).
+             * Each key is the source of a string that rendered wrong: still
+             * Danish, mistranslated by the fallback ("Afmarkér alle" ->
+             * "Demarcate all", "Lærerkred." -> "Teaching staff."), or
+             * inconsistent with the module's own words ("Studieplan
+             * Kalender" -> "Study plan Calendar" beside "Course Plan").
+             *
+             * The single capitalised words are here for a reason beyond
+             * vocabulary: looksLikeName() treats a lone capitalised word
+             * with no recognisable Danish in it as a person's name and
+             * never translates it, which is why "Mandag".."Fredag" stayed
+             * Danish on Time Tracking while "Lørdag" and "Søndag" (with
+             * their ø) did not, and why "Mere", "Tidsreg." and
+             * "Hurtignavigering" never moved. An exact entry is checked
+             * before that guard.
+             */
+            'Studieplan Kalender': 'Course Plan Calendar',
+            'Mandag': 'Monday',
+            'Tirsdag': 'Tuesday',
+            'Onsdag': 'Wednesday',
+            'Torsdag': 'Thursday',
+            'Fredag': 'Friday',
+            'Lørdag': 'Saturday',
+            'Søndag': 'Sunday',
+            'Mere': 'More',
+            'Tidsreg.': 'Time reg.',
+            'Hurtignavigering': 'Quick navigation',
+            'Se versioninformation': 'Show version information',
+            'Visning: - Forløb og opgaver. Viser hold med mindst én opgave eller forløb. - Kun opgaver: Viser hold, som har mindst én opgave.':
+                'Show: - Units and Assignments. Shows classes with at least one assignment or unit. - Assignments only: Shows classes with at least one assignment.',
+            'Aktuelle hold er: Aktive holdelementer, med mindst én aktiv elev på dags dato.':
+                'Current classes are: active classes with at least one active student as of today.',
+            'Lærerkred. - Summen af afholdte og planlagte moduler med læreren.':
+                'Teacher credit - the sum of held and planned periods with the teacher.',
+            'Opgjort i moduler af 70 min.': 'Calculated in periods of 70 min.',
+            'Dagsnorm': 'Daily norm',
+            'Registreret': 'Registered',
+            'Forventet': 'Expected',
+            'Timer uden ferie/helligdage': 'Hours excluding holidays/public holidays',
+            'Der er ingen lærere at kreditere': 'There are no teachers to credit',
+            'Markér alle': 'Select all',
+            'Afmarkér alle': 'Deselect all',
+            'Afkrydsning i Dags/Ugeændringer er ikke gyldigt uden afkrydsning i Skema eller Skema-top.':
+                'A tick in Day/Week Changes is not valid without a tick in Schedule or Schedule Top.',
+            'Sæt kryds hvis tilmelding skal slås til på begivenheden': 'Tick to enable sign-up for the event',
+            'Bruges fx til skjule en fraværssamtale for andre elever':
+                'Used, for example, to hide an absence interview from other students',
+            'Ved flueben i Frivillig aktivitet reserveres deltagere ikke. Bemærk dog at lokaler og ressourcer altid reserveres. Deltagere er dermed i denne kontekst; lærere og elever.':
+                'Ticking Optional activity does not reserve participants. Note that rooms and resources are always reserved. Participants in this context means teachers and students.'
         });
 
     const WEEKDAYS =
@@ -1087,6 +1139,46 @@
             okt: 'Oct',
             nov: 'Nov',
             dec: 'Dec'
+        });
+
+    /*
+     * Full month names, as the Time Tracking statement writes them
+     * ("Juli 2026"). Like the abbreviations, only with a year after
+     * them (issue #63).
+     */
+    const MONTHS =
+        Object.freeze({
+            januar: 'January',
+            februar: 'February',
+            marts: 'March',
+            april: 'April',
+            maj: 'May',
+            juni: 'June',
+            juli: 'July',
+            august: 'August',
+            september: 'September',
+            oktober: 'October',
+            november: 'November',
+            december: 'December'
+        });
+
+    /*
+     * Phrases that only ever occur next to a figure that varies - the
+     * Annual Summary tooltips "Budgetterede timer: 0 + 0 Realiserede
+     * timer: 4,4 + 0 + 0" and "Aftalt timetal i alt 26/27: 1694,6
+     * Periode: ... (365 dage) ...". Sent to the fallback, they came back
+     * readable but with every decimal comma turned into a point
+     * ("4,4" -> "4.4", "1694,6" -> "1694.6"), so they are resolved
+     * locally, phrase by phrase, and the figures are never touched
+     * (issue #63).
+     */
+    const PHRASES =
+        Object.freeze({
+            'Aftalt timetal i alt': 'Agreed hours in total',
+            'Aftalt timetal i perioden': 'Agreed hours in the period',
+            'Antal kalenderdage': 'Number of calendar days',
+            'Budgetterede timer': 'Budgeted hours',
+            'Realiserede timer': 'Actual hours'
         });
 
     /*
@@ -2073,6 +2165,19 @@
             return true;
         }
 
+        /*
+         * The footer's "Lectio version 24.035" is a product name and a
+         * number. The fallback rendered it "Reading version 24.035" -
+         * lectio is Latin - so it is an identifier here and never sent
+         * (issue #63).
+         */
+        if (
+            /^Lectio version [\d.]+$/i
+                .test(source)
+        ) {
+            return true;
+        }
+
         if (
             /^[^\s@]+@[^\s@]+\.[^\s@]+$/
                 .test(source)
@@ -2252,6 +2357,23 @@
                                 .replace(
                                     /^Eleven\b/i,
                                     'Student'
+                                );
+                        }
+
+                        /*
+                         * A class's own pages: "Holdet 1i TOK/4 -
+                         * Studieplan Kalender", "Holdet 1i TOK/4 -
+                         * Forløbsliste". The fallback wrote "class 1i
+                         * TOK/4 - Progress list" (issue #63).
+                         */
+                        if (
+                            /^Holdet\b/i
+                                .test(value)
+                        ) {
+                            return value
+                                .replace(
+                                    /^Holdet\b/i,
+                                    'Class'
                                 );
                         }
 
@@ -2482,6 +2604,83 @@
             result.replace(
                 /^(\d{1,2}\p{L}{1,3})( - | )aktivitet(\/\d+)?$/iu,
                 '$1$2Activity$3'
+            );
+
+        /*
+         * Full month names with a year: "Juli 2026" -> "July 2026"
+         * (issue #63). "August 2026" comes out as it went in.
+         */
+        result =
+            result.replace(
+                /(^|\s)(januar|februar|marts|april|maj|juni|juli|august|september|oktober|november|december)(?=\s+\d{4}\b)/gi,
+                (
+                    _,
+                    lead,
+                    month
+                ) =>
+                    `${lead}${
+                        MONTHS[
+                            month.toLowerCase()
+                        ]
+                    }`
+            );
+
+        /*
+         * The footer's page time: "21/9-2026 kl. 21:00" -> "21/9-2026
+         * at 21:00". Only a full date, "kl." and a clock time, so the
+         * "kl." of any other shape is left to the rules above
+         * (issue #63).
+         */
+        result =
+            result.replace(
+                /^(\d{1,2}\/\d{1,2}-\d{4}) kl\. (\d{1,2}:\d{2})$/,
+                '$1 at $2'
+            );
+
+        for (
+            const [
+                danish,
+                english
+            ]
+            of Object.entries(PHRASES)
+        ) {
+            result =
+                result.replace(
+                    new RegExp(
+                        `\\b${danish}\\b`,
+                        'g'
+                    ),
+                    english
+                );
+        }
+
+        result =
+            result.replace(
+                /\((\d+) dage\)/g,
+                '($1 days)'
+            );
+
+        /*
+         * A label in front of a figure - "Arbejde: 232,7, Barns sygdom:
+         * 7,4", "Saldo: 10,7", "Dagsnorm: 7,4" on Time Tracking - is
+         * looked up as an entry of its own. Only labels the dictionary
+         * knows change, so "Total: 10,5 h" and "Norm: 32 h" are as they
+         * were; a label the fallback would have to guess at is not the
+         * kind of thing this rule is for (issue #63).
+         */
+        result =
+            result.replace(
+                /(^|, |\s)([\p{L}][\p{L} \/]*?)(?=: -?\d)/gu,
+                (
+                    _,
+                    lead,
+                    label
+                ) =>
+                    lead +
+                    (
+                        exactCore(label) ??
+                        label
+                    )
             );
 
         return {

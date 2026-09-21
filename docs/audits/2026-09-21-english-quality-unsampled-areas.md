@@ -27,8 +27,9 @@ away. No names, message subjects or personal ids from any page appear in this do
 **Status.** Every one-line finding is fixed: Manager **1.31.1** (straight to Stable, as the
 Manager always does), English Mode **1.11.1** (`modules-unstable/`, Experimental channel),
 and one catalogue category. Everything larger is filed: #60, #61, #63, #64. The
-rendered-English pass is **not done** and is recorded as an unchecked checklist at the end
-of Part 3 (#63).
+rendered-English pass (#63) was **done later the same day** with English Mode running —
+see [Rendered-English pass](#rendered-english-pass-2026-09-21-evening-issue-63) at the end
+of Part 3; what it found is English Mode **1.11.4** and issue #68.
 
 ## Part 1 — The Manager and the module settings UI (repo)
 
@@ -274,22 +275,107 @@ ses af andre`, `Gem`, `Annuller`.
 - **Period names** — `Skoleåret 26/27`, `Andet halvår 2026`, `Finansåret 2026` go to Google
   by virtue of `å`; not one-line entries because the year varies. → #61.
 
-### Rendered-English pass — NOT DONE (owner checklist, also filed as #63)
+### Rendered-English pass — owner checklist (filed as #63, done below)
 
-Reason: no Tampermonkey in the available Chrome profile, so English Mode was not running.
-Needs a session with English Mode ≥ 1.11.1 installed from the Experimental channel. Read-only.
-Re-check each screen several times with 1–4 s waits.
+Written when no Tampermonkey was on in the available Chrome profile. Done later the same
+day; each item is ticked where the rendered English was actually read, with the exceptions
+noted inline.
 
-- [ ] Study Plan calendar — sub-nav, `Vis:` select, checkboxes, headers, month abbreviations, `Total`/`Norm`, class-code columns
-- [ ] A class's Study Plan — the class sub-nav and the `Holdet … - Studieplan Kalender` heading
-- [ ] Unit list (`Forløbsliste`) — empty state and the Gem/Annuller/Anvend tooltips
-- [ ] Annual Summary — the five tabs (two with a mid-word shortcut letter), period select, table headers, row labels, the `1i - aktivitet` / `1i aktivitet/4` rows
-- [ ] Time Tracking — toolbar, headers, the type select, `Kopiér rækken`, the Opgørelse table
-- [ ] Surveys — toolbar, section headings, headers **and their hover tooltips**, both empty states
-- [ ] Create Lesson — every row label, pickers, search placeholder, credit table, double-booking block; close with Annuller
-- [ ] Create Other Activity — `Vises i:`, `Frivillig aktivitet (…)`, `Tilmelding`, `Aflysningsårsag` options; close with Annuller
-- [ ] Private Appointment — the `Privat Aftale` heading, `Kommentar`, the footnote; close with Annuller
-- [ ] Hover tooltips on timetable cells
+- [x] Study Plan calendar — sub-nav, `Vis:` select, checkboxes, headers, month abbreviations, `Total`/`Norm`, class-code columns
+- [x] A class's Study Plan — the class sub-nav and the `Holdet … - Studieplan Kalender` heading
+- [x] Unit list (`Forløbsliste`) — empty state and the Gem/Annuller/Anvend tooltips
+- [x] Annual Summary — the five tabs (two with a mid-word shortcut letter), period select, table headers, row labels, the `1i - aktivitet` / `1i aktivitet/4` rows
+- [x] Time Tracking — toolbar, headers, the type select, `Kopiér rækken`, the Opgørelse table
+- [x] Surveys — toolbar, section headings, headers **and their hover tooltips**, both empty states
+- [x] Create Lesson — every row label, pickers, search placeholder, credit table, double-booking block; left by navigating away
+- [x] Create Other Activity — `Vises i:`, `Frivillig aktivitet (…)`, `Tilmelding`; left by navigating away. **`Aflysningsårsag` options not observed** — the select is not in the DOM until Status is set to Aflyst, and the form was not changed
+- [x] Private Appointment — the `Privat Aftale` heading, `Kommentar`, the footnote; left by navigating away
+- [x] Hover tooltips on timetable cells — observed on the Study Plan calendar: **all still Danish** (→ #68)
+
+### Rendered-English pass (2026-09-21, evening, issue #63)
+
+**How.** Read-only, in the owner's Chrome, logged in as a teacher at school 223 (ADR-0009:
+nothing saved, submitted, registered or cancelled; the three Create forms were opened,
+read, and left by navigating away; no radio, checkbox or field was changed). The plan had
+been to inject the Experimental copy with `GM_*` shims because Tampermonkey was believed to
+be off — but on opening the tab **Tampermonkey was on**, with the Manager and six modules
+running, and English Mode **1.11.2** registered (read off `lectio-module:register`, the
+DA/EN switch on EN). So the pass observed the real Tampermonkey install of 1.11.2, not an
+injected copy, which is the genuine condition the issue asked for. 1.11.3 differs from
+1.11.2 only in the Manager settings labels (71f43f1), which are not on any of these screens.
+The one attempt to inject before that was noticed timed out and never ran (nothing of it is
+in any page; `window.__shimReady` stayed undefined), and no extension or setting was
+touched. Two scratch HTTP servers on 127.0.0.1 were started for the injection and stopped
+afterwards.
+
+Each screen was read at +4 s and again at +7–8 s after load (the Annual Summary also at
++18 s, because its tooltips arrive from the fallback late) through a DOM walk over every
+text node plus every `title`, `placeholder`, `alt`, button value and `<option>`, filtered
+for anything still carrying Danish; the interesting strings were then checked by eye
+against the page text. The Danish source of each finding was read from a fresh fetch of the
+same page's HTML, so it is the exact attribute or node, not a guess.
+
+**What rendered correctly** (nothing to do): every 1.11.1 entry that is on screen — the
+Study Plan sub-nav, `Vis:` select and its options, both checkboxes, `Month`/`Week`/`Student
+Workload`, `Jul 2026`…`Jun 2027`, `Total: 10,5 h` / `Norm: 32 h`, `2i Activity` as a column
+header; the class sub-nav in full; `There are no units` and the three Save/Cancel/Apply
+tooltips; all five Annual Summary tabs with their mid-word shortcut letters (`Time T` + `r`
++ `acking` reads as one word), the period select (`School year 26/27` … `My Period`), every
+header and row label, `1i - Activity` and `1i Activity/4`; Time Tracking's toolbar, headers,
+the whole type select, `Copy row`, `Previous/Next Shortcut: Alt+B/N`, `Statement`,
+`Period`, `Balance`, `Breakdown`; every Surveys string including all five header tooltips
+and both empty states; every Create Lesson and Other Activity row label, `1st period
+08:15-09:25`, `Select Period`, the pickers, the search placeholder and its button, the
+credit table, the double-booking block, `Shown in`, `Optional activity (does not reserve
+participants)`, `Use sign-up`; and Private Appointment in full, `Private Appointment`
+heading included. Not one `1 in`, mid-word split or casing fault was seen.
+
+**Findings.** Fix = English Mode **1.11.4** unless an issue number is given.
+
+| Screen | Danish source | Rendered (1.11.2) | Why | Fix |
+|---|---|---|---|---|
+| Study Plan (teacher) | `Studieplan Kalender` (heading, own text node) | `Study plan Calendar` | Google; inconsistent with *Course Plan* everywhere else | exact entry → `Course Plan Calendar` |
+| Class Study Plan | `Holdet 1i TOK/4 - Studieplan Kalender` | `class 1i TOK/4 - Study plan Calendar` | Google; lower-case *class* | ` - ` rule: `Holdet` → `Class`, plus the entry above → `Class 1i TOK/4 - Course Plan Calendar` |
+| Unit list | `Holdet 1i TOK/4 - Forløbsliste` | `class 1i TOK/4 - Progress list` | Google, though `Forløbsliste` is an entry (the whole string is not) | same rule → `Class 1i TOK/4 - Unit List` |
+| Study Plan | `Visning: - Forløb og opgaver. Viser hold med mindst én opgave eller forløb. - Kun opgaver: Viser hold, som har mindst én opgave.` (`Vis:` tooltip) | `Display: - Progress and tasks. Shows teams with at least one task or process. - Tasks only: …` | Google; *teams*, *tasks*, *process* | exact entry |
+| Study Plan | `Aktuelle hold er: Aktive holdelementer, med mindst én aktiv elev på dags dato.` (`Kun aktuelle hold` tooltip) | `Current classes are: Active class elements, with at least one active student to date.` | Google, readable but odd | exact entry |
+| Every page | `Lectio version 24.035` (footer) | `Reading version 24.035` | Google: *lectio* is Latin | `looksLikeIdentifier()` treats `Lectio version N` as an identifier; never sent |
+| Every page | `Se versioninformation` (footer tooltip), `Hurtignavigering` (quick-nav tooltip) | stayed Danish | single capitalised word → `looksLikeName()` → skipped | exact entries |
+| Every page | `Mere`, `Tidsreg.` (the narrow-layout menu; hidden on wide screens but in the DOM) | stayed Danish | same name guard | exact entries → `More`, `Time reg.` (judgement call: the tooltip beside it says *time registration*) |
+| Every page | `21/9-2026 kl. 21:00` (footer) | stayed Danish | no rule for the date-`kl.`-time shape | rule → `21/9-2026 at 21:00` |
+| Annual Summary | `Lærerkred. - Summen af afholdte og planlagte moduler med læreren.` (`LærerKred` tooltip) | Danish at +7 s, then `Teaching staff. - The sum of held and planned periods with the teacher.` | Google, late; *Teaching staff* is wrong | exact entry |
+| Annual Summary | `Opgjort i moduler af 70 min.` (header tooltips) | Danish at +7 s, `Calculated in periods of 70 min.` at +18 s | Google, late but right | exact entry, so it is immediate |
+| Annual Summary | `Budgetterede timer: 0 + 0 Realiserede timer: 4,4 + 0 + 0` | `Budgeted hours: 0 + 0 Realized hours: 4.4 + 0 + 0` | Google turned the decimal comma into a point | phrase rules; figures untouched |
+| Annual Summary | `Aftalt timetal i alt 26/27: 1694,6 Periode: 3/7-26 - 2/7-27 (365 dage) Antal kalenderdage 26/27: 365 Aftalt timetal i perioden: …` | readable, every `1694,6` as `1694.6` | same | phrase rules + `(N dage)` + label rule |
+| Time Tracking | `Mandag` … `Fredag` (day column) | stayed Danish, while `Lørdag`/`Søndag` rendered `Saturday`/`Sunday` | `looksLikeName()`: a lone capitalised word with no `æøå` and no listed Danish word is taken for a name before `translateStructured()` runs; the two with `ø` pass `hasDanish()` | all seven weekdays as exact entries (checked before the guard) |
+| Time Tracking | `Juli 2026` (statement rows) | stayed Danish (`August 2026` is the same word) | no full-month rule | `MONTHS` table, only with a year after it |
+| Time Tracking | `Arbejde: 232,7, Barns sygdom: 7,4, Ferie: 185,0, Sygdom: 14,8` (the breakdown cells) | stayed Danish | no recognisable Danish word, so never sent | label-before-figure rule: each `Label:` looked up as an entry |
+| Time Tracking | `Timer uden ferie/helligdage: 254,9`, `Dagsnorm: 7,4` (tooltip), `Registreret: 439,9 Forventet: 429,2 Saldo: 10,7` (tooltip) | stayed Danish | same | entries + the same rule |
+| Create Lesson | `Der er ingen lærere at kreditere` | Danish at +4 s, `There are no teachers to credit` at +8 s | Google, late | exact entry |
+| Create Lesson / Other Activity | `Afmarkér alle` (alt) | `Demarcate all` | Google | exact entries `Select all` / `Deselect all` |
+| Other Activity | `Afkrydsning i Dags/Ugeændringer er ikke gyldigt uden afkrydsning i Skema eller Skema-top.` | `A tick in Daily/Weekly Changes is not valid without a tick in Schema or Schema-top.` | Google; *Schema* | exact entry |
+| Other Activity | `Sæt kryds hvis tilmelding skal slås til på begivenheden` (tooltip) | `Tick ​​if registration is to be activated for the event` (with two zero-width spaces) | Google | exact entry → `Tick to enable sign-up for the event` |
+| Other Activity | `Ved flueben i Frivillig aktivitet reserveres deltagere ikke. …` (tooltip) | `By ticking Voluntary activity, participants are not reserved. Note, however, that premises and resources …` | Google; *Voluntary*, *premises* | exact entry |
+| Other Activity | `Bruges fx til skjule en fraværssamtale for andre elever` (tooltip) | `Used, for example, to hide an absence conversation from other students` | Google, acceptable | exact entry, for stability |
+| Study Plan | `data-tooltip` on every cell: `2i Aktivitet`, `ma 6/7-26 - sø 12/7-26`, … | all Danish | `processElement()` never reads `data-tooltip`; and other modules parse that attribute on lesson blocks, so it is not a one-line change | **#68** |
+
+**Behavioural notes.** The fallback is slow on attribute text: tooltips were routinely
+still Danish at +7 s and English at +18 s, which is why several findings above are entries
+for strings Google eventually got right. The page `<title>` is never translated (not on the
+checklist; not filed). `Survey` (from `CORE`) sits in a hidden node beside the visible
+`Surveys` nav label (from `PERSONAL_NAV`); only the latter is seen, so it is left.
+
+**Not observed:** the `Aflysningsårsag` options, `Dobbeltbookede entiteter:` and `Note på
+aflyste aktiviteter:` on Other Activity — only rendered after Status is set to Aflyst, and
+the form was not changed. Everything else on the checklist was reached.
+
+**Verification of 1.11.4.** `tests/fixtures/english-mode-patterns.html` now carries every
+shape above in its live DOM form (the `&nbsp;Mandag` cell, the tooltips verbatim) and
+asserts the rendered English, that `August 2026` is untouched, and that none of the sources
+reached the fallback stub; a third broken copy served from memory — the label rule with its
+lookup removed — fails naming the breakdown cell. The live pages were not re-observed with
+1.11.4 (it is not installed in that profile; injecting it beside the running 1.11.2 would
+have double-processed the page).
 
 ## Fixes applied
 
@@ -300,6 +386,8 @@ Re-check each screen several times with 1–4 s waits.
 | `scripts/check-i18n.mjs`, `.github/workflows/checks.yml`, `AGENTS.md` | — | String-table key parity guard, run in CI after the boot-order check. |
 | `modules-unstable/Lectio-English-Mode.user.js`, `modules-unstable/modules.json`, `modules-unstable/README.md` | 1.11.0 → **1.11.1** (Experimental) | 127 exact `CORE` entries, every one read off a rendered page in this session; none invented. Changelog in both languages. `modules/` untouched (frozen). |
 | `modules-unstable/modules.json` (change-radar) | — | category `Schedule` → `Timetable`, so Danish readers no longer see two `Skema` groups. |
+| `modules-unstable/Lectio-English-Mode.user.js`, `modules-unstable/modules.json`, `modules-unstable/README.md` | 1.11.3 → **1.11.4** (Experimental) | The rendered pass (#63): 27 exact entries, `MONTHS` and `PHRASES` tables, the `Holdet` piece rule, the footer-time rule, the label-before-figure rule, `Lectio version N` as an identifier. Changelog in both languages. `modules/` untouched (frozen). |
+| `tests/fixtures/english-mode-patterns.html`, `tests/english-mode-patterns.browser.test.js` | — | Every #63 shape in its live DOM form, one near miss, the fallback log, and a third bite test. |
 
 No test in the suite exercises English Mode's dictionary against the Experimental copy
 (`tests/issue-20-verify.html` loads the frozen `modules/` file, and
@@ -331,5 +419,6 @@ are verified by the harness below rather than by the suite. Recorded, not fixed 
 
 - **#60** — localise every module's settings schema and re-announce on language change (Part 1.4).
 - **#61** — English Mode pattern-level gaps from these screens: mid-word shortcut letters, `kl.`, `t.`, month abbreviations, period names, the Time Tracking start tooltip (Part 3).
-- **#63** — the rendered-English re-check with English Mode running (Part 3 checklist; needs the owner's Tampermonkey session).
+- **#63** — the rendered-English re-check with English Mode running — **done** (the section at the end of Part 3); its one-line findings are 1.11.4.
 - **#64** — Manager Danish wording and consistency notes (Part 1.3).
+- **#68** — Study Plan cell tooltips (`data-tooltip`) stay Danish; not a one-line change because other modules parse that attribute on lesson blocks.
