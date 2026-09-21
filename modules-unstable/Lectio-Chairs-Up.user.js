@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Chairs Up
 // @namespace    https://www.lectio.dk/
-// @version      1.4.1
+// @version      1.4.2
 // @description  Shows when a lesson is the final active booking of the day in its room. Universal Lectio version.
 // @match        https://www.lectio.dk/lectio/*
 // @grant        none
@@ -53,9 +53,52 @@
   (function registerWithLectioManager() {
     const MODULE_ID = 'chairs-up';
     const MODULE_NAME = 'Lectio - Chairs Up';
-    const MODULE_VERSION = '1.4.1';
+    const MODULE_VERSION = '1.4.2';
+
+    /*
+     * The settings panel's own words, in both languages (ADR-0013). The
+     * Manager renders these strings exactly as given, so the schema is built
+     * from whichever language is current each time announce() runs, and
+     * lectio-manager:language re-announces it. Order of authority: the
+     * Manager's published choice, then whatever Lectio (or English Mode) put
+     * on <html lang>, then Danish, because Lectio is Danish and a module on
+     * its own stays Danish.
+     *
+     * The two literals sit between i18n markers so scripts/check-i18n.mjs can
+     * hold their keys in step. Only display strings live here - never a key,
+     * a type, a default or an option value.
+     */
+    function labels() {
+      const preferred = document.documentElement?.dataset?.lectioLanguage;
+      const language = (preferred || document.documentElement.lang || 'da').toLowerCase();
+
+      return language.startsWith('en')
+        // i18n:en
+        ? {
+          markerStyleLabel: 'Timetable marker',
+          markerStyleHelp: 'Choose how strongly the final lesson stands out.',
+          markerBadge: 'Chair badge',
+          markerOutline: 'Outline',
+          markerQuiet: 'Quiet dot',
+          lessonNoticeLabel: 'Lesson-page notice',
+          lessonNoticeHelp: 'Show the large Chairs Up notice on activity pages.'
+        }
+        // i18n:da
+        : {
+          markerStyleLabel: 'Markering i skemaet',
+          markerStyleHelp: 'Vælg, hvor tydeligt dagens sidste lektion skal skille sig ud.',
+          markerBadge: 'Stolemærke',
+          markerOutline: 'Ramme',
+          markerQuiet: 'Diskret prik',
+          lessonNoticeLabel: 'Besked på aktivitetssiden',
+          lessonNoticeHelp: 'Vis den store Chairs Up-besked på aktivitetssider.'
+        };
+        // i18n:end
+    }
 
     function announce() {
+      const text = labels();
+
       window.dispatchEvent(new CustomEvent('lectio-module:register', {
         detail: {
           id: MODULE_ID,
@@ -65,19 +108,19 @@
             {
               key: 'markerStyle',
               type: 'select',
-              label: 'Timetable marker',
-              description: 'Choose how strongly the final lesson stands out.',
+              label: text.markerStyleLabel,
+              description: text.markerStyleHelp,
               options: [
-                { value: 'badge', label: 'Chair badge' },
-                { value: 'outline', label: 'Outline' },
-                { value: 'quiet', label: 'Quiet dot' }
+                { value: 'badge', label: text.markerBadge },
+                { value: 'outline', label: text.markerOutline },
+                { value: 'quiet', label: text.markerQuiet }
               ]
             },
             {
               key: 'showLessonNotice',
               type: 'toggle',
-              label: 'Lesson-page notice',
-              description: 'Show the large Chairs Up notice on activity pages.'
+              label: text.lessonNoticeLabel,
+              description: text.lessonNoticeHelp
             }
           ],
           currentValues: { ...settings },
@@ -164,6 +207,9 @@
     window.addEventListener('lectio-manager:discover', announce);
     window.addEventListener('lectio-manager:set-setting', handleSetting);
     window.addEventListener('lectio-manager:prune-storage', handlePrune);
+    // The schema was worded in whichever language was current when it was
+    // announced, so a language chosen later is answered with a fresh one.
+    window.addEventListener('lectio-manager:language', announce);
     announce();
   })();
 

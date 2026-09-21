@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio English Mode
 // @namespace    lectio-english-mode
-// @version      1.11.2
+// @version      1.11.3
 // @description  Context-aware English layer for Lectio with instant core UI translation, persistent cache and Google fallback.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-start
@@ -66,10 +66,53 @@
     (function registerWithLectioManager() {
         const MODULE_ID = 'english-mode';
         const MODULE_NAME = 'Lectio English Mode';
-        const MODULE_VERSION = '1.11.2';
+        const MODULE_VERSION = '1.11.3';
+
+        /*
+         * The settings panel's own words, in both languages (ADR-0013). The
+         * Manager renders these strings exactly as given, so the schema is
+         * built from whichever language is current each time announce()
+         * runs, and lectio-manager:language re-announces it. Order of
+         * authority: the Manager's published choice, then <html lang> -
+         * which this very module sets to its own mode - then Danish.
+         *
+         * The two language names in the picker are deliberately not here:
+         * a language is named in itself, in both panels.
+         *
+         * The two literals sit between i18n markers so
+         * scripts/check-i18n.mjs can hold their keys in step. Only display
+         * strings live here - never a key, a type, a default or an option
+         * value.
+         */
+        function labels() {
+            const preferred = document.documentElement?.dataset?.lectioLanguage;
+            const language = (preferred || document.documentElement?.lang || 'da').toLowerCase();
+
+            return language.startsWith('en')
+                // i18n:en
+                ? {
+                    languageLabel: 'Interface language',
+                    languageHelp: 'Reloads Lectio in the selected language.',
+                    positionLabel: 'Language switch position',
+                    positionHelp: 'Choose whether the DA/EN switch scrolls with the page or stays visible.',
+                    positionLocked: 'Locked',
+                    positionFloating: 'Floating'
+                }
+                // i18n:da
+                : {
+                    languageLabel: 'Sprog i brugerfladen',
+                    languageHelp: 'Genindlæser Lectio på det valgte sprog.',
+                    positionLabel: 'Sprogknappens placering',
+                    positionHelp: 'Vælg, om DA/EN-knappen ruller med siden eller bliver stående synlig.',
+                    positionLocked: 'Låst',
+                    positionFloating: 'Flydende'
+                };
+                // i18n:end
+        }
 
         function announce() {
             const storedMode = GM_getValue(STORAGE_MODE, MODE_DA);
+            const text = labels();
 
             window.dispatchEvent(new CustomEvent('lectio-module:register', {
                 detail: {
@@ -80,8 +123,8 @@
                         {
                             key: 'language',
                             type: 'select',
-                            label: 'Interface language',
-                            description: 'Reloads Lectio in the selected language.',
+                            label: text.languageLabel,
+                            description: text.languageHelp,
                             options: [
                                 { value: MODE_DA, label: 'Dansk' },
                                 { value: MODE_EN, label: 'English' }
@@ -90,11 +133,11 @@
                         {
                             key: 'switchPosition',
                             type: 'select',
-                            label: 'Language switch position',
-                            description: 'Choose whether the DA/EN switch scrolls with the page or stays visible.',
+                            label: text.positionLabel,
+                            description: text.positionHelp,
                             options: [
-                                { value: SWITCH_POSITION_LOCKED, label: 'Locked' },
-                                { value: SWITCH_POSITION_FLOATING, label: 'Floating' }
+                                { value: SWITCH_POSITION_LOCKED, label: text.positionLocked },
+                                { value: SWITCH_POSITION_FLOATING, label: text.positionFloating }
                             ]
                         }
                     ],
@@ -181,6 +224,10 @@
         window.addEventListener('lectio-manager:discover', announce);
         window.addEventListener('lectio-manager:set-setting', handleSetting);
         window.addEventListener('lectio-manager:prune-storage', handlePrune);
+        // The schema was worded in whichever language was current when it
+        // was announced, so a language chosen later is answered with a fresh
+        // one.
+        window.addEventListener('lectio-manager:language', announce);
         announce();
     })();
 

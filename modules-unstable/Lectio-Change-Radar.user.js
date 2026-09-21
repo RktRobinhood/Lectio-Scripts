@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Change Radar
 // @namespace    https://github.com/RktRobinhood/Lectio-Scripts
-// @version      0.9.4
+// @version      0.9.5
 // @description  Watches Lectio for the changes you choose to track - timetable, assignments, absence, documents - and keeps a compact recent-change HUD.
 // @author       RktRobinhood
 // @match        https://www.lectio.dk/lectio/*
@@ -20,7 +20,7 @@
     id: 'change-radar',
     aliases: ['schedule-change-radar', 'lectio-change-radar', 'change-log'],
     name: 'Lectio Change Radar',
-    version: '0.9.4',
+    version: '0.9.5',
     channel: 'unstable'
   });
 
@@ -161,53 +161,135 @@
   // temporal dead zone when reached (issue #58, scripts/check-boot-order.mjs).
   const ASSIGNMENT_STATUS_PATTERN = /^(?:Afleveret|Ikke afleveret|Mangler|Afventer|Venter|Afsluttet|Godkendt|Ikke godkendt|Handed in|Not handed in|Missing|Awaiting|Closed|Approved|Not approved)$/i;
 
-  const SETTING_SCHEMA = Object.freeze([
-    makeSelectSetting('displayMode', 'Radar location', 'Where the radar lives. Automatic uses Lectio Manager\'s shared dock when the Manager is installed, and falls back to a floating radar when it is not.', 'auto', [
-      ['auto', 'Automatic'], ['dock', 'Always the Manager dock'], ['floating', 'Always floating on the page']
-    ], 'Radar'),
-    makeSelectSetting('urgentHours', 'Urgent window', 'An unseen change to an activity inside this window turns the radar red.', 24, [
-      [6, 'Next 6 hours'], [12, 'Next 12 hours'], [24, 'Next 24 hours'], [48, 'Next 48 hours']
-    ], 'Radar'),
-    makeSelectSetting('recentHours', 'Recent-change window', 'After changes are seen, keep the radar amber for this long before returning to green.', 24, [
-      [12, '12 hours'], [24, '24 hours'], [48, '48 hours'], [72, '72 hours']
-    ], 'Radar'),
-    makeToggleSetting('attentionAnimation', 'Urgent animation', 'Pulse the radar signal when an urgent unseen change needs attention.', true, 'Radar'),
-    makeToggleSetting('hoverOpen', 'Open on hover', 'Open the change log when the pointer rests on the radar. Click still pins it open.', true, 'Radar'),
-    makeSelectSetting('historyLimit', 'History size', 'Maximum number of recent changes kept in the rotating local log.', 10, [
-      [5, '5 changes'], [10, '10 changes'], [20, '20 changes']
-    ], 'Radar'),
+  /*
+   * The settings panel's own words, in both languages (ADR-0013). The Manager
+   * renders schema strings exactly as given, so settingSchema() below words
+   * the schema in whichever language is current each time it is announced,
+   * and lectio-manager:language re-announces it; the floating HUD's own
+   * settings panel reads the same schema. Keys, types, defaults, option
+   * values and the section grouping never vary - only the words do. One entry
+   * per setting: its label, its help text, and one line per option value.
+   *
+   * The two literals sit between i18n markers so scripts/check-i18n.mjs can
+   * hold their keys in step, at every depth.
+   */
+  const SETTING_TEXT = Object.freeze({
+    // i18n:en
+    en: {
+      sections: { radar: 'Radar', checking: 'Checking', timetable: 'Timetable', assignments: 'Assignments', absence: 'Absence', documents: 'Documents' },
+      displayMode: { label: 'Radar location', help: 'Where the radar lives. Automatic uses Lectio Manager\'s shared dock when the Manager is installed, and falls back to a floating radar when it is not.', auto: 'Automatic', dock: 'Always the Manager dock', floating: 'Always floating on the page' },
+      urgentHours: { label: 'Urgent window', help: 'An unseen change to an activity inside this window turns the radar red.', 6: 'Next 6 hours', 12: 'Next 12 hours', 24: 'Next 24 hours', 48: 'Next 48 hours' },
+      recentHours: { label: 'Recent-change window', help: 'After changes are seen, keep the radar amber for this long before returning to green.', 12: '12 hours', 24: '24 hours', 48: '48 hours', 72: '72 hours' },
+      attentionAnimation: { label: 'Urgent animation', help: 'Pulse the radar signal when an urgent unseen change needs attention.' },
+      hoverOpen: { label: 'Open on hover', help: 'Open the change log when the pointer rests on the radar. Click still pins it open.' },
+      historyLimit: { label: 'History size', help: 'Maximum number of recent changes kept in the rotating local log.', 5: '5 changes', 10: '10 changes', 20: '20 changes' },
+      pollMinutes: { label: 'Check frequency', help: 'How often Change Radar checks Lectio while a Lectio tab is open.', 5: 'Every 5 minutes', 10: 'Every 10 minutes', 15: 'Every 15 minutes', 30: 'Every 30 minutes' },
+      weeksAhead: { label: 'Weeks to watch', help: 'How far ahead the radar snapshots your timetable.', 0: 'This week only', 1: 'This week + next', 2: 'This week + 2 weeks' },
+      trackCancellations: { label: 'Cancellations', help: 'Report a lesson being cancelled, and a cancellation later being lifted.' },
+      trackTimeChanges: { label: 'Time and date moves', help: 'Report a lesson moving to a different day, start time, or end time.' },
+      trackRoomChanges: { label: 'Room changes', help: 'Report a lesson moving to a different room.' },
+      trackTeacherChanges: { label: 'Teacher changes', help: 'Report a different teacher being put on a lesson, such as a substitute.' },
+      trackAddedLessons: { label: 'Lessons added', help: 'Report an activity appearing in a week the radar was already watching.' },
+      trackRemovedLessons: { label: 'Lessons removed', help: 'Report an activity disappearing from a week the radar is watching. That is not the same as a cancellation, which leaves the lesson visible.' },
+      trackHomework: { label: 'Homework', help: 'Report homework (Lektier) being set, changed, or cleared on a lesson.' },
+      trackLessonNotes: { label: 'Notes and other content', help: 'Report changes to a lesson\'s note or its other-content field. These get edited often, so this is off by default.' },
+      trackLessonDetails: { label: 'Other lesson details', help: 'Report changes to a lesson\'s class, title, resources, or participants, and changes Lectio flags without saying what changed. Off by default because most of these are administrative.' },
+      trackAssignments: { label: 'Watch assignments', help: 'Check your assignment list as well as your timetable. Costs one extra request per check, at most twice an hour.' },
+      trackNewAssignments: { label: 'New assignments', help: 'Report an assignment appearing on your list.' },
+      trackUpcomingAssignments: { label: 'Due soon', help: 'Raise an assignment on the radar once its deadline comes inside the window you set under Weeks to watch, so a deadline announces itself before it is on top of you rather than only when it moves.' },
+      trackAssignmentDeadlines: { label: 'Deadline changes', help: 'Report an assignment deadline moving.' },
+      trackAssignmentStatus: { label: 'Status and grades', help: 'Report an assignment changing status, or a grade being published for one.' },
+      trackAbsence: { label: 'Watch absence', help: 'Check your absence page as well as your timetable. Costs one extra request per check, at most twice an hour. Off by default.' },
+      trackAbsenceRegistrations: { label: 'New registrations', help: 'Report a new absence registration appearing against you.' },
+      trackAbsencePercent: { label: 'Percentage changes', help: 'Report your absence percentage moving for a class. That shifts on its own as lessons pass, so it is off by default.' },
+      trackDocuments: { label: 'Watch documents', help: 'Check your document overview as well as your timetable. Costs one extra request per check, at most twice an hour. Off by default.' },
+      trackNewDocuments: { label: 'New documents', help: 'Report a document appearing in your overview.' },
+      trackDocumentUpdates: { label: 'Document updates', help: 'Report an existing document being replaced or renamed.' }
+    },
+    // i18n:da
+    da: {
+      sections: { radar: 'Radar', checking: 'Tjek', timetable: 'Skema', assignments: 'Opgaver', absence: 'Fravær', documents: 'Dokumenter' },
+      displayMode: { label: 'Radarens placering', help: 'Hvor radaren sidder. Automatisk bruger Lectio Managers fælles dock, når Manageren er installeret, og lader ellers radaren flyde på siden.', auto: 'Automatisk', dock: 'Altid Managerens dock', floating: 'Altid flydende på siden' },
+      urgentHours: { label: 'Hastevindue', help: 'En uset ændring af en aktivitet inden for dette tidsrum gør radaren rød.', 6: 'De næste 6 timer', 12: 'De næste 12 timer', 24: 'De næste 24 timer', 48: 'De næste 48 timer' },
+      recentHours: { label: 'Vindue for nylige ændringer', help: 'Når ændringerne er set, forbliver radaren gul så længe, før den bliver grøn igen.', 12: '12 timer', 24: '24 timer', 48: '48 timer', 72: '72 timer' },
+      attentionAnimation: { label: 'Animation ved hast', help: 'Lad radarsignalet pulsere, når en uset hasteændring kræver opmærksomhed.' },
+      hoverOpen: { label: 'Åbn, når musen holdes over', help: 'Åbn ændringsloggen, når musen hviler på radaren. Et klik fastholder den stadig åben.' },
+      historyLimit: { label: 'Historikkens længde', help: 'Højeste antal nylige ændringer, der gemmes i den roterende lokale log.', 5: '5 ændringer', 10: '10 ændringer', 20: '20 ændringer' },
+      pollMinutes: { label: 'Hvor ofte der tjekkes', help: 'Hvor ofte Change Radar tjekker Lectio, mens en Lectio-fane er åben.', 5: 'Hvert 5. minut', 10: 'Hvert 10. minut', 15: 'Hvert 15. minut', 30: 'Hvert 30. minut' },
+      weeksAhead: { label: 'Uger at holde øje med', help: 'Hvor langt frem radaren tager øjebliksbilleder af dit skema.', 0: 'Kun denne uge', 1: 'Denne uge + næste', 2: 'Denne uge + 2 uger' },
+      trackCancellations: { label: 'Aflysninger', help: 'Meld, når en lektion aflyses, og når en aflysning senere ophæves.' },
+      trackTimeChanges: { label: 'Flytning af tid og dato', help: 'Meld, når en lektion flyttes til en anden dag eller får et andet start- eller sluttidspunkt.' },
+      trackRoomChanges: { label: 'Lokaleskift', help: 'Meld, når en lektion flyttes til et andet lokale.' },
+      trackTeacherChanges: { label: 'Lærerskift', help: 'Meld, når en anden lærer sættes på en lektion, fx en vikar.' },
+      trackAddedLessons: { label: 'Tilføjede lektioner', help: 'Meld, når en aktivitet dukker op i en uge, radaren allerede holdt øje med.' },
+      trackRemovedLessons: { label: 'Fjernede lektioner', help: 'Meld, når en aktivitet forsvinder fra en uge, radaren holder øje med. Det er ikke det samme som en aflysning, hvor lektionen stadig kan ses.' },
+      trackHomework: { label: 'Lektier', help: 'Meld, når der gives, ændres eller fjernes lektier på en lektion.' },
+      trackLessonNotes: { label: 'Noter og øvrigt indhold', help: 'Meld ændringer i en lektions note eller i feltet Øvrigt indhold. De redigeres tit, så dette er slået fra som standard.' },
+      trackLessonDetails: { label: 'Andre lektionsdetaljer', help: 'Meld ændringer i en lektions hold, titel, ressourcer eller deltagere samt ændringer, Lectio markerer uden at sige, hvad der er ændret. Slået fra som standard, fordi de fleste af dem er administrative.' },
+      trackAssignments: { label: 'Hold øje med opgaver', help: 'Tjek din opgaveliste ud over dit skema. Koster én ekstra forespørgsel pr. tjek, højst to gange i timen.' },
+      trackNewAssignments: { label: 'Nye opgaver', help: 'Meld, når en opgave dukker op på din liste.' },
+      trackUpcomingAssignments: { label: 'Frist nærmer sig', help: 'Vis en opgave på radaren, når dens frist kommer inden for det tidsrum, du har valgt under Uger at holde øje med, så en frist melder sig, før den er over dig, og ikke kun når den flyttes.' },
+      trackAssignmentDeadlines: { label: 'Ændrede frister', help: 'Meld, når en opgaves frist flyttes.' },
+      trackAssignmentStatus: { label: 'Status og karakterer', help: 'Meld, når en opgave skifter status, eller når der offentliggøres en karakter for den.' },
+      trackAbsence: { label: 'Hold øje med fravær', help: 'Tjek din fraværsside ud over dit skema. Koster én ekstra forespørgsel pr. tjek, højst to gange i timen. Slået fra som standard.' },
+      trackAbsenceRegistrations: { label: 'Nye registreringer', help: 'Meld, når der registreres nyt fravær på dig.' },
+      trackAbsencePercent: { label: 'Ændret fraværsprocent', help: 'Meld, når din fraværsprocent for et hold ændrer sig. Den flytter sig af sig selv, efterhånden som lektionerne går, så dette er slået fra som standard.' },
+      trackDocuments: { label: 'Hold øje med dokumenter', help: 'Tjek din dokumentoversigt ud over dit skema. Koster én ekstra forespørgsel pr. tjek, højst to gange i timen. Slået fra som standard.' },
+      trackNewDocuments: { label: 'Nye dokumenter', help: 'Meld, når et dokument dukker op i din oversigt.' },
+      trackDocumentUpdates: { label: 'Opdaterede dokumenter', help: 'Meld, når et eksisterende dokument erstattes eller omdøbes.' }
+    }
+    // i18n:end
+  });
 
-    makeSelectSetting('pollMinutes', 'Check frequency', 'How often Change Radar checks Lectio while a Lectio tab is open.', 10, [
-      [5, 'Every 5 minutes'], [10, 'Every 10 minutes'], [15, 'Every 15 minutes'], [30, 'Every 30 minutes']
-    ], 'Checking'),
-    makeSelectSetting('weeksAhead', 'Weeks to watch', 'How far ahead the radar snapshots your timetable.', 1, [
-      [0, 'This week only'], [1, 'This week + next'], [2, 'This week + 2 weeks']
-    ], 'Checking'),
+  // The schema, worded in the current language. Built fresh on every call so
+  // a language switch is answered with the right words; everything else in it
+  // is fixed here and never varies between the two.
+  function settingSchema() {
+    const text = SETTING_TEXT[radarLanguage()];
+    const select = (key, defaultValue, values, section) => makeSelectSetting(
+      key, text[key].label, text[key].help, defaultValue,
+      values.map((value) => [value, text[key][value]]), text.sections[section]
+    );
+    const toggle = (key, defaultValue, section) => makeToggleSetting(
+      key, text[key].label, text[key].help, defaultValue, text.sections[section]
+    );
 
-    makeToggleSetting('trackCancellations', 'Cancellations', 'Report a lesson being cancelled, and a cancellation later being lifted.', true, 'Timetable'),
-    makeToggleSetting('trackTimeChanges', 'Time and date moves', 'Report a lesson moving to a different day, start time, or end time.', true, 'Timetable'),
-    makeToggleSetting('trackRoomChanges', 'Room changes', 'Report a lesson moving to a different room.', true, 'Timetable'),
-    makeToggleSetting('trackTeacherChanges', 'Teacher changes', 'Report a different teacher being put on a lesson, such as a substitute.', true, 'Timetable'),
-    makeToggleSetting('trackAddedLessons', 'Lessons added', 'Report an activity appearing in a week the radar was already watching.', true, 'Timetable'),
-    makeToggleSetting('trackRemovedLessons', 'Lessons removed', 'Report an activity disappearing from a week the radar is watching. That is not the same as a cancellation, which leaves the lesson visible.', true, 'Timetable'),
-    makeToggleSetting('trackHomework', 'Homework', 'Report homework (Lektier) being set, changed, or cleared on a lesson.', true, 'Timetable'),
-    makeToggleSetting('trackLessonNotes', 'Notes and other content', 'Report changes to a lesson\'s note or its other-content field. These get edited often, so this is off by default.', false, 'Timetable'),
-    makeToggleSetting('trackLessonDetails', 'Other lesson details', 'Report changes to a lesson\'s class, title, resources, or participants, and changes Lectio flags without saying what changed. Off by default because most of these are administrative.', false, 'Timetable'),
+    return [
+      select('displayMode', 'auto', ['auto', 'dock', 'floating'], 'radar'),
+      select('urgentHours', 24, [6, 12, 24, 48], 'radar'),
+      select('recentHours', 24, [12, 24, 48, 72], 'radar'),
+      toggle('attentionAnimation', true, 'radar'),
+      toggle('hoverOpen', true, 'radar'),
+      select('historyLimit', 10, [5, 10, 20], 'radar'),
 
-    makeToggleSetting('trackAssignments', 'Watch assignments', 'Check your assignment list as well as your timetable. Costs one extra request per check, at most twice an hour.', true, 'Assignments'),
-    makeToggleSetting('trackNewAssignments', 'New assignments', 'Report an assignment appearing on your list.', true, 'Assignments'),
-    makeToggleSetting('trackUpcomingAssignments', 'Due soon', 'Raise an assignment on the radar once its deadline comes inside the window you set under Weeks to watch, so a deadline announces itself before it is on top of you rather than only when it moves.', true, 'Assignments'),
-    makeToggleSetting('trackAssignmentDeadlines', 'Deadline changes', 'Report an assignment deadline moving.', true, 'Assignments'),
-    makeToggleSetting('trackAssignmentStatus', 'Status and grades', 'Report an assignment changing status, or a grade being published for one.', false, 'Assignments'),
+      select('pollMinutes', 10, [5, 10, 15, 30], 'checking'),
+      select('weeksAhead', 1, [0, 1, 2], 'checking'),
 
-    makeToggleSetting('trackAbsence', 'Watch absence', 'Check your absence page as well as your timetable. Costs one extra request per check, at most twice an hour. Off by default.', false, 'Absence'),
-    makeToggleSetting('trackAbsenceRegistrations', 'New registrations', 'Report a new absence registration appearing against you.', true, 'Absence'),
-    makeToggleSetting('trackAbsencePercent', 'Percentage changes', 'Report your absence percentage moving for a class. That shifts on its own as lessons pass, so it is off by default.', false, 'Absence'),
+      toggle('trackCancellations', true, 'timetable'),
+      toggle('trackTimeChanges', true, 'timetable'),
+      toggle('trackRoomChanges', true, 'timetable'),
+      toggle('trackTeacherChanges', true, 'timetable'),
+      toggle('trackAddedLessons', true, 'timetable'),
+      toggle('trackRemovedLessons', true, 'timetable'),
+      toggle('trackHomework', true, 'timetable'),
+      toggle('trackLessonNotes', false, 'timetable'),
+      toggle('trackLessonDetails', false, 'timetable'),
 
-    makeToggleSetting('trackDocuments', 'Watch documents', 'Check your document overview as well as your timetable. Costs one extra request per check, at most twice an hour. Off by default.', false, 'Documents'),
-    makeToggleSetting('trackNewDocuments', 'New documents', 'Report a document appearing in your overview.', true, 'Documents'),
-    makeToggleSetting('trackDocumentUpdates', 'Document updates', 'Report an existing document being replaced or renamed.', false, 'Documents')
-  ]);
+      toggle('trackAssignments', true, 'assignments'),
+      toggle('trackNewAssignments', true, 'assignments'),
+      toggle('trackUpcomingAssignments', true, 'assignments'),
+      toggle('trackAssignmentDeadlines', true, 'assignments'),
+      toggle('trackAssignmentStatus', false, 'assignments'),
+
+      toggle('trackAbsence', false, 'absence'),
+      toggle('trackAbsenceRegistrations', true, 'absence'),
+      toggle('trackAbsencePercent', false, 'absence'),
+
+      toggle('trackDocuments', false, 'documents'),
+      toggle('trackNewDocuments', true, 'documents'),
+      toggle('trackDocumentUpdates', false, 'documents')
+    ];
+  }
 
   const UI = Object.freeze({
     root: 'lectio-change-radar',
@@ -309,6 +391,9 @@
 
   registerWithManager();
   window.addEventListener('lectio-manager:discover', handleDiscovery);
+  // The schema was worded in whichever language was current when it was
+  // announced, so a language chosen later is answered with a fresh one.
+  window.addEventListener('lectio-manager:language', registerWithManager);
   window.addEventListener('lectio-manager:set-setting', handleManagerSettingsEvent);
   window.addEventListener('lectio-manager:prune-storage', handlePruneStorage);
   window.addEventListener('lectio-manager:dock:render-panel', handleDockPanelRender);
@@ -397,7 +482,7 @@
         name: MODULE.name,
         version: MODULE.version,
         channel: MODULE.channel,
-        settingsSchema: SETTING_SCHEMA.map((item) => ({ ...item, value: currentValues[item.key] })),
+        settingsSchema: settingSchema().map((item) => ({ ...item, value: currentValues[item.key] })),
         currentValues,
         settings: currentValues,
         setSetting: apply,
@@ -2487,7 +2572,7 @@
     host.className = 'lcr-settings';
     let openSection = null;
 
-    for (const schema of SETTING_SCHEMA) {
+    for (const schema of settingSchema()) {
       // Twenty-odd trackers in one flat list is unreadable, so the module's own
       // panel groups on the same section labels the Manager reads.
       if (schema.section && schema.section !== openSection) {

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Theming
 // @namespace    https://www.lectio.dk/
-// @version      0.18.1
+// @version      0.18.2
 // @description  Gives Lectio a soft, translucent glass shell with 46 built-in colour schemes (Catppuccin, Nord, Dracula, Cyberpunk, sports, social-app, IB and Danish-landscape palettes and more), each with its own distinct background photo, and can derive a scheme from a website or image, take its background from your own picture, and let you hand-pick every key colour.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-start
@@ -16,7 +16,7 @@
 
     const MODULE_ID = 'lectio-theming';
     const MODULE_NAME = 'Lectio Theming';
-    const MODULE_VERSION = '0.18.1';
+    const MODULE_VERSION = '0.18.2';
     const STORAGE_KEY = 'lectioTheming.settings.v2';
     // The chosen background picture lives in its own entry rather than in the
     // settings blob: it is orders of magnitude larger than every other setting
@@ -334,13 +334,18 @@
 
     const THEME_KEYS = Object.keys(THEMES);
     const PRESET_KEYS = [...THEME_KEYS, 'custom'];
-    const PRESET_OPTIONS = [
-        ...THEME_KEYS.map((key) => ({
-            value: key,
-            label: `${THEMES[key].label} — ${THEMES[key].mode === 'dark' ? 'Dark' : 'Light'}`
-        })),
-        { value: 'custom', label: 'Custom palette' }
-    ];
+
+    // A theme's name is a proper noun and stays as it is; only the light/dark
+    // tag and the custom entry are worded in the current language.
+    function presetOptions(text) {
+        return [
+            ...THEME_KEYS.map((key) => ({
+                value: key,
+                label: `${THEMES[key].label} — ${THEMES[key].mode === 'dark' ? text.presetDark : text.presetLight}`
+            })),
+            { value: 'custom', label: text.presetCustom }
+        ];
+    }
 
     // Neutral starting point for the custom palette only — named themes above
     // never touch these, they carry their own authentic colours. Once any
@@ -391,9 +396,147 @@
     window.addEventListener('lectio-manager:prune-storage', handlePruneStorage);
     window.addEventListener('lectio-manager:preview-setting', handleSettingPreview);
     window.addEventListener('lectio-manager:clear-setting-preview', handleSettingPreviewClear);
+    // The schema was worded in whichever language was current when it was
+    // announced, so a language chosen later is answered with a fresh one.
+    window.addEventListener('lectio-manager:language', announce);
+
+    /*
+     * The settings panel's own words, in both languages (ADR-0013). The
+     * Manager renders these strings exactly as given, so the schema is built
+     * from whichever language is current each time announce() runs. Order of
+     * authority: the Manager's published choice, then whatever Lectio (or
+     * English Mode) put on <html lang>, then Danish, because Lectio is Danish
+     * and a module on its own stays Danish.
+     *
+     * The two literals sit between i18n markers so scripts/check-i18n.mjs can
+     * hold their keys in step. Only display strings live here - never a key,
+     * a type, a default or an option value.
+     */
+    function labels() {
+        const preferred = document.documentElement?.dataset?.lectioLanguage;
+        const language = (preferred || document.documentElement?.lang || 'da').toLowerCase();
+
+        return language.startsWith('en')
+            // i18n:en
+            ? {
+                sectionTheme: 'Theme',
+                sectionPalette: 'Custom palette',
+                sectionBackground: 'Background',
+                sectionAppearance: 'Appearance',
+                sectionReset: 'Reset',
+                enabledLabel: 'Theme enabled',
+                enabledHelp: 'Switch the visual layer on or off.',
+                presetLabel: 'Theme',
+                presetHelp: 'Hover to preview a built-in colour scheme, then choose it to keep it.',
+                presetLight: 'Light',
+                presetDark: 'Dark',
+                presetCustom: 'Custom palette',
+                modeLabel: 'Light or dark base',
+                modeHelp: 'The starting point for the custom palette — built-in themes keep their own light or dark look.',
+                modeLight: 'Light',
+                modeDark: 'Dark',
+                backgroundColourLabel: 'Page colour',
+                backgroundColourHelp: 'Pick the colour behind everything. Choosing any colour here switches to the custom palette.',
+                textColourLabel: 'Text colour',
+                textColourHelp: 'Darkened or lightened automatically if the pair would be hard to read.',
+                accentLabel: 'Accent colour',
+                accentHelp: 'Links, buttons, highlights and focus rings.',
+                accentAltLabel: 'Second accent',
+                accentAltHelp: 'Secondary highlights, lesson stripes and background gradients.',
+                sourceLabel: 'Palette source',
+                sourceHelp: 'Paste an https image or website URL.',
+                importLabel: 'Import colours',
+                importHelp: 'Sample the image or colours used by the website.',
+                importButton: 'Import',
+                localImageLabel: 'Local image',
+                localImageHelp: 'Take the two accents from an image on this device. It never leaves the browser.',
+                localImageButton: 'Choose image',
+                resetColoursLabel: 'Reset custom colours',
+                resetColoursHelp: 'Drop the hand-picked and imported colours and go back to the neutral base.',
+                resetColoursButton: 'Reset colours',
+                backgroundLabel: 'Background picture',
+                backgroundHelp: 'Use a picture from this device behind Lectio, whichever colour theme is selected. It is stored in this browser only and is never uploaded.',
+                backgroundButton: 'Choose picture',
+                clearBackgroundLabel: 'Remove background picture',
+                clearBackgroundHelp: 'Go back to the selected theme’s own background.',
+                clearBackgroundButton: 'Remove',
+                veilLabel: 'Background tint',
+                veilHelp: 'How much of the theme colour is laid over your picture. Raise it if text is hard to read.',
+                radiusLabel: 'Corner radius',
+                radiusHelp: 'Round panels and controls.',
+                blurLabel: 'Glass blur',
+                blurHelp: 'Use translucent, blurred navigation surfaces.',
+                densityLabel: 'Spacing',
+                densityHelp: 'Choose compact or roomier controls.',
+                densityCompact: 'Compact',
+                densityComfortable: 'Comfortable',
+                resetThemeLabel: 'Reset theme',
+                resetThemeHelp: 'Restore the Catppuccin Latte defaults. Keeps any background picture you chose.',
+                resetThemeButton: 'Reset'
+            }
+            // i18n:da
+            : {
+                sectionTheme: 'Tema',
+                sectionPalette: 'Egen palet',
+                sectionBackground: 'Baggrund',
+                sectionAppearance: 'Udseende',
+                sectionReset: 'Nulstil',
+                enabledLabel: 'Tema slået til',
+                enabledHelp: 'Slå det visuelle lag til eller fra.',
+                presetLabel: 'Tema',
+                presetHelp: 'Hold musen over et indbygget farvetema for at se det, og vælg det for at beholde det.',
+                presetLight: 'Lys',
+                presetDark: 'Mørk',
+                presetCustom: 'Egen palet',
+                modeLabel: 'Lys eller mørk basis',
+                modeHelp: 'Udgangspunktet for din egen palet — de indbyggede temaer beholder deres eget lyse eller mørke udtryk.',
+                modeLight: 'Lys',
+                modeDark: 'Mørk',
+                backgroundColourLabel: 'Sidens farve',
+                backgroundColourHelp: 'Vælg farven bag det hele. Vælger du en farve her, skiftes der til din egen palet.',
+                textColourLabel: 'Tekstfarve',
+                textColourHelp: 'Gøres automatisk mørkere eller lysere, hvis parret ellers ville være svært at læse.',
+                accentLabel: 'Accentfarve',
+                accentHelp: 'Links, knapper, fremhævninger og fokusringe.',
+                accentAltLabel: 'Anden accentfarve',
+                accentAltHelp: 'Sekundære fremhævninger, striber på lektioner og baggrundens farveovergange.',
+                sourceLabel: 'Kilde til paletten',
+                sourceHelp: 'Indsæt en https-adresse til et billede eller en hjemmeside.',
+                importLabel: 'Importér farver',
+                importHelp: 'Aflæs farverne fra billedet eller dem, hjemmesiden bruger.',
+                importButton: 'Importér',
+                localImageLabel: 'Billede fra din enhed',
+                localImageHelp: 'Tag de to accentfarver fra et billede på denne enhed. Det forlader aldrig browseren.',
+                localImageButton: 'Vælg billede',
+                resetColoursLabel: 'Nulstil egne farver',
+                resetColoursHelp: 'Smid de håndvalgte og importerede farver væk, og gå tilbage til den neutrale basis.',
+                resetColoursButton: 'Nulstil farver',
+                backgroundLabel: 'Baggrundsbillede',
+                backgroundHelp: 'Brug et billede fra denne enhed som baggrund i Lectio, uanset hvilket farvetema der er valgt. Det gemmes kun i denne browser og uploades aldrig.',
+                backgroundButton: 'Vælg billede',
+                clearBackgroundLabel: 'Fjern baggrundsbillede',
+                clearBackgroundHelp: 'Gå tilbage til det valgte temas egen baggrund.',
+                clearBackgroundButton: 'Fjern',
+                veilLabel: 'Baggrundens toning',
+                veilHelp: 'Hvor meget af temaets farve der lægges over dit billede. Skru op, hvis teksten er svær at læse.',
+                radiusLabel: 'Afrundede hjørner',
+                radiusHelp: 'Hvor afrundede paneler og knapper er.',
+                blurLabel: 'Glaseffekt',
+                blurHelp: 'Brug gennemsigtige, slørede navigationsflader.',
+                densityLabel: 'Luft',
+                densityHelp: 'Vælg kompakte eller mere rummelige knapper og felter.',
+                densityCompact: 'Kompakt',
+                densityComfortable: 'Rummelig',
+                resetThemeLabel: 'Nulstil tema',
+                resetThemeHelp: 'Gendan standardindstillingerne med Catppuccin Latte. Et baggrundsbillede, du har valgt, beholdes.',
+                resetThemeButton: 'Nulstil'
+            };
+            // i18n:end
+    }
 
     function announce() {
         const colours = currentCustomColours();
+        const text = labels();
 
         window.dispatchEvent(new CustomEvent('lectio-module:register', {
             detail: {
@@ -402,88 +545,88 @@
                 version: MODULE_VERSION,
                 settingsSchema: [
                     {
-                        key: 'enabled', type: 'toggle', label: 'Theme enabled', section: 'Theme',
-                        description: 'Switch the visual layer on or off.'
+                        key: 'enabled', type: 'toggle', label: text.enabledLabel, section: text.sectionTheme,
+                        description: text.enabledHelp
                     },
                     {
-                        key: 'preset', type: 'select', label: 'Theme', section: 'Theme',
-                        description: 'Hover to preview a built-in colour scheme, then choose it to keep it.',
+                        key: 'preset', type: 'select', label: text.presetLabel, section: text.sectionTheme,
+                        description: text.presetHelp,
                         previewOnHover: true,
-                        options: PRESET_OPTIONS
+                        options: presetOptions(text)
                     },
                     {
-                        key: 'mode', type: 'select', label: 'Light or dark base', section: 'Custom palette', advanced: true,
-                        description: 'The starting point for the custom palette — built-in themes keep their own light or dark look.',
+                        key: 'mode', type: 'select', label: text.modeLabel, section: text.sectionPalette, advanced: true,
+                        description: text.modeHelp,
                         options: [
-                            { value: 'light', label: 'Light' },
-                            { value: 'dark', label: 'Dark' }
+                            { value: 'light', label: text.modeLight },
+                            { value: 'dark', label: text.modeDark }
                         ]
                     },
                     {
-                        key: 'colourBackground', type: 'color', label: 'Page colour', section: 'Custom palette', advanced: true,
-                        description: 'Pick the colour behind everything. Choosing any colour here switches to the custom palette.'
+                        key: 'colourBackground', type: 'color', label: text.backgroundColourLabel, section: text.sectionPalette, advanced: true,
+                        description: text.backgroundColourHelp
                     },
                     {
-                        key: 'colourText', type: 'color', label: 'Text colour', section: 'Custom palette', advanced: true,
-                        description: 'Darkened or lightened automatically if the pair would be hard to read.'
+                        key: 'colourText', type: 'color', label: text.textColourLabel, section: text.sectionPalette, advanced: true,
+                        description: text.textColourHelp
                     },
                     {
-                        key: 'colourAccent', type: 'color', label: 'Accent colour', section: 'Custom palette', advanced: true,
-                        description: 'Links, buttons, highlights and focus rings.'
+                        key: 'colourAccent', type: 'color', label: text.accentLabel, section: text.sectionPalette, advanced: true,
+                        description: text.accentHelp
                     },
                     {
-                        key: 'colourAccentAlt', type: 'color', label: 'Second accent', section: 'Custom palette', advanced: true,
-                        description: 'Secondary highlights, lesson stripes and background gradients.'
+                        key: 'colourAccentAlt', type: 'color', label: text.accentAltLabel, section: text.sectionPalette, advanced: true,
+                        description: text.accentAltHelp
                     },
                     {
-                        key: 'sourceUrl', type: 'text', label: 'Palette source', section: 'Custom palette', advanced: true,
-                        description: 'Paste an https image or website URL.'
+                        key: 'sourceUrl', type: 'text', label: text.sourceLabel, section: text.sectionPalette, advanced: true,
+                        description: text.sourceHelp
                     },
                     {
-                        key: 'applySource', type: 'button', label: 'Import colours', section: 'Custom palette', advanced: true,
-                        description: 'Sample the image or colours used by the website.', buttonLabel: 'Import'
+                        key: 'applySource', type: 'button', label: text.importLabel, section: text.sectionPalette, advanced: true,
+                        description: text.importHelp, buttonLabel: text.importButton
                     },
                     {
-                        key: 'chooseImage', type: 'button', label: 'Local image', section: 'Custom palette', advanced: true,
-                        description: 'Take the two accents from an image on this device. It never leaves the browser.', buttonLabel: 'Choose image'
+                        key: 'chooseImage', type: 'button', label: text.localImageLabel, section: text.sectionPalette, advanced: true,
+                        description: text.localImageHelp, buttonLabel: text.localImageButton
                     },
                     {
-                        key: 'resetColours', type: 'button', label: 'Reset custom colours', section: 'Custom palette', advanced: true,
-                        description: 'Drop the hand-picked and imported colours and go back to the neutral base.', buttonLabel: 'Reset colours'
+                        key: 'resetColours', type: 'button', label: text.resetColoursLabel, section: text.sectionPalette, advanced: true,
+                        description: text.resetColoursHelp, buttonLabel: text.resetColoursButton
                     },
                     {
-                        key: 'chooseBackground', type: 'button', label: 'Background picture', section: 'Background',
-                        description: 'Use a picture from this device behind Lectio, whichever colour theme is selected. It is stored in this browser only and is never uploaded.',
-                        buttonLabel: 'Choose picture'
+                        key: 'chooseBackground', type: 'button', label: text.backgroundLabel, section: text.sectionBackground,
+                        description: text.backgroundHelp,
+                        buttonLabel: text.backgroundButton
                     },
                     {
-                        key: 'clearBackground', type: 'button', label: 'Remove background picture', section: 'Background',
-                        description: 'Go back to the selected theme’s own background.', buttonLabel: 'Remove'
+                        key: 'clearBackground', type: 'button', label: text.clearBackgroundLabel, section: text.sectionBackground,
+                        description: text.clearBackgroundHelp, buttonLabel: text.clearBackgroundButton
                     },
                     {
-                        key: 'backgroundVeil', type: 'range', label: 'Background tint', section: 'Background',
-                        description: 'How much of the theme colour is laid over your picture. Raise it if text is hard to read.',
+                        key: 'backgroundVeil', type: 'range', label: text.veilLabel, section: text.sectionBackground,
+                        description: text.veilHelp,
                         min: 0, max: MAX_VEIL, step: 5, suffix: '%'
                     },
                     {
-                        key: 'radius', type: 'range', label: 'Corner radius', section: 'Appearance',
-                        description: 'Round panels and controls.', min: 4, max: 20, step: 1, suffix: 'px'
+                        key: 'radius', type: 'range', label: text.radiusLabel, section: text.sectionAppearance,
+                        description: text.radiusHelp, min: 4, max: 20, step: 1, suffix: 'px'
                     },
                     {
-                        key: 'blur', type: 'toggle', label: 'Glass blur', section: 'Appearance',
-                        description: 'Use translucent, blurred navigation surfaces.'
+                        key: 'blur', type: 'toggle', label: text.blurLabel, section: text.sectionAppearance,
+                        description: text.blurHelp
                     },
                     {
-                        key: 'density', type: 'select', label: 'Spacing', section: 'Appearance',
-                        description: 'Choose compact or roomier controls.',
+                        key: 'density', type: 'select', label: text.densityLabel, section: text.sectionAppearance,
+                        description: text.densityHelp,
                         options: [
-                            { value: 'compact', label: 'Compact' },
-                            { value: 'comfortable', label: 'Comfortable' }
+                            { value: 'compact', label: text.densityCompact },
+                            { value: 'comfortable', label: text.densityComfortable }
                         ]
                     },
                     {
-                        key: 'resetTheme', type: 'button', label: 'Reset theme', section: 'Reset',
-                        description: 'Restore the Catppuccin Latte defaults. Keeps any background picture you chose.', buttonLabel: 'Reset'
+                        key: 'resetTheme', type: 'button', label: text.resetThemeLabel, section: text.sectionReset,
+                        description: text.resetThemeHelp, buttonLabel: text.resetThemeButton
                     }
                 ],
                 currentValues: {

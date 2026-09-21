@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Subject Colours
 // @namespace    https://www.lectio.dk/
-// @version      0.11.1
+// @version      0.11.2
 // @description  Learns which classes are actually yours from your own timetable and gives each one its own colour, with a separate muted spectrum for one-off activities like assemblies and meetings.
 // @match        https://www.lectio.dk/lectio/*
 // @grant        none
@@ -15,7 +15,7 @@
 
     const MODULE_ID = 'subject-colours';
     const MODULE_NAME = 'Lectio - Subject Colours';
-    const MODULE_VERSION = '0.11.1';
+    const MODULE_VERSION = '0.11.2';
     const LOG = '[Lectio Subject Colours]';
     const STYLE_ID = 'lectio-subject-colours-styles';
 
@@ -134,24 +134,14 @@
     const MAX_ENTRIES = 400;
     const MAX_TRACKED_WEEKS = 26;
 
-    const STYLE_OPTIONS = [
-        { value: 'fill', label: 'Fill the block' },
-        { value: 'stripe', label: 'Edge stripe only' },
-        { value: 'both', label: 'Fill and stripe' }
-    ];
+    // The values a setting may hold. Their labels live in settingsLabels(),
+    // in both languages, and are put beside them when the schema is built.
+    const STYLE_VALUES = ['fill', 'stripe', 'both'];
     // How much evidence a hold needs before it counts as one of your regular
     // classes rather than a one-off. "Weeks" is the load-bearing half: a class
     // recurs week after week, while a three-lesson project day does not.
-    const REGULARITY_OPTIONS = [
-        { value: 'loose', label: 'Loose — colour almost everything' },
-        { value: 'balanced', label: 'Balanced' },
-        { value: 'strict', label: 'Strict — only firm weekly classes' }
-    ];
-    const LEGEND_LOCATION_OPTIONS = [
-        { value: 'auto', label: 'Automatic' },
-        { value: 'dock', label: 'Always the Manager dock' },
-        { value: 'floating', label: 'Always floating on the page' }
-    ];
+    const REGULARITY_VALUES = ['loose', 'balanced', 'strict'];
+    const LEGEND_LOCATION_VALUES = ['auto', 'dock', 'floating'];
     // The Manager announces itself by asking every module to register, and that
     // is the only signal there is when it is evaluated after this module.
     // Automatic mode waits this long for it before falling back to the floating
@@ -283,7 +273,7 @@
         // persisted its own default, 'floating', for everyone who ever opened
         // the settings panel, and a stored value always wins over a default.
         // Without this, "prefer the dock" shipped to new installs only.
-        let legendLocation = hasOption(LEGEND_LOCATION_OPTIONS, saved.legendLocation)
+        let legendLocation = hasOption(LEGEND_LOCATION_VALUES, saved.legendLocation)
             ? saved.legendLocation
             : DEFAULT_SETTINGS.legendLocation;
 
@@ -300,9 +290,9 @@
 
         return {
             enabled: typeof saved.enabled === 'boolean' ? saved.enabled : DEFAULT_SETTINGS.enabled,
-            style: hasOption(STYLE_OPTIONS, saved.style) ? saved.style : DEFAULT_SETTINGS.style,
+            style: hasOption(STYLE_VALUES, saved.style) ? saved.style : DEFAULT_SETTINGS.style,
             intensity: clamp(Number(saved.intensity) || DEFAULT_SETTINGS.intensity, 60, 140),
-            regularity: hasOption(REGULARITY_OPTIONS, saved.regularity)
+            regularity: hasOption(REGULARITY_VALUES, saved.regularity)
                 ? saved.regularity
                 : DEFAULT_SETTINGS.regularity,
             scanWeeks: clamp(Math.round(Number(saved.scanWeeks ?? DEFAULT_SETTINGS.scanWeeks)), 0, 16),
@@ -340,8 +330,8 @@
         writeJson(SETTINGS_KEY, settings);
     }
 
-    function hasOption(options, value) {
-        return options.some(option => option.value === value);
+    function hasOption(values, value) {
+        return values.includes(value);
     }
 
     function thresholds() {
@@ -1626,27 +1616,143 @@
 
     let legendSignature = '';
 
-    function legendLabels() {
-        // Language, in order of authority: the Manager's published choice, then
-        // whatever Lectio (or English Mode) has put on <html lang>, then Danish -
-        // Lectio is a Danish system, so a module running on its own stays Danish.
+    // Language, in order of authority: the Manager's published choice, then
+    // whatever Lectio (or English Mode) has put on <html lang>, then Danish -
+    // Lectio is a Danish system, so a module running on its own stays Danish.
+    function isEnglish() {
         const preferred = document.documentElement?.dataset?.lectioLanguage;
         const language = (preferred || document.documentElement.lang || 'da').toLowerCase();
-        const english = language.startsWith('en');
+        return language.startsWith('en');
+    }
 
-        return english
+    // The two literals in each of these sit between i18n markers so
+    // scripts/check-i18n.mjs can hold their keys in step. Only display strings
+    // live here - never a key, a type, a default or an option value.
+    function legendLabels() {
+        return isEnglish()
+            // i18n:en
             ? {
                 toggle: count => `Colours · ${count}`,
                 show: 'Show colour key',
                 hide: 'Hide colour key',
                 heading: 'Colour key'
             }
+            // i18n:da
             : {
                 toggle: count => `Farver · ${count}`,
                 show: 'Vis farvenøgle',
                 hide: 'Skjul farvenøgle',
                 heading: 'Farvenøgle'
             };
+            // i18n:end
+    }
+
+    /*
+     * The settings panel's own words (ADR-0013). The Manager renders schema
+     * strings exactly as given, so the schema is worded in whichever language
+     * is current each time announce() runs, and lectio-manager:language
+     * re-announces it. "Hold" is the same word in the singular and the
+     * plural, so the Danish counts only inflect "gang" and "uge".
+     */
+    function settingsLabels() {
+        return isEnglish()
+            // i18n:en
+            ? {
+                sectionColours: 'Colours',
+                sectionAccessibility: 'Accessibility',
+                sectionDetection: 'Detection',
+                sectionClasses: 'Your classes',
+                enabledLabel: 'Colour the schedule',
+                enabledHelp: 'Give each of your regular classes its own colour.',
+                styleLabel: 'Colour style',
+                styleHelp: 'Fill the whole lesson block, mark only its edge, or both.',
+                styles: { fill: 'Fill the block', stripe: 'Edge stripe only', both: 'Fill and stripe' },
+                intensityLabel: 'Colour strength',
+                intensityHelp: 'How saturated the colours are against the current theme.',
+                colourOtherLabel: 'Mark one-off activities',
+                colourOtherHelp: 'Give assemblies, meetings and trips a muted grey-toned colour of their own.',
+                legendLabel: 'Show colour key',
+                legendHelp: 'Off by default. A compact key listing the classes currently on screen. '
+                    + 'Hover an entry to highlight its blocks, or click its swatch to recolour it there and then.',
+                legendLocationLabel: 'Colour key location',
+                legendLocationHelp: 'Automatic puts the key in Lectio Manager\'s shared dock when the Manager is '
+                    + 'installed, and falls back to a floating key on the page when it is not.',
+                legendLocations: { auto: 'Automatic', dock: 'Always the Manager dock', floating: 'Always floating on the page' },
+                patternLabel: 'Mark each class with a shape too',
+                patternHelp: 'Off by default. Adds a corner mark to each class block, in addition to its colour, so '
+                    + 'classes can still be told apart on a washed-out projector, in bright sunlight, or without colour '
+                    + 'vision at all. One-off activities keep their own dashed edge instead.',
+                patternScaleLabel: 'Shape marker size',
+                patternScaleHelp: 'How big the corner mark is.',
+                regularityLabel: 'What counts as a class',
+                regularityHelp: 'How often a hold must appear in your timetable before it earns its own colour.',
+                regularities: { loose: 'Loose — colour almost everything', balanced: 'Balanced', strict: 'Strict — only firm weekly classes' },
+                scanWeeksLabel: 'Weeks to learn from',
+                scanWeeksHelp: 'How much of your own timetable is read in the background. Set to 0 to learn only from pages you open yourself.',
+                rescanLabel: 'Read my timetable again',
+                rescanButton: 'Rescan',
+                rescanFound: count => `${count} class${count === 1 ? '' : 'es'} found so far. Reopen Settings after a rescan to see changes.`,
+                rescanNone: 'No classes found yet. Open your schedule and rescan.',
+                classSeen: (times, weeks) => `Seen ${times} time${times === 1 ? '' : 's'} across ${weeks} week${weeks === 1 ? '' : 's'}.`,
+                lockLabel: 'Keep my colours exactly',
+                lockHelp: 'Freeze every class colour, picked or not, so switching Lectio Theming\'s colour scheme '
+                    + 'never reshuffles them. You can still change a class\'s colour by hand at any time.',
+                resetLabel: 'Reset chosen colours',
+                resetButton: 'Reset',
+                resetHelp: 'Hand every class back the colour worked out from your theme.',
+                forgetLabel: 'Forget what was learned',
+                forgetButton: 'Forget',
+                forgetHelp: 'Clear the learned timetable and every colour assignment for this school.'
+            }
+            // i18n:da
+            : {
+                sectionColours: 'Farver',
+                sectionAccessibility: 'Tilgængelighed',
+                sectionDetection: 'Genkendelse',
+                sectionClasses: 'Dine hold',
+                enabledLabel: 'Farvelæg skemaet',
+                enabledHelp: 'Giv hvert af dine faste hold sin egen farve.',
+                styleLabel: 'Farvestil',
+                styleHelp: 'Udfyld hele skemabrikken, markér kun kanten, eller begge dele.',
+                styles: { fill: 'Udfyld brikken', stripe: 'Kun stribe i kanten', both: 'Udfyldning og stribe' },
+                intensityLabel: 'Farvestyrke',
+                intensityHelp: 'Hvor mættede farverne er i forhold til det aktuelle tema.',
+                colourOtherLabel: 'Markér enkeltstående aktiviteter',
+                colourOtherHelp: 'Giv morgensamlinger, møder og ture deres egen dæmpede, gråtonede farve.',
+                legendLabel: 'Vis farvenøgle',
+                legendHelp: 'Slået fra som standard. En kompakt nøgle over de hold, der er på skærmen lige nu. '
+                    + 'Hold musen over et hold for at fremhæve dets brikker, eller klik på farvefeltet for at give det en ny farve med det samme.',
+                legendLocationLabel: 'Farvenøglens placering',
+                legendLocationHelp: 'Automatisk lægger nøglen i Lectio Managers fælles dock, når Manageren er '
+                    + 'installeret, og lader den ellers flyde på siden.',
+                legendLocations: { auto: 'Automatisk', dock: 'Altid Managerens dock', floating: 'Altid flydende på siden' },
+                patternLabel: 'Markér også hvert hold med en figur',
+                patternHelp: 'Slået fra som standard. Sætter et hjørnemærke på hver holdbrik ud over farven, så '
+                    + 'holdene stadig kan kendes fra hinanden på en udvasket projektor, i skarpt sollys eller helt '
+                    + 'uden farvesyn. Enkeltstående aktiviteter beholder i stedet deres egen stiplede kant.',
+                patternScaleLabel: 'Figurmærkets størrelse',
+                patternScaleHelp: 'Hvor stort hjørnemærket er.',
+                regularityLabel: 'Hvad der tæller som et hold',
+                regularityHelp: 'Hvor ofte et hold skal optræde i dit skema, før det får sin egen farve.',
+                regularities: { loose: 'Løst — farvelæg næsten alt', balanced: 'Afbalanceret', strict: 'Strengt — kun faste ugentlige hold' },
+                scanWeeksLabel: 'Uger at lære fra',
+                scanWeeksHelp: 'Hvor meget af dit eget skema der læses i baggrunden. Sæt den til 0 for kun at lære fra sider, du selv åbner.',
+                rescanLabel: 'Læs mit skema igen',
+                rescanButton: 'Læs igen',
+                rescanFound: count => `${count} hold fundet indtil videre. Åbn Indstillinger igen efter en ny læsning for at se ændringerne.`,
+                rescanNone: 'Ingen hold fundet endnu. Åbn dit skema, og læs det igen.',
+                classSeen: (times, weeks) => `Set ${times} ${times === 1 ? 'gang' : 'gange'} over ${weeks} ${weeks === 1 ? 'uge' : 'uger'}.`,
+                lockLabel: 'Behold mine farver præcis',
+                lockHelp: 'Fastfrys alle holdfarver, valgte som uvalgte, så et skift af farvetema i Lectio Theming '
+                    + 'aldrig blander dem om. Du kan stadig ændre et holds farve i hånden når som helst.',
+                resetLabel: 'Nulstil valgte farver',
+                resetButton: 'Nulstil',
+                resetHelp: 'Giv hvert hold den farve tilbage, der er beregnet ud fra dit tema.',
+                forgetLabel: 'Glem det lærte',
+                forgetButton: 'Glem',
+                forgetHelp: 'Ryd det lærte skema og alle farvetildelinger for denne skole.'
+            };
+            // i18n:end
     }
 
     // Only a class already painted on the page counts: a quiet week with two
@@ -2359,48 +2465,49 @@
     // MANAGER REGISTRATION
     // ============================================================
 
-    function classControls() {
+    function classControls(text) {
         return classKeys().map(key => {
             const entry = store.entries[key];
-            const weeks = weeksSeenOf(entry);
 
             return {
                 key: `class:${key}`,
                 type: 'color',
+                // The class's own name, as Lectio shows it - not a string to translate.
                 label: entry.label,
-                section: 'Your classes',
-                description: `Seen ${occurrencesOf(entry)} time${occurrencesOf(entry) === 1 ? '' : 's'} `
-                    + `across ${weeks} week${weeks === 1 ? '' : 's'}.`
+                section: text.sectionClasses,
+                description: text.classSeen(occurrencesOf(entry), weeksSeenOf(entry))
             };
         });
     }
 
     function settingsSchema() {
-        const classes = classControls();
+        const text = settingsLabels();
+        const classes = classControls(text);
+        const optionsFor = (values, names) => values.map(value => ({ value, label: names[value] }));
 
         return [
             {
                 key: 'enabled',
                 type: 'toggle',
-                label: 'Colour the schedule',
-                section: 'Colours',
-                description: 'Give each of your regular classes its own colour.'
+                label: text.enabledLabel,
+                section: text.sectionColours,
+                description: text.enabledHelp
             },
             {
                 key: 'style',
                 type: 'select',
-                label: 'Colour style',
-                section: 'Colours',
-                description: 'Fill the whole lesson block, mark only its edge, or both.',
-                options: STYLE_OPTIONS,
+                label: text.styleLabel,
+                section: text.sectionColours,
+                description: text.styleHelp,
+                options: optionsFor(STYLE_VALUES, text.styles),
                 previewOnHover: true
             },
             {
                 key: 'intensity',
                 type: 'range',
-                label: 'Colour strength',
-                section: 'Colours',
-                description: 'How saturated the colours are against the current theme.',
+                label: text.intensityLabel,
+                section: text.sectionColours,
+                description: text.intensityHelp,
                 min: 60,
                 max: 140,
                 step: 5,
@@ -2409,45 +2516,41 @@
             {
                 key: 'colourOther',
                 type: 'toggle',
-                label: 'Mark one-off activities',
-                section: 'Colours',
-                description: 'Give assemblies, meetings and trips a muted grey-toned colour of their own.'
+                label: text.colourOtherLabel,
+                section: text.sectionColours,
+                description: text.colourOtherHelp
             },
             {
                 key: 'showLegend',
                 type: 'toggle',
-                label: 'Show colour key',
-                section: 'Colours',
-                description: 'Off by default. A compact key listing the classes currently on screen. '
-                    + 'Hover an entry to highlight its blocks, or click its swatch to recolour it there and then.'
+                label: text.legendLabel,
+                section: text.sectionColours,
+                description: text.legendHelp
             },
             ...(settings.showLegend
                 ? [{
                     key: 'legendLocation',
                     type: 'select',
-                    label: 'Colour key location',
-                    section: 'Colours',
-                    description: 'Automatic puts the key in Lectio Manager\'s shared dock when the Manager is '
-                        + 'installed, and falls back to a floating key on the page when it is not.',
-                    options: LEGEND_LOCATION_OPTIONS
+                    label: text.legendLocationLabel,
+                    section: text.sectionColours,
+                    description: text.legendLocationHelp,
+                    options: optionsFor(LEGEND_LOCATION_VALUES, text.legendLocations)
                 }]
                 : []),
             {
                 key: 'patternMarkers',
                 type: 'toggle',
-                label: 'Mark each class with a shape too',
-                section: 'Accessibility',
-                description: 'Off by default. Adds a corner mark to each class block, in addition to its colour, so '
-                    + 'classes can still be told apart on a washed-out projector, in bright sunlight, or without colour '
-                    + 'vision at all. One-off activities keep their own dashed edge instead.'
+                label: text.patternLabel,
+                section: text.sectionAccessibility,
+                description: text.patternHelp
             },
             ...(settings.patternMarkers
                 ? [{
                     key: 'patternScale',
                     type: 'range',
-                    label: 'Shape marker size',
-                    section: 'Accessibility',
-                    description: 'How big the corner mark is.',
+                    label: text.patternScaleLabel,
+                    section: text.sectionAccessibility,
+                    description: text.patternScaleHelp,
                     min: 50,
                     max: 200,
                     step: 10,
@@ -2457,17 +2560,17 @@
             {
                 key: 'regularity',
                 type: 'select',
-                label: 'What counts as a class',
-                section: 'Detection',
-                description: 'How often a hold must appear in your timetable before it earns its own colour.',
-                options: REGULARITY_OPTIONS
+                label: text.regularityLabel,
+                section: text.sectionDetection,
+                description: text.regularityHelp,
+                options: optionsFor(REGULARITY_VALUES, text.regularities)
             },
             {
                 key: 'scanWeeks',
                 type: 'range',
-                label: 'Weeks to learn from',
-                section: 'Detection',
-                description: 'How much of your own timetable is read in the background. Set to 0 to learn only from pages you open yourself.',
+                label: text.scanWeeksLabel,
+                section: text.sectionDetection,
+                description: text.scanWeeksHelp,
                 min: 0,
                 max: 16,
                 step: 1
@@ -2475,38 +2578,35 @@
             {
                 key: 'rescan',
                 type: 'button',
-                label: 'Read my timetable again',
-                buttonLabel: 'Rescan',
-                section: 'Detection',
-                description: classes.length
-                    ? `${classes.length} class${classes.length === 1 ? '' : 'es'} found so far. Reopen Settings after a rescan to see changes.`
-                    : 'No classes found yet. Open your schedule and rescan.'
+                label: text.rescanLabel,
+                buttonLabel: text.rescanButton,
+                section: text.sectionDetection,
+                description: classes.length ? text.rescanFound(classes.length) : text.rescanNone
             },
             ...classes,
             ...(classes.length
                 ? [{
                     key: 'lockColours',
                     type: 'toggle',
-                    label: 'Keep my colours exactly',
-                    section: 'Your classes',
-                    description: 'Freeze every class colour, picked or not, so switching Lectio Theming\'s colour scheme '
-                        + 'never reshuffles them. You can still change a class\'s colour by hand at any time.'
+                    label: text.lockLabel,
+                    section: text.sectionClasses,
+                    description: text.lockHelp
                 }, {
                     key: 'resetColours',
                     type: 'button',
-                    label: 'Reset chosen colours',
-                    buttonLabel: 'Reset',
-                    section: 'Your classes',
-                    description: 'Hand every class back the colour worked out from your theme.'
+                    label: text.resetLabel,
+                    buttonLabel: text.resetButton,
+                    section: text.sectionClasses,
+                    description: text.resetHelp
                 }]
                 : []),
             {
                 key: 'forget',
                 type: 'button',
-                label: 'Forget what was learned',
-                buttonLabel: 'Forget',
-                section: 'Detection',
-                description: 'Clear the learned timetable and every colour assignment for this school.'
+                label: text.forgetLabel,
+                buttonLabel: text.forgetButton,
+                section: text.sectionDetection,
+                description: text.forgetHelp
             }
         ];
     }
@@ -2621,7 +2721,7 @@
             settings.overrides[target] = String(value).toLowerCase();
         } else if (key === 'enabled' && typeof value === 'boolean') {
             settings.enabled = value;
-        } else if (key === 'style' && hasOption(STYLE_OPTIONS, value)) {
+        } else if (key === 'style' && hasOption(STYLE_VALUES, value)) {
             previewStyle = null;
             settings.style = value;
         } else if (key === 'intensity') {
@@ -2630,7 +2730,7 @@
             settings.colourOther = value;
         } else if (key === 'showLegend' && typeof value === 'boolean') {
             settings.showLegend = value;
-        } else if (key === 'legendLocation' && hasOption(LEGEND_LOCATION_OPTIONS, value)) {
+        } else if (key === 'legendLocation' && hasOption(LEGEND_LOCATION_VALUES, value)) {
             settings.legendLocation = value;
         } else if (key === 'patternMarkers' && typeof value === 'boolean') {
             settings.patternMarkers = value;
@@ -2643,7 +2743,7 @@
             // reading from last time; turning it on captures a fresh one.
             settings.lockedTheme = null;
             ensureLockedTheme();
-        } else if (key === 'regularity' && hasOption(REGULARITY_OPTIONS, value)) {
+        } else if (key === 'regularity' && hasOption(REGULARITY_VALUES, value)) {
             settings.regularity = value;
         } else if (key === 'scanWeeks') {
             settings.scanWeeks = clamp(Math.round(Number(value) || 0), 0, 16);
@@ -2677,7 +2777,7 @@
     function handlePreview(event) {
         const detail = event.detail;
         if (!detail || detail.id !== MODULE_ID || detail.key !== 'style') return;
-        if (!hasOption(STYLE_OPTIONS, detail.value)) return;
+        if (!hasOption(STYLE_VALUES, detail.value)) return;
 
         previewStyle = detail.value;
         invalidate();
@@ -2765,11 +2865,13 @@
 
     window.addEventListener('lectio-manager:discover', handleDiscovery, { signal: lifecycle.signal });
 
-    // The dock label and tooltip are captured when the item registers, so a
-    // language chosen after that would sit in the dock in the old language until
-    // the next page load. Re-rendering re-registers them.
+    // The dock label and tooltip are captured when the item registers, and the
+    // settings schema when it is announced, so a language chosen after that
+    // would sit in the old language until the next page load. Re-rendering
+    // re-registers the one; re-announcing re-words the other.
     window.addEventListener('lectio-manager:language', () => {
         renderLegend();
+        announce();
     }, { signal: lifecycle.signal });
     window.addEventListener('lectio-manager:set-setting', handleSetting, { signal: lifecycle.signal });
     window.addEventListener('lectio-manager:prune-storage', handlePrune, { signal: lifecycle.signal });

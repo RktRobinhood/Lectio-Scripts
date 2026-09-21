@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Unread Message Notifications
 // @namespace    https://www.lectio.dk/
-// @version      0.9.0
+// @version      0.9.1
 // @description  Shows one unread-message badge using Lectio's own unread count, at any Lectio school. Includes direct and group-addressed messages.
 // @match        https://www.lectio.dk/lectio/*
 // @grant        none
@@ -61,9 +61,53 @@
     (function registerWithLectioManager() {
         const MODULE_ID = 'message-notifications';
         const MODULE_NAME = 'Lectio - Unread Message Notifications';
-        const MODULE_VERSION = '0.9.0';
+        const MODULE_VERSION = '0.9.1';
+
+        /*
+         * The settings panel's own words, in both languages (ADR-0013). The
+         * Manager renders these strings exactly as given, so the schema is
+         * built from whichever language is current each time announce()
+         * runs, and lectio-manager:language re-announces it. Order of
+         * authority: the Manager's published choice, then whatever Lectio
+         * (or English Mode) put on <html lang>, then Danish, because Lectio
+         * is Danish and a module on its own stays Danish.
+         *
+         * The two literals sit between i18n markers so
+         * scripts/check-i18n.mjs can hold their keys in step. Only display
+         * strings live here - never a key, a type, a default or an option
+         * value.
+         */
+        function labels() {
+            const preferred = document.documentElement?.dataset?.lectioLanguage;
+            const language = (preferred || document.documentElement.lang || 'da').toLowerCase();
+
+            return language.startsWith('en')
+                // i18n:en
+                ? {
+                    pollLabel: 'Check for messages',
+                    pollHelp: 'How often to refresh while Lectio is visible.',
+                    pollEvery: minutes => `Every ${minutes} minutes`,
+                    previewLabel: 'Message preview',
+                    previewHelp: 'Show recent unread messages when hovering the badge.',
+                    scaleLabel: 'Bubble size',
+                    scaleHelp: 'Scale the unread-message bubble to suit your screen.'
+                }
+                // i18n:da
+                : {
+                    pollLabel: 'Tjek efter beskeder',
+                    pollHelp: 'Hvor ofte der tjekkes, mens Lectio er synligt.',
+                    pollEvery: minutes => `Hvert ${minutes}. minut`,
+                    previewLabel: 'Forhåndsvisning af beskeder',
+                    previewHelp: 'Vis de seneste ulæste beskeder, når musen holdes over boblen.',
+                    scaleLabel: 'Boblens størrelse',
+                    scaleHelp: 'Skalér boblen med ulæste beskeder, så den passer til din skærm.'
+                };
+                // i18n:end
+        }
 
         function announce() {
+            const text = labels();
+
             window.dispatchEvent(new CustomEvent('lectio-module:register', {
                 detail: {
                     id: MODULE_ID,
@@ -73,27 +117,23 @@
                         {
                             key: 'pollMinutes',
                             type: 'select',
-                            label: 'Check for messages',
-                            description: 'How often to refresh while Lectio is visible.',
-                            options: [
-                                { value: '2', label: 'Every 2 minutes' },
-                                { value: '5', label: 'Every 5 minutes' },
-                                { value: '10', label: 'Every 10 minutes' },
-                                { value: '15', label: 'Every 15 minutes' },
-                                { value: '30', label: 'Every 30 minutes' }
-                            ]
+                            label: text.pollLabel,
+                            description: text.pollHelp,
+                            options: ['2', '5', '10', '15', '30'].map(
+                                value => ({ value, label: text.pollEvery(value) })
+                            )
                         },
                         {
                             key: 'showPreview',
                             type: 'toggle',
-                            label: 'Message preview',
-                            description: 'Show recent unread messages when hovering the badge.'
+                            label: text.previewLabel,
+                            description: text.previewHelp
                         },
                         {
                             key: 'bubbleScale',
                             type: 'range',
-                            label: 'Bubble size',
-                            description: 'Scale the unread-message bubble to suit your screen.',
+                            label: text.scaleLabel,
+                            description: text.scaleHelp,
                             min: 75,
                             max: 175,
                             step: 5,
@@ -174,6 +214,10 @@
         window.addEventListener('lectio-manager:discover', announce);
         window.addEventListener('lectio-manager:set-setting', handleSetting);
         window.addEventListener('lectio-manager:prune-storage', handlePrune);
+        // The schema was worded in whichever language was current when it
+        // was announced, so a language chosen later is answered with a fresh
+        // one.
+        window.addEventListener('lectio-manager:language', announce);
         announce();
     })();
 
