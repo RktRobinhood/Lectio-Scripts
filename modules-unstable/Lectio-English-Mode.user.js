@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio English Mode
 // @namespace    lectio-english-mode
-// @version      1.11.0
+// @version      1.11.1
 // @description  Context-aware English layer for Lectio with instant core UI translation, persistent cache and Google fallback.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-start
@@ -66,7 +66,7 @@
     (function registerWithLectioManager() {
         const MODULE_ID = 'english-mode';
         const MODULE_NAME = 'Lectio English Mode';
-        const MODULE_VERSION = '1.11.0';
+        const MODULE_VERSION = '1.11.1';
 
         function announce() {
             const storedMode = GM_getValue(STORAGE_MODE, MODE_DA);
@@ -836,7 +836,149 @@
                 'The classes you are a class teacher for are automatically added as class favorites and cannot be removed.',
 
             'Ved at vælge en stamklasse som stamklassefavorit vil der være adgang til den indbyggede gruppe med stamklassens lærere:"Alle stamklassenavn lærere" fra Dokumenter, Beskeder samt på Forsiden.':
-                'Selecting a home class as a home class favorite gives access to the built-in group of that home class\'s teachers: "All [home class name] teachers" from Documents, Messages, and the Overview page.'
+                'Selecting a home class as a home class favorite gives access to the built-in group of that home class\'s teachers: "All [home class name] teachers" from Documents, Messages, and the Overview page.',
+
+            /*
+             * Study Plan, Annual Summary, Time Tracking, Surveys and the
+             * three create forms (issue #21 audit, teacher role, school
+             * 223). Every key below was read off the rendered Danish page;
+             * none is guessed. Most were not merely missing here - they
+             * contain no word the hasDanish() gate recognises, so they were
+             * never even sent to the Google fallback and stayed Danish
+             * outright. "Privat Aftale" is the form's own heading, which
+             * Lectio title-cases differently from the link that opens it.
+             */
+            'Deling': 'Sharing',
+            'Fagvalg': 'Subject Choice',
+            'Vis': 'Show',
+            'Søg': 'Search',
+            'Kun opgaver': 'Assignments only',
+            'Horisontal': 'Horizontal',
+            'Måned': 'Month',
+            'Uge': 'Week',
+            'Medlemsskema': 'Member Schedule',
+            'Materialer': 'Materials',
+            'Modulregnskab': 'Period Count',
+            'Lærere-Elever': 'Teachers-Students',
+            'Adgangskoder': 'Access Codes',
+            'Forløbsliste': 'Unit List',
+            'Der er ingen forløb': 'There are no units',
+            'Anvend': 'Apply',
+            'Tryk for at se flere muligheder': 'Click to see more options',
+            'Åbn hjælp til dette skærmbillede': 'Open help for this screen',
+            'Vis større foto': 'Show larger photo',
+            'Søg efter beskeder og dokumenter': 'Search messages and documents',
+            'Gem data og luk posten. Genvej: Alt+S': 'Save and close. Shortcut: Alt+S',
+            'Luk posten uden at gemme. Genvej: Alt+Z': 'Close without saving. Shortcut: Alt+Z',
+            'Gem data uden at lukke posten. Genvej: Alt+W': 'Save without closing. Shortcut: Alt+W',
+
+            'Timeberegning': 'Hour Calculation',
+            'Ekstra timer': 'Extra Hours',
+            'Eks.Belastning': 'Exam Load',
+            'Tidsregistrering': 'Time Tracking',
+            'Min periode': 'My Period',
+            'Budgetteret': 'Budgeted',
+            'Realiseret': 'Actual',
+            'LærerKred': 'Teacher Credit',
+            'Holdnorm': 'Class Norm',
+            'Lærernorm': 'Teacher Norm',
+            'Timer': 'Hours',
+            'Ekstra': 'Extra',
+            'Ej hold': 'No Class',
+            'Undervisning i alt': 'Teaching Total',
+            'Tillæg/opgaver': 'Supplements/Tasks',
+            'Bemærkninger': 'Remarks',
+            'Ingen tillæg': 'No supplements',
+            'Sum': 'Total',
+            'Aftalt timetal': 'Agreed Hours',
+            'Overtimer/Undertimer': 'Overtime/Undertime',
+
+            'Vis hele året': 'Show whole year',
+            'Registrer ferie': 'Register Holiday',
+            'Dag': 'Day',
+            'Fra kl.': 'From',
+            'Til kl.': 'To',
+            'Timetal': 'Hour Count',
+            'Arbejde': 'Work',
+            'Helligdag': 'Public Holiday',
+            'Ferie': 'Holiday',
+            'Særlige feriedage': 'Special Holiday Days',
+            'Sygdom': 'Sick Leave',
+            'Barns sygdom': 'Child Sick Leave',
+            'Omsorgsdag': 'Care Day',
+            'Omsorgsdage': 'Care Days',
+            'Afspadsering': 'Time Off in Lieu',
+            'Barsel': 'Parental Leave',
+            'Andet': 'Other',
+            'Kopiér rækken': 'Copy row',
+            'Opgørelse': 'Statement',
+            'Periode': 'Period',
+            'Saldo': 'Balance',
+            'Udspecificeret': 'Breakdown',
+
+            'Opret spørgeskema': 'Create Survey',
+            'Åbne for besvarelse': 'Open for Responses',
+            'Åbne for rapportering': 'Open for Reporting',
+            'Egne spørgeskemaer': 'My Surveys',
+            'Titel': 'Title',
+            'Ejer': 'Owner',
+            'Anonym': 'Anonymous',
+            'Svarfrist': 'Response Deadline',
+            'Frigives': 'Released',
+            'Udløber': 'Expires',
+            'Ingen spørgeskemaer åbne for besvarelse...': 'No surveys open for responses...',
+            'Ingen spørgeskemaer...': 'No surveys...',
+            'Vis kun aktuelle': 'Current only',
+            'Besvarelse foregår anonymt: Ja/Nej': 'Responses are anonymous: Yes/No',
+            'Besvar spørgeskema inden dette tidspunkt': 'Answer the survey before this time',
+            'Frigivelse af spørgeskemaundersøgelsens resultater': 'Release of the survey results',
+            'Herefter er resultaterne ikke længere tilgængelige': 'After this the results are no longer available',
+            'Vis resultat af spørgeskemaundersøgelsen': 'Show survey results',
+
+            'Opret aktivitet': 'Create Activity',
+            'Anden aktivitetsliste': 'Other Activity List',
+            'Vælg modul': 'Select Period',
+            'Aflyst': 'Cancelled',
+            'Deltagere': 'Participants',
+            'Valgte': 'Selected',
+            'Ressourcer': 'Resources',
+            'Krediteret lærer': 'Credited Teacher',
+            'Krediteringsnote': 'Credit Note',
+            'Krediteringsrolle': 'Credit Role',
+            'Krediteret hold': 'Credited Class',
+            'Dobbeltbookninger': 'Double Bookings',
+            'Opdater': 'Update',
+            'Aflys dobbeltbookede aktiviteter': 'Cancel double-booked activities',
+            'Der er ikke fundet nogen dobbeltbookninger': 'No double bookings found',
+            'Vælg Hold': 'Select Class',
+            'Vælg Lærer': 'Select Teacher',
+            'Vælg Lokale': 'Select Room',
+            'Vælg Ressource': 'Select Resource',
+            'Søg: hold, lærer, lokale, ressource': 'Search: class, teacher, room, resource',
+            'Tilføj hold, lærer, lokale eller ressource som deltager': 'Add a class, teacher, room or resource as a participant',
+            'Sætter hak i alle bokse': 'Ticks every box',
+            'Fjerner hak i alle bokse': 'Unticks every box',
+            'Start': 'Start',
+            'Slut': 'End',
+            'Vises i': 'Shown in',
+            'Skema-top': 'Schedule Top',
+            'Dags/Ugeændringer': 'Day/Week Changes',
+            'Skjul elevdeltagelse for andre elever': 'Hide student participation from other students',
+            'Frivillig aktivitet (Reserverer ikke deltagere)': 'Optional activity (does not reserve participants)',
+            'Tilmelding': 'Sign-up',
+            'Brug tilmelding': 'Use sign-up',
+            'Dobbeltbookede entiteter': 'Double-booked entities',
+            'Note på aflyste aktiviteter': 'Note on cancelled activities',
+            'Aflysningsårsag': 'Cancellation Reason',
+            'Censor': 'Examiner',
+            'Ekskursion': 'Field Trip',
+            'Ferietimer': 'Holiday Hours',
+            'Fællesaktiviteter': 'Joint Activities',
+            'Kurser': 'Courses',
+            'Studievejledning': 'Student Counselling',
+            'Tjenestefri': 'Leave of Absence',
+            'Privat Aftale': 'Private Appointment',
+            'Private aftaler kan ikke ses af andre': 'Private appointments cannot be seen by others'
         });
 
     const WEEKDAYS =

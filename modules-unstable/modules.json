@@ -13,15 +13,15 @@
         "teacher"
       ],
       "status": "unstable",
-      "version": "1.11.0",
-      "changelog": "English Mode now tells the Manager what it keeps in the browser, so the new Storage list can show that its learned translations sit outside the page's 5 MB. A translation it could not save is now reported.",
+      "version": "1.11.1",
+      "changelog": "Study Plan, Annual Summary, Time Tracking, Surveys and the Create Lesson / Other Activity / Private Appointment forms now translate their own labels, headings and buttons instead of leaving them in Danish or sending them to Google.",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-English-Mode.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
       "i18n": {
         "da": {
           "name": "English Mode",
           "description": "Tilføjer en DA / EN-knap og oversætter Lectios brugerflade til kontekstbevidst engelsk.",
-          "changelog": "English Mode fortæller nu Manageren, hvad den gemmer i browseren, så den nye lagerliste kan vise, at de lærte oversættelser ligger uden for sidens 5 MB. En oversættelse, den ikke kunne gemme, bliver nu meldt."
+          "changelog": "Studieplan, Årsopgørelse, Tidsregistrering, Spørgeskema og formularerne Opret lektion / Anden aktivitet / Privat aftale oversætter nu selv deres etiketter, overskrifter og knapper i stedet for at stå på dansk eller gå til Google."
         }
       }
     },
@@ -55,7 +55,7 @@
       ],
       "name": "Lectio Change Radar",
       "description": "Experimental Lectio watcher with a compact themed radar HUD. Choose exactly what it tracks - timetable cancellations, moves, rooms, teachers and homework, plus optional assignment, absence and document watching - plus upcoming assignment deadlines raised as they come inside your chosen lookahead - with urgency states, unseen-change tracking and a rotating local change log.",
-      "category": "Schedule",
+      "category": "Timetable",
       "audience": [
         "student",
         "teacher"
