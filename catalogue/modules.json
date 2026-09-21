@@ -2,13 +2,13 @@
   "schemaVersion": 1,
   "generatedAt": "2026-09-20T18:00:00Z",
   "manager": {
-    "version": "1.31.2",
-    "changelog": "The gear no longer keeps a problem-log mark that another Lectio tab has already read: the mark now follows the log's read state across tabs, and after a page comes back from the back/forward cache, instead of lingering until a reload.",
+    "version": "1.31.3",
+    "changelog": "The button that installs an experimental module now just says Install, like the one for a stable module: the Experimental tag on the card already says which kind it is.",
     "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/manager/Lectio-Manager.user.js",
     "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
     "i18n": {
       "da": {
-        "changelog": "Tandhjulet beholder ikke længere et problemlog-mærke, som en anden Lectio-fane allerede har læst: mærket følger nu loggens læst-tilstand på tværs af faner og efter tilbage/frem-cachen i stedet for at hænge til næste genindlæsning."
+        "changelog": "Knappen, der installerer et eksperimentelt modul, siger nu bare Installer ligesom knappen til et stabilt modul: mærkatet Eksperimentel på kortet siger allerede, hvilken slags det er."
       }
     }
   },

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.31.2
+// @version      1.31.3
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules, including their settings and shared dock controls.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
@@ -100,9 +100,6 @@
             updateLinkTitle: 'Open Tampermonkey’s update/install page',
             downgradeLinkTitle: (channel) => `Open Tampermonkey with the selected ${channel} version`,
             install: 'Install',
-            // The channel is "Experimental" to the person (issue #34), so the
-            // button that installs from it says the same word.
-            installTest: 'Install experimental',
             installed: 'Installed',
             backToInstalled: '← Installed',
             available: 'Available',
@@ -251,7 +248,6 @@
             updateLinkTitle: 'Åbn Tampermonkeys opdaterings-/installationsside',
             downgradeLinkTitle: (channel) => `Åbn Tampermonkey med den valgte version fra ${channel}`,
             install: 'Installer',
-            installTest: 'Installer eksperimentel',
             installed: 'Installeret',
             backToInstalled: '← Installeret',
             available: 'Tilgængelige',
@@ -402,7 +398,7 @@
     // Kept in step with the @version header by scripts/check-versions.mjs. The
     // header is metadata Tampermonkey reads; this is the only copy the running
     // script can see, and it is what the self-update notice compares.
-    const MANAGER_VERSION = '1.31.2';
+    const MANAGER_VERSION = '1.31.3';
 
     const STABLE_CATALOGUE_URL =
         'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/catalogue/modules.json';
@@ -5554,8 +5550,9 @@
             installLink.href = module.installUrl;
             installLink.target = '_blank';
             installLink.rel = 'noopener noreferrer';
-            installLink.textContent =
-                isExperimentalModule(module, null) ? t('installTest') : t('install');
+            // One word for both channels (issue #65): the card's Experimental
+            // chip and the channel note already say what the person is on.
+            installLink.textContent = t('install');
 
             actions.appendChild(installLink);
         }
