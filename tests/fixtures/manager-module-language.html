@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio Manager module-language fixture</title>
+    <script>
+        /*
+         * A language switch re-words a module's open settings view (issue #60).
+         *
+         * The Manager renders a module's schema strings as given and owns the
+         * language choice; the module words its schema at announce() time and
+         * re-announces on lectio-manager:language. This page has the real
+         * Manager and the real Experimental Chairs Up module, and checks the
+         * two halves meet: switching the Manager to Dansk, with Chairs Up's
+         * settings view open, re-words every label, help text and option in
+         * place - no closing and reopening - and the card behind it says
+         * "Installeret v…" rather than "Installed v…". Then the settings file:
+         * exported under English and under Danish it carries the same values,
+         * and a file written under one imports under the other, because the
+         * keys and option values a module announces never change with the
+         * words.
+         */
+        window.addEventListener('click', (event) => {
+            // Export hands the browser a file to save, and a download in
+            // flight can keep headless Chrome alive after --dump-dom has
+            // printed (issue #51). The export path runs; the save is declined.
+            const link = event.target?.closest?.('a[download]');
+            if (link) event.preventDefault();
+        }, true);
+
+        // The module's own version, so the card shows "Installed" rather than
+        // an update or a channel target, whatever number the module is at.
+        const request = new XMLHttpRequest();
+        request.open('GET', '/modules-unstable/Lectio-Chairs-Up.user.js', false);
+        request.send();
+        window.chairsUpSource = request.responseText;
+        const chairsUpVersion = window.chairsUpSource.match(/@version\s+(\S+)/)[1];
+
+        const catalogue = {
+            schemaVersion: 1,
+            generatedAt: '2026-09-21T00:00:00.000Z',
+            modules: [{
+                id: 'chairs-up',
+                name: 'Chairs Up',
+                description: 'Marks a lesson when it is the last active booking of the day in that room.',
+                category: 'Timetable',
+                audience: ['teacher'],
+                status: 'stable',
+                version: chairsUpVersion,
+                installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Chairs-Up.user.js'
+            }]
+        };
+
+        const gmStorage = new Map([
+            ['lectioManager.catalogue.v1', JSON.stringify(catalogue)],
+            ['lectioManager.lastRefresh.v1', Date.now()],
+            ['lectioManager.updateTipDismissed.v1', true]
+        ]);
+
+        window.GM_getValue = (key, fallback) => gmStorage.has(key) ? gmStorage.get(key) : fallback;
+        window.GM_setValue = (key, value) => gmStorage.set(key, value);
+        window.GM_xmlhttpRequest = (options) => { setTimeout(() => options.onerror && options.onerror(), 0); };
+        window.fetch = () => Promise.resolve(new Response(
+            '<!DOCTYPE html><html><body></body></html>',
+            { status: 200, headers: { 'content-type': 'text/html' } }
+        ));
+
+        window.pageErrors = [];
+        window.addEventListener('error', (event) => window.pageErrors.push(String(event.message)));
+
+        window.registrations = 0;
+        window.currentValues = null;
+        window.addEventListener('lectio-module:register', (event) => {
+            if (event.detail?.id !== 'chairs-up') return;
+            window.registrations += 1;
+            window.currentValues = { ...event.detail.currentValues };
+        });
+
+        window.applied = [];
+        window.addEventListener('lectio-manager:set-setting', (event) => {
+            if (event.detail?.id === 'chairs-up') window.applied.push(event.detail.key);
+        });
+    </script>
+</head>
+<body>
+    <main id="masterContent"></main>
+    <script src="/manager/Lectio-Manager.user.js"></script>
+    <script>
+        // After the Manager, so the Manager's boot-time Discovery and the
+        // module's own load-time announcement are both exercised.
+        new Function(window.chairsUpSource)();
+    </script>
+    <script>
+        function assert(condition, message) {
+            if (!condition) throw new Error(message);
+        }
+
+        const tick = (ms = 0) => new Promise((done) => setTimeout(done, ms));
+
+        function settingsView() {
+            return document.querySelector('.lectio-manager-settings-view');
+        }
+
+        function labels() {
+            return [...settingsView().querySelectorAll('.lectio-manager-setting-label')].map((node) => node.textContent);
+        }
+
+        function descriptions() {
+            return [...settingsView().querySelectorAll('.lectio-manager-setting-description')].map((node) => node.textContent);
+        }
+
+        function optionLabels() {
+            return [...settingsView().querySelectorAll('select option')].map((node) => node.textContent);
+        }
+
+        function cardStatus() {
+            return document.querySelector('[data-module-id="chairs-up"] .lectio-manager-status-installed')?.textContent || '';
+        }
+
+        function choose(value) {
+            const select = document.querySelector('.lectio-manager-language-select');
+            select.value = value;
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+
+        function fileControl(name) {
+            return document.querySelector(`.lectio-manager-settings-file-${name}`);
+        }
+
+        async function importFile(file) {
+            fileControl('input').value = JSON.stringify(file);
+            fileControl('check').click();
+            await tick(0);
+            assert(!fileControl('apply').hidden, `a settings file was not offered for import: ${fileControl('status').textContent}`);
+            fileControl('apply').click();
+            await tick(20);
+        }
+
+        window.addEventListener('load', async () => {
+            try {
+                await tick(50);
+                assert(window.registrations > 0, 'Chairs Up never registered');
+                assert(window.pageErrors.length === 0, `something threw on load: ${window.pageErrors.join(' | ')}`);
+
+                document.querySelector('#lectio-manager-toggle').click();
+                document.querySelector('[data-primary-view="installed"]').click();
+
+                const html = document.documentElement;
+                assert(html.dataset.lectioLanguage === 'en', `the Manager did not start in English: ${html.dataset.lectioLanguage}`);
+                assert(/^Installed v\d/.test(cardStatus()), `the card did not say Installed v…: "${cardStatus()}"`);
+
+                const settingsButton = document.querySelector('[data-module-id="chairs-up"] .lectio-manager-settings-btn');
+                assert(settingsButton, 'the Chairs Up card has no settings button');
+                settingsButton.click();
+                await tick(0);
+
+                assert(settingsView() && !settingsView().hidden, 'the settings view did not open');
+                assert(labels().includes('Timetable marker') && labels().includes('Lesson-page notice'), `the settings view did not open in English: ${labels().join(' | ')}`);
+                assert(optionLabels().includes('Chair badge'), `the options did not open in English: ${optionLabels().join(' | ')}`);
+                assert(descriptions().some((text) => /^Choose how strongly/.test(text)), `the help text did not open in English: ${descriptions().join(' | ')}`);
+
+                // The switch. The view stays open and is re-worded in place.
+                const before = window.registrations;
+                choose('da');
+                await tick(0);
+
+                assert(window.registrations > before, 'switching the language did not make the module re-announce');
+                assert(!settingsView().hidden, 'switching the language closed the settings view');
+                assert(labels().includes('Markering i skemaet') && labels().includes('Besked på aktivitetssiden'), `the open settings view was not re-worded in Danish: ${labels().join(' | ')}`);
+                assert(optionLabels().includes('Stolemærke'), `the options stayed English: ${optionLabels().join(' | ')}`);
+                assert(descriptions().some((text) => /^Vælg, hvor tydeligt/.test(text)), `the help text stayed English: ${descriptions().join(' | ')}`);
+                assert(/^Installeret v\d/.test(cardStatus()), `the card's Installed label stayed English: "${cardStatus()}"`);
+
+                choose('en');
+                await tick(0);
+                assert(labels().includes('Timetable marker'), `switching back left Danish labels behind: ${labels().join(' | ')}`);
+                assert(/^Installed v\d/.test(cardStatus()), `switching back left the card Danish: "${cardStatus()}"`);
+
+                // The settings file, under both languages.
+                settingsView().querySelector('.lectio-manager-settings-back').click();
+                await tick(0);
+
+                const section = document.querySelector('.lectio-manager-settings-file-section');
+                assert(section, 'the panel has no settings-file section');
+                section.open = true;
+
+                fileControl('export').click();
+                const englishFile = JSON.parse(fileControl('text').value);
+                assert(englishFile.manager.language === 'en', `the English export does not say so: ${englishFile.manager.language}`);
+                const englishValues = englishFile.modules['chairs-up']?.values;
+                assert(englishValues, 'the export carries nothing for Chairs Up');
+                assert(
+                    Object.keys(englishValues).sort().join(',') === 'markerStyle,showLessonNotice',
+                    `the export carries the wrong keys for Chairs Up: ${Object.keys(englishValues).join(',')}`
+                );
+
+                choose('da');
+                await tick(0);
+                fileControl('export').click();
+                const danishFile = JSON.parse(fileControl('text').value);
+                assert(danishFile.manager.language === 'da', `the Danish export does not say so: ${danishFile.manager.language}`);
+                assert(
+                    JSON.stringify(danishFile.modules['chairs-up'].values) === JSON.stringify(englishValues),
+                    `the module's values in the file changed with the language: ${JSON.stringify(danishFile.modules['chairs-up'].values)} vs ${JSON.stringify(englishValues)}`
+                );
+
+                // A file written under English, with every value changed,
+                // imports while the Manager is Danish - and the original
+                // English file brings everything back.
+                const changed = JSON.parse(JSON.stringify(englishFile));
+                changed.modules['chairs-up'].values.markerStyle = englishValues.markerStyle === 'quiet' ? 'outline' : 'quiet';
+                changed.modules['chairs-up'].values.showLessonNotice = !englishValues.showLessonNotice;
+                changed.manager.language = 'da';
+
+                window.applied.length = 0;
+                await importFile(changed);
+                assert(window.applied.includes('markerStyle') && window.applied.includes('showLessonNotice'), `the import did not reach the module: ${window.applied.join(',')}`);
+                assert(
+                    window.currentValues.markerStyle === changed.modules['chairs-up'].values.markerStyle &&
+                    window.currentValues.showLessonNotice === changed.modules['chairs-up'].values.showLessonNotice,
+                    `the module did not take the imported values: ${JSON.stringify(window.currentValues)}`
+                );
+
+                await importFile(englishFile);
+                assert(
+                    window.currentValues.markerStyle === englishValues.markerStyle &&
+                    window.currentValues.showLessonNotice === englishValues.showLessonNotice,
+                    `the round trip did not restore the module: ${JSON.stringify(window.currentValues)}`
+                );
+                assert(html.dataset.lectioLanguage === 'en', `the round trip did not restore the language: ${html.dataset.lectioLanguage}`);
+
+                assert(window.pageErrors.length === 0, `something threw: ${window.pageErrors.join(' | ')}`);
+
+                document.body.appendChild(Object.assign(document.createElement('pre'), { id: 'detail', textContent: 'ok' }));
+                document.documentElement.dataset.testResult = 'pass';
+            } catch (error) {
+                document.body.appendChild(Object.assign(document.createElement('pre'), { id: 'detail', textContent: error.message }));
+                document.documentElement.dataset.testResult = `fail: ${error.message}`;
+            }
+        });
+    </script>
+</body>
+</html>

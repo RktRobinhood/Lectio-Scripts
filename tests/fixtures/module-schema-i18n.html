@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio module settings-schema language fixture</title>
+    <script>
+        /*
+         * Every Experimental module's settings schema, in both languages
+         * (issue #60).
+         *
+         * The Manager renders a schema's strings exactly as given, so each
+         * module words its schema itself, at announce() time, from whichever
+         * language is current - data-lectio-language, then <html lang>, then
+         * Danish (ADR-0013) - and re-announces on lectio-manager:language.
+         * This page stands in for the Manager: it publishes a language the
+         * way the Manager does and reads what each module answers with.
+         *
+         * What must hold, per module, between the English and the Danish
+         * answer: the same controls in the same order, with the same key,
+         * type, bounds, option values and section grouping, and the same
+         * current values - a settings file written under one language must
+         * import under the other, and a changed key would break every backup
+         * ever made - and different words on every label, help text and
+         * button. A label that reads the same in both languages is either a
+         * string nobody translated or a proper noun that should not have been
+         * a label. What must also hold: the words a module announces with no
+         * language published at all are its Danish ones, and a page whose
+         * <html lang> says English gets English.
+         *
+         * No Manager is loaded, on purpose: the reading order and the
+         * re-announce are the module's own, and must work with any page
+         * standing in at the other end.
+         */
+        window.registrations = new Map();
+        window.announcements = new Map();
+        window.pageErrors = [];
+
+        window.addEventListener('lectio-module:register', (event) => {
+            const id = event.detail?.id;
+            window.registrations.set(id, event.detail);
+            window.announcements.set(id, (window.announcements.get(id) || 0) + 1);
+        });
+
+        window.addEventListener('error', (event) => {
+            window.pageErrors.push(String(event.message));
+        });
+
+        const gmStorage = new Map();
+        window.GM_getValue = (key, fallback) => gmStorage.has(key) ? gmStorage.get(key) : fallback;
+        window.GM_setValue = (key, value) => gmStorage.set(key, value);
+        window.GM_xmlhttpRequest = (options) => {
+            setTimeout(() => options.onerror && options.onerror(), 0);
+        };
+
+        /* Nothing here reaches Lectio, and nothing may hang. */
+        window.fetch = () => Promise.resolve(new Response(
+            '<!DOCTYPE html><html><body></body></html>',
+            { status: 200, headers: { 'content-type': 'text/html' } }
+        ));
+    </script>
+</head>
+<body>
+    <nav><a href="/lectio/223/beskeder2.aspx">Beskeder</a></nav>
+    <main id="masterContent"></main>
+
+    <script src="/modules-unstable/Lectio-Subject-Colours.user.js"></script>
+    <script src="/modules-unstable/Lectio-Chairs-Up.user.js"></script>
+    <script src="/modules-unstable/Lectio-Unread-Message-Notifications.user.js"></script>
+    <script src="/modules-unstable/Lectio-Change-Radar.user.js"></script>
+    <script src="/modules-unstable/Lectio-Theming.user.js"></script>
+    <script src="/modules-unstable/Lectio-Schedule-Summary.user.js"></script>
+    <script src="/modules-unstable/Lectio-English-Mode.user.js"></script>
+
+    <script>
+        const MODULE_IDS = [
+            'chairs-up',
+            'english-mode',
+            'schedule-summary',
+            'message-notifications',
+            'subject-colours',
+            'lectio-theming',
+            'change-radar'
+        ];
+
+        // The strings a person reads. Everything else in a control is shape.
+        const WORDING = ['label', 'description', 'buttonLabel', 'section'];
+
+        const html = document.documentElement;
+        const detail = [];
+
+        function assert(condition, message) {
+            if (!condition) throw new Error(message);
+        }
+
+        function clone(value) {
+            return JSON.parse(JSON.stringify(value));
+        }
+
+        function publish(language) {
+            if (language === null) {
+                delete html.dataset.lectioLanguage;
+            } else {
+                html.dataset.lectioLanguage = language;
+            }
+            window.dispatchEvent(new CustomEvent('lectio-manager:language', {
+                detail: { language: language || html.lang }
+            }));
+        }
+
+        // Publish a language the way the Manager does and take every module's
+        // fresh answer. Read synchronously: a module answers lectio-manager:language
+        // in the same tick, and nothing may sneak an answer in another language
+        // in between.
+        function capture(language) {
+            const before = new Map(window.announcements);
+            publish(language);
+
+            const answers = new Map();
+            for (const id of MODULE_IDS) {
+                assert(
+                    (window.announcements.get(id) || 0) > (before.get(id) || 0),
+                    `${id} did not re-announce on lectio-manager:language (${language}) - a language chosen after page load would stay in the old words until the next navigation`
+                );
+                answers.set(id, clone(window.registrations.get(id)));
+            }
+            return answers;
+        }
+
+        // A control with its wording removed and its options reduced to their
+        // values. Two languages must agree on this exactly.
+        function shapeOf(control) {
+            const shape = {};
+            for (const [name, value] of Object.entries(control)) {
+                if (WORDING.includes(name)) continue;
+                shape[name] = Array.isArray(value)
+                    ? value.map((entry) => (entry && typeof entry === 'object') ? { ...entry, label: undefined } : entry)
+                    : value;
+            }
+            return shape;
+        }
+
+        // Sections as an ordinal sequence: which controls sit together, in
+        // what order, regardless of what the sections are called.
+        function groupingOf(schema) {
+            const seen = [];
+            return schema.map((control) => {
+                const name = typeof control.section === 'string' ? control.section : '';
+                let index = seen.indexOf(name);
+                if (index < 0) {
+                    seen.push(name);
+                    index = seen.length - 1;
+                }
+                return index;
+            });
+        }
+
+        function wordingOf(schema) {
+            return schema.map((control) => {
+                const words = {};
+                for (const name of WORDING) {
+                    if (name in control) words[name] = control[name];
+                }
+                if (Array.isArray(control.options)) {
+                    words.options = control.options.map((option) => option.label);
+                }
+                return words;
+            });
+        }
+
+        function compare(id, en, da) {
+            const where = `${id}:`;
+            assert(Array.isArray(en.settingsSchema) && en.settingsSchema.length, `${where} the English registration has no settings schema`);
+            assert(Array.isArray(da.settingsSchema) && da.settingsSchema.length, `${where} the Danish registration has no settings schema`);
+            assert(
+                en.settingsSchema.length === da.settingsSchema.length,
+                `${where} ${en.settingsSchema.length} controls in English but ${da.settingsSchema.length} in Danish`
+            );
+            assert(
+                JSON.stringify(en.currentValues) === JSON.stringify(da.currentValues),
+                `${where} the current values changed with the language: ${JSON.stringify(en.currentValues)} vs ${JSON.stringify(da.currentValues)}`
+            );
+            assert(
+                JSON.stringify(groupingOf(en.settingsSchema)) === JSON.stringify(groupingOf(da.settingsSchema)),
+                `${where} the controls are grouped into sections differently in the two languages`
+            );
+
+            let strings = 0;
+            const sections = new Set();
+
+            en.settingsSchema.forEach((control, index) => {
+                const other = da.settingsSchema[index];
+                const key = control.key;
+                const at = `${where} control '${key}'`;
+
+                assert(other.key === key, `${where} control ${index} is '${key}' in English but '${other.key}' in Danish - a changed key breaks every settings backup`);
+                assert(
+                    JSON.stringify(shapeOf(control)) === JSON.stringify(shapeOf(other)),
+                    `${at} has a different shape in the two languages (type, default, bounds or option values): ${JSON.stringify(shapeOf(control))} vs ${JSON.stringify(shapeOf(other))}`
+                );
+
+                for (const name of ['label', 'description', 'buttonLabel']) {
+                    const has = typeof control[name] === 'string' && control[name].trim();
+                    const otherHas = typeof other[name] === 'string' && other[name].trim();
+                    assert(Boolean(has) === Boolean(otherHas), `${at} has a ${name} in one language and not the other`);
+                    if (!has) continue;
+                    assert(control[name] !== other[name], `${at} ${name} reads the same in English and Danish: "${control[name]}"`);
+                    strings += 1;
+                }
+
+                assert(
+                    (typeof control.section === 'string') === (typeof other.section === 'string'),
+                    `${at} has a section in one language and not the other`
+                );
+                if (typeof control.section === 'string') sections.add(other.section);
+
+                if (Array.isArray(control.options)) {
+                    control.options.forEach((option, optionIndex) => {
+                        const otherOption = other.options[optionIndex];
+                        assert(
+                            typeof otherOption?.label === 'string' && otherOption.label.trim(),
+                            `${at} option '${option.value}' has no Danish label`
+                        );
+                        if (option.label !== otherOption.label) strings += 1;
+                    });
+                }
+            });
+
+            // Section names are wording too, and at least one of them changes
+            // in every module that has sections; a name that is the same in
+            // both (Change Radar's "Radar") is allowed but not counted.
+            const enSections = new Set(en.settingsSchema.map((control) => control.section).filter((name) => typeof name === 'string'));
+            const changedSections = [...sections].filter((name) => !enSections.has(name)).length;
+            if (enSections.size) {
+                assert(changedSections > 0, `${where} none of its ${enSections.size} section names is translated`);
+            }
+
+            detail.push(`${id}: ${en.settingsSchema.length} controls, ${strings + changedSections} strings differ between English and Danish`);
+        }
+
+        window.addEventListener('load', async () => {
+            try {
+                // Let anything that announces off a timer settle first.
+                await new Promise((done) => setTimeout(done, 50));
+
+                assert(window.pageErrors.length === 0, `a module threw on load: ${window.pageErrors.join(' | ')}`);
+                for (const id of MODULE_IDS) {
+                    assert(window.registrations.has(id), `${id} never registered on this page`);
+                }
+
+                // 1. Nothing published, Lectio's own lang="da": every module
+                //    must have announced in Danish.
+                const unpublished = new Map(MODULE_IDS.map((id) => [id, clone(window.registrations.get(id))]));
+
+                // 2. The Manager publishes English, then Danish. Each is a
+                //    fresh announcement.
+                const en = capture('en');
+                const da = capture('da');
+
+                for (const id of MODULE_IDS) {
+                    compare(id, en.get(id), da.get(id));
+                    assert(
+                        JSON.stringify(wordingOf(unpublished.get(id).settingsSchema)) === JSON.stringify(wordingOf(da.get(id).settingsSchema)),
+                        `${id}: with no language published on a Danish page it did not announce in Danish`
+                    );
+                }
+
+                // 3. Nothing published, but the page itself says English -
+                //    what English Mode does to <html lang> - and the module
+                //    follows the page. Then back to Danish.
+                html.lang = 'en';
+                const pageEnglish = capture(null);
+                html.lang = 'da';
+                const pageDanish = capture(null);
+
+                for (const id of MODULE_IDS) {
+                    assert(
+                        JSON.stringify(wordingOf(pageEnglish.get(id).settingsSchema)) === JSON.stringify(wordingOf(en.get(id).settingsSchema)),
+                        `${id}: with nothing published and <html lang="en"> it did not announce in English`
+                    );
+                    assert(
+                        JSON.stringify(wordingOf(pageDanish.get(id).settingsSchema)) === JSON.stringify(wordingOf(da.get(id).settingsSchema)),
+                        `${id}: with nothing published and <html lang="da"> it did not announce in Danish`
+                    );
+                }
+
+                // 4. The published choice beats the page: English published on
+                //    a Danish page is English.
+                const published = capture('en');
+                for (const id of MODULE_IDS) {
+                    assert(
+                        JSON.stringify(wordingOf(published.get(id).settingsSchema)) === JSON.stringify(wordingOf(en.get(id).settingsSchema)),
+                        `${id}: a published English choice did not beat <html lang="da">`
+                    );
+                }
+
+                assert(window.pageErrors.length === 0, `a module threw during the language switches: ${window.pageErrors.join(' | ')}`);
+
+                document.body.appendChild(Object.assign(document.createElement('pre'), { id: 'detail', textContent: detail.join('\n') }));
+                document.documentElement.dataset.testResult = 'pass';
+            } catch (error) {
+                document.body.appendChild(Object.assign(document.createElement('pre'), { id: 'detail', textContent: error.message }));
+                document.documentElement.dataset.testResult = `fail: ${error.message}`;
+            }
+        });
+    </script>
+</body>
+</html>

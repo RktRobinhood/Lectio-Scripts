@@ -2,13 +2,13 @@
   "schemaVersion": 1,
   "generatedAt": "2026-09-20T18:00:00Z",
   "manager": {
-    "version": "1.31.4",
-    "changelog": "Danish wording tidied: the dock is now called Dock, the Problem log is Problemlog, a notice is a Bemærkning, the Manager's own preferences have one name, and the line about a channel's target version reads as a sentence.",
+    "version": "1.32.0",
+    "changelog": "A module's settings now follow the Manager's language: switching between English and Dansk re-words an open settings view in place, for modules that carry both languages. The Installed v… line on a module card is translated too.",
     "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/manager/Lectio-Manager.user.js",
     "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
     "i18n": {
       "da": {
-        "changelog": "Dansk sprog rettet til: docken hedder nu Dock, Fejllog hedder Problemlog, en note hedder Bemærkning, Managerens egne indstillinger har ét navn, og linjen om en kanals målversion er nu en sætning."
+        "changelog": "Et moduls indstillinger følger nu Managerens sprog: skifter du mellem English og Dansk, skifter en åben indstillingsvisning sprog med det samme, for moduler der har begge sprog med. Linjen Installeret v… på et modulkort er også oversat."
       }
     }
   },

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.31.4
+// @version      1.32.0
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules, including their settings and shared dock controls.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
@@ -122,6 +122,7 @@
             noInstalled: 'No installed modules detected yet.',
             allInstalled: 'All available modules are installed.',
             noneMatch: 'No available modules match this filter.',
+            installedVersion: (version) => `Installed v${version}`,
             updateAvailable: (version, installed) => `Update available: v${version} (installed v${installed})`,
             whatsNew: 'What’s new:',
             channelTarget: (channel, version, installed) => `${channel} target: v${version} (installed v${installed})`,
@@ -270,6 +271,7 @@
             noInstalled: 'Ingen installerede moduler fundet endnu.',
             allInstalled: 'Alle tilgængelige moduler er installeret.',
             noneMatch: 'Ingen tilgængelige moduler matcher dette filter.',
+            installedVersion: (version) => `Installeret v${version}`,
             updateAvailable: (version, installed) => `Opdatering tilgængelig: v${version} (installeret v${installed})`,
             whatsNew: 'Nyt i denne version:',
             channelTarget: (channel, version, installed) => `Mål for ${channel}: v${version} (installeret v${installed})`,
@@ -397,7 +399,7 @@
     // Kept in step with the @version header by scripts/check-versions.mjs. The
     // header is metadata Tampermonkey reads; this is the only copy the running
     // script can see, and it is what the self-update notice compares.
-    const MANAGER_VERSION = '1.31.4';
+    const MANAGER_VERSION = '1.32.0';
 
     const STABLE_CATALOGUE_URL =
         'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/catalogue/modules.json';
@@ -5488,7 +5490,7 @@
                     t('channelTarget', releaseChannel === 'stable' ? t('stable') : t('selectedTarget'), module.version, record.version);
             } else {
                 installedLabel.textContent =
-                    `Installed v${record.version || module.version}`;
+                    t('installedVersion', record.version || module.version);
             }
 
             status.appendChild(installedLabel);
