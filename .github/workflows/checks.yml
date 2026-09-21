@@ -69,10 +69,12 @@ jobs:
       - name: Dock icons are up to date
         run: node scripts/build-dock-icons.mjs --check
 
-      # No module-scope const/let/class below the Manager's boot block. That
-      # shape has shipped three times (1.21.0, 1.25.0 / #32, 1.27.0 / #30) and
-      # is valid JavaScript, so the syntax gate above passes it every time.
-      - name: No module-scope state below the Manager's boot block
+      # No module-scope const/let/class below any userscript's boot block. That
+      # shape has shipped three times in the Manager (1.21.0, 1.25.0 / #32,
+      # 1.27.0 / #30) and is valid JavaScript, so the syntax gate above passes
+      # it every time. With no arguments the script covers every .user.js in
+      # the four directories the syntax gate covers (#52).
+      - name: No module-scope state below a userscript's boot block
         run: node scripts/check-boot-order.mjs
 
       # The browser tests shell out to Chrome via CHROME_PATH, falling back to a

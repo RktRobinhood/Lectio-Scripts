@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /*
- * Temporal-dead-zone guard for the Manager's boot block.
+ * Temporal-dead-zone guard for every userscript's boot block.
  *
  * THE BUG THIS EXISTS FOR
  * -----------------------
@@ -31,14 +31,23 @@
  * this is valid JavaScript, it is only wrong at runtime, and only in the one
  * arrangement no plain <script> fixture reproduces.
  *
- * So: find the boot call site, and fail if any module-scope `const`, `let` or
- * `class` is declared after it. Crude and automatic beats careful and
- * remembered. It would have caught all three in well under a second.
+ * The modules have the same shape and the same exposure - every one of them
+ * boots synchronously at document-idle too - and two of them have already had
+ * a near miss caught by hand rather than by a check: Chairs Up's fetch
+ * safety-net state (#36, c604041) and Unread's nav-drift flag (#24, d891e65)
+ * were both placed above the boot call on purpose, with a comment saying why.
+ * A hand-placed declaration is one refactor away from being a shipped one.
  *
- * The companion is tests/fixtures/manager-boot-integrity.html, which boots the
- * Manager the way Tampermonkey does and fails on any exception, including a
- * swallowed one. This catches the declaration; that catches the consequence,
- * including shapes this cannot see.
+ * So: find each file's boot call site, and fail if any module-scope `const`,
+ * `let` or `class` is declared after it. Crude and automatic beats careful and
+ * remembered. It would have caught all three Manager cases in well under a
+ * second, and it catches both module near misses if they are reintroduced
+ * (tests/check-boot-order.test.js does exactly that).
+ *
+ * The companion for the Manager is tests/fixtures/manager-boot-integrity.html,
+ * which boots it the way Tampermonkey does and fails on any exception,
+ * including a swallowed one. This catches the declaration; that catches the
+ * consequence, including shapes this cannot see.
  *
  *
  * HOW MODULE SCOPE IS TOLD APART FROM EVERYTHING ELSE
@@ -57,14 +66,90 @@
  *
  * "Module scope" is then derived from the file rather than assumed: the stack
  * at the boot anchor is truncated at and including its last '{', which is the
- * innermost enclosing *block* - the body of the Manager's IIFE. A declaration
- * is at module scope if and only if its own stack is exactly that prefix. One
+ * innermost enclosing *block* - the body of the file's IIFE. A declaration is
+ * at module scope if and only if its own stack is exactly that prefix. One
  * extra '(', '[' or '{' of any kind and it is nested, so it is not flagged.
  * The rule holds with no IIFE at all (the prefix is simply empty).
  *
  * `var` is deliberately not flagged: it hoists and is initialised to
  * `undefined`, so it has no dead zone. `class` is flagged, because a class
  * declaration has exactly the same dead zone a `const` does.
+ *
+ *
+ * HOW THE BOOT ANCHOR IS FOUND (the decision behind issue #52)
+ * ------------------------------------------------------------
+ * The userscripts do not share one boot shape, so the anchor is found by the
+ * first of these rules that applies, and the per-file output line says which:
+ *
+ *   1. Exactly one `document.readyState` test in the file: that is the anchor.
+ *      The Manager, Schedule Summary, Subject Colours, Theming, Change Radar,
+ *      the skeleton template and English Mode all have it. English Mode's is
+ *      spread over several lines, which costs nothing here because the
+ *      tokeniser never cared about layout. Two or more such tests is an
+ *      ambiguous anchor and fails outright, as it always has.
+ *
+ *   2. No readyState test: the first module-scope call statement - an
+ *      identifier at the start of a statement, at module scope, followed by
+ *      '(' - is the anchor. Chairs Up starts with `injectStyles();` and Unread
+ *      with `init();`, both bare calls at module scope with no readyState test
+ *      anywhere, and a bare call at module scope is exactly the thing that
+ *      runs the module during top-level evaluation.
+ *
+ *   3. Neither: the check FAILS and names the file, unless the file carries the
+ *      opt-out marker below. A file this check cannot understand is never
+ *      skipped quietly - "not checked" must be a visible, deliberate statement
+ *      in the file itself, not a gap in the checker.
+ *
+ * Why the readyState test wins over an earlier call (rule 1 before rule 2):
+ * several modules make housekeeping calls at module scope before their boot
+ * block - Subject Colours calls ensureLockedTheme() and then declares a dozen
+ * pieces of state before its readyState test; Change Radar prunes storage and
+ * registers with the Manager first; Theming announces and applies before
+ * testing readyState. Anchoring on the first call would flag every one of
+ * those declarations, none of which the early call reads, and this check has
+ * no reachability analysis to tell that apart. A guard that is wrong on day
+ * one gets deleted. So a readyState test, when the file has one, is taken as
+ * the file's own statement of where boot is, and a call before it is reported
+ * on the file's output line as not being an anchor, so the gap is visible
+ * rather than assumed away.
+ *
+ *
+ * THE OPT-OUT MARKER
+ * ------------------
+ * A file with no recognisable boot shape may say so, in itself, with one line
+ * comment of exactly this form (the dash may be '-' or an em dash):
+ *
+ *   // boot-order: not-checked — <reason>
+ *
+ * The file is then reported as NOT CHECKED with its reason, on its own line,
+ * and does not fail the run. The reason is required. No file carries this
+ * marker today; tests/check-boot-order.test.js pins the set of files that do,
+ * so one cannot appear without the test being updated in the same change.
+ *
+ *
+ * DEFERRED FINDINGS
+ * -----------------
+ * Extending the check to the modules found three module-scope declarations
+ * below their file's boot anchor, in files that cannot be edited here: Chairs
+ * Up's three notice-watcher `let`s (in both the frozen Stable copy and the
+ * Experimental one) and Change Radar's ASSIGNMENT_STATUS_PATTERN. None is a
+ * live dead-zone read - each is reached only behind an `await` or from a
+ * timer - but the rule is deliberately conservative and does not know that.
+ * The fix is to move them, which is a version bump and an Experimental ship
+ * per ADR-0014, and the Stable copy of Chairs Up is frozen until promotion, so
+ * an opt-out marker cannot be written into it at all.
+ *
+ * Those findings are therefore listed in DEFERRED_FINDINGS below, by file and
+ * declared name, with the issue that tracks moving them. A deferred finding is
+ * still printed on every run, marked DEFERRED with its issue number; it just
+ * does not fail the run. The list is not an allow-list in the usual sense:
+ *   - it matches one declared name in one file, so a NEW declaration below the
+ *     same boot block still fails;
+ *   - an entry that matches nothing any more FAILS the run, so a fixed or
+ *     promoted file forces its entry to be deleted in the same change;
+ *   - tests/check-boot-order.test.js asserts the set of deferred findings the
+ *     default run reports is exactly the set expected, so it cannot grow
+ *     without that test being changed too.
  *
  *
  * WHAT THIS CANNOT DO - read this before trusting it
@@ -75,35 +160,57 @@
  *   delimiter stack would end unbalanced, so the run ends by checking that the
  *   stack is empty and refuses to pass if it is not. A wrong guess becomes a
  *   loud failure, never a quiet one.
- * - It only knows the one boot shape this file has: a single module-scope
- *   `document.readyState` test. If the boot block is rewritten, or a second
- *   readyState test appears, the anchor is ambiguous and the check fails rather
- *   than guessing - that is on purpose, because the alternative is a guard that
+ * - It knows the boot shapes listed above and no others. A boot written as
+ *   `await start()`, or a call guarded by an `if` with no braces, is not
+ *   recognised; the file fails and the author adds a recognisable shape or the
+ *   marker. That is on purpose, because the alternative is a guard that
  *   silently stops guarding.
+ * - A module-scope call made before a readyState anchor is not checked
+ *   against (see the decision above). The output line says how many there are.
  * - It is conservative by design. A module-scope `const` below the boot block
- *   that init() never actually reads is still flagged. That is the file's
- *   convention anyway (all module state lives above the boot block) and the
- *   alternative is reachability analysis, which needs a real parser.
+ *   that boot never actually reads is still flagged. That is the convention
+ *   anyway (all module state lives above the boot block) and the alternative
+ *   is reachability analysis, which needs a real parser.
  * - It cannot see any other temporal-dead-zone shape: a const inside a function
  *   read by a nested call before its declaration, a getter that fires early, a
- *   cycle between two files. The boot fixture is what covers those.
- * - It checks the Manager only. Modules do not all have one unambiguous boot
- *   anchor - several have no readyState test at all - and a check that skipped
- *   the files it could not understand would be worse than none. The Manager is
- *   the file that matters most here: it is Stable-exempt, ships straight to
- *   users, and runs on every Lectio page for everyone.
+ *   cycle between two files. The Manager's boot fixture is what covers those.
  *
  *   node scripts/check-boot-order.mjs
- *   node scripts/check-boot-order.mjs path/to/some-other.user.js
+ *       every .user.js under manager/, modules/, modules-unstable/, templates/
+ *   node scripts/check-boot-order.mjs path/to/some.user.js [more paths or directories]
  */
 
-import { readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 
-const DEFAULT_TARGET = 'manager/Lectio-Manager.user.js';
-const target = process.argv.slice(2).find((argument) => !argument.startsWith('--')) ?? DEFAULT_TARGET;
+const DEFAULT_DIRECTORIES = ['manager', 'modules', 'modules-unstable', 'templates'];
+
+// A finding the check makes today and cannot act on here, with the issue that
+// will act on it. Read DEFERRED FINDINGS above before adding to this; the test
+// pins the set, a stale entry fails the run, and the list is printed every time.
+const DEFERRED_FINDINGS = [
+    { file: 'modules/Lectio-Chairs-Up.user.js', name: 'noticeObserver', issue: 58 },
+    { file: 'modules/Lectio-Chairs-Up.user.js', name: 'noticeFrame', issue: 58 },
+    { file: 'modules/Lectio-Chairs-Up.user.js', name: 'noticeNeedsPlacement', issue: 58 },
+    { file: 'modules-unstable/Lectio-Chairs-Up.user.js', name: 'noticeObserver', issue: 58 },
+    { file: 'modules-unstable/Lectio-Chairs-Up.user.js', name: 'noticeFrame', issue: 58 },
+    { file: 'modules-unstable/Lectio-Chairs-Up.user.js', name: 'noticeNeedsPlacement', issue: 58 },
+    { file: 'modules-unstable/Lectio-Change-Radar.user.js', name: 'ASSIGNMENT_STATUS_PATTERN', issue: 58 }
+];
+
+// `// boot-order: not-checked — <reason>`, on a line of its own.
+const OPT_OUT_MARKER = /^[ \t]*\/\/[ \t]*boot-order:[ \t]*not-checked[ \t]*(?:—|-+)?[ \t]*(.*)$/m;
 
 // Declaration keywords with a temporal dead zone. `var` is absent on purpose.
 const DEAD_ZONE_KEYWORDS = new Set(['const', 'let', 'class']);
+
+// Words that can start a statement and be followed by '(' without being a
+// call of a module function. `async` covers `async function` and `async (`.
+const STATEMENT_KEYWORDS = new Set([
+    'if', 'for', 'while', 'switch', 'return', 'throw', 'typeof', 'new', 'await',
+    'function', 'class', 'const', 'let', 'var', 'try', 'catch', 'finally', 'do',
+    'else', 'import', 'export', 'delete', 'void', 'yield', 'async', 'with',
+    'break', 'continue', 'debugger'
+]);
 
 /*
  * After one of these, a '/' opens a regular expression; after anything else it
@@ -126,8 +233,9 @@ const isIdentifierPart = (character) => /[A-Za-z0-9_$]/.test(character);
  * One pass over the file.
  *
  * Returns every identifier seen in code position, each with the delimiter
- * stack it was seen at, plus whether the delimiters balanced. Nothing here
- * interprets JavaScript beyond what lexing needs.
+ * stack it was seen at and whether it opens a statement, plus whether the
+ * delimiters balanced. Nothing here interprets JavaScript beyond what lexing
+ * needs.
  */
 function tokenise(source) {
     const words = [];
@@ -293,6 +401,11 @@ function tokenise(source) {
                 index,
                 scope: stack.join(''),
                 afterDot: previous === '.',
+                // Whether this word opens a statement: nothing, ';', '{' or '}'
+                // before it, or the `else` of an if. `if (x) call();` is not
+                // recognised, and that is listed under WHAT THIS CANNOT DO.
+                startsStatement: previous === '' || previous === ';' || previous === '{' || previous === '}'
+                    || (previous === 'w' && previousWord === 'else'),
                 rest: source.slice(end, end + 200)
             });
 
@@ -338,113 +451,317 @@ function introducesBinding(rest) {
     return /^\s+([A-Za-z_$][A-Za-z0-9_$]*|[{[])/.test(rest);
 }
 
-function fail(lines) {
-    console.error('');
-    for (const line of lines) console.error(line);
-    console.error('');
+// A statement that is a call of something by name: `init();`, `main().catch(`.
+function isCallStatement(entry) {
+    return entry.startsStatement
+        && !entry.afterDot
+        && !STATEMENT_KEYWORDS.has(entry.word)
+        && /^\s*\(/.test(entry.rest);
+}
+
+// The innermost enclosing block of a token's delimiter stack.
+function enclosingBlock(scope) {
+    const lastBlock = scope.lastIndexOf('{');
+    return lastBlock === -1 ? '' : scope.slice(0, lastBlock + 1);
+}
+
+/*
+ * The boot anchor, by the rules in the header. Returns either { anchor, kind,
+ * moduleScope } or { error: [lines] }.
+ */
+function findAnchor(words) {
+    const readyStates = words.filter((entry, position) =>
+        entry.word === 'readyState' && entry.afterDot && words[position - 1]?.word === 'document');
+
+    if (readyStates.length > 1) {
+        return {
+            error: [
+                `expected at most one \`document.readyState\` boot test, found ${readyStates.length}`,
+                `  at lines ${readyStates.map((anchor) => anchor.line).join(', ')}`,
+                '',
+                '  This check finds the boot call site by that test, and two of them make the',
+                '  anchor ambiguous. If the boot block has been rewritten, teach this script',
+                '  the new shape - the temporal-dead-zone trap it guards against (issues #30,',
+                '  #32, and 1.21.0) has cost three shipped Manager versions and is invisible',
+                '  to every other gate.'
+            ]
+        };
+    }
+
+    if (readyStates.length === 1) {
+        const anchor = readyStates[0];
+        return { anchor, kind: 'readyState test', moduleScope: enclosingBlock(anchor.scope) };
+    }
+
+    // No readyState test. Module scope is the shallowest scope any call
+    // statement is made at; the first call at that scope is the boot.
+    const calls = words.filter(isCallStatement);
+    if (calls.length) {
+        const moduleScope = calls.map((entry) => entry.scope).sort((a, b) => a.length - b.length || a.localeCompare(b))[0];
+        const anchor = calls.find((entry) => entry.scope === moduleScope);
+        return { anchor, kind: 'first module-scope call', moduleScope };
+    }
+
+    return {
+        error: [
+            'no boot anchor recognised: no `document.readyState` test and no call statement',
+            '  at module scope.',
+            '',
+            '  This check needs to know where the file starts running in order to flag',
+            '  module-scope const/let/class declared below that point. Either give the file',
+            '  a recognisable boot shape - a single `if (document.readyState === \'loading\')`',
+            '  test, or a bare `init();`-style call at module scope - or, if the file',
+            '  genuinely has no boot, say so in the file itself with a line comment of',
+            '  exactly this form, reason included:',
+            '',
+            '    // boot-order: not-checked — <reason>',
+            '',
+            '  A file this check cannot understand is never skipped quietly.'
+        ]
+    };
+}
+
+/*
+ * One file. Returns { file, status, lines } where status is 'passed',
+ * 'deferred' (passed, with findings deferred to an issue), 'not-checked'
+ * (opted out in the file) or 'failed'.
+ */
+function checkFile(file) {
+    const source = readFileSync(file, 'utf8');
+
+    const marker = source.match(OPT_OUT_MARKER);
+    if (marker) {
+        const reason = marker[1].trim();
+        if (!reason) {
+            return {
+                file,
+                status: 'failed',
+                lines: [
+                    'the `boot-order: not-checked` marker needs a reason after the dash.',
+                    '  "Not checked" is a statement to the next reader; say why.'
+                ]
+            };
+        }
+        const markerLine = source.slice(0, marker.index).split('\n').length;
+        return { file, status: 'not-checked', lines: [`NOT CHECKED - ${reason} (marker at line ${markerLine})`] };
+    }
+
+    const { words, problems } = tokenise(source);
+
+    if (problems.length) {
+        return {
+            file,
+            status: 'failed',
+            lines: [
+                'this check could not tokenise the file, so it is not passing it.',
+                '',
+                ...problems.map((problem) => `  - ${problem}`),
+                '',
+                '  scripts/check-boot-order.mjs lexes by hand (no parser dependency in this',
+                '  repo). An unbalanced result means it mis-read something - most likely a',
+                '  regular expression it took for a division, or the reverse. Fix the check;',
+                '  do not delete it.'
+            ]
+        };
+    }
+
+    const found = findAnchor(words);
+    if (found.error) return { file, status: 'failed', lines: found.error };
+
+    const { anchor, kind, moduleScope } = found;
+
+    const declarations = words.filter((entry) =>
+        DEAD_ZONE_KEYWORDS.has(entry.word)
+        && !entry.afterDot
+        && entry.scope === moduleScope
+        && introducesBinding(entry.rest));
+
+    /*
+     * A guard that passes because it found nothing to look at is the failure
+     * mode that matters most here, since it looks exactly like a guard that
+     * works. Every userscript in this repo carries module-scope declarations;
+     * if this run saw none, the scope derivation is wrong, not the file.
+     */
+    if (!declarations.length) {
+        return {
+            file,
+            status: 'failed',
+            lines: [
+                'found no module-scope const/let/class declarations at all.',
+                '',
+                '  That is not credible for a userscript, so the scope derivation in this',
+                '  check is what is broken. It is refusing to pass rather than report a clean',
+                `  bill of health it did not earn. (boot anchor: ${kind} at line ${anchor.line},`,
+                `  scope "${moduleScope}")`
+            ]
+        };
+    }
+
+    const above = declarations.filter((entry) => entry.index < anchor.index);
+    const below = declarations.filter((entry) => entry.index > anchor.index);
+
+    const earlierCalls = kind === 'readyState test'
+        ? words.filter((entry) => isCallStatement(entry) && entry.scope === moduleScope && entry.index < anchor.index)
+        : [];
+    const anchorNote = `${kind} at line ${anchor.line}` + (earlierCalls.length
+        ? `; ${earlierCalls.length} earlier module-scope call(s) at line(s) ${earlierCalls.map((entry) => entry.line).join(', ')} not treated as boot`
+        : '');
+
+    const deferrals = DEFERRED_FINDINGS.filter((entry) => entry.file === file);
+    const deferred = [];
+    const failing = [];
+    for (const entry of below) {
+        const name = declaredName(entry.rest);
+        const deferral = deferrals.find((candidate) => candidate.name === name);
+        (deferral ? deferred : failing).push({ entry, name, deferral });
+    }
+    const stale = deferrals.filter((candidate) => !deferred.some((finding) => finding.deferral === candidate));
+
+    const lines = [];
+
+    if (failing.length) {
+        lines.push(
+            `${failing.length} module-scope declaration(s) below the boot block (${kind} at line ${anchor.line}):`,
+            '',
+            ...failing.map(({ entry, name }) => `  - ${file}:${entry.line}: ${entry.word} ${name}`),
+            '',
+            '  Tampermonkey injects every userscript at document-idle, so readyState is never',
+            '  \'loading\' on a real install and boot runs during the file\'s own top-level',
+            '  evaluation. Anything boot reaches that is declared below that line is read',
+            '  inside its temporal dead zone, throws a ReferenceError into whichever catch',
+            '  block is nearest, and leaves the script running degraded with nothing on the',
+            '  console.',
+            '',
+            '  Move the declaration above the boot block, where the rest of the module-scope',
+            '  state lives. If it belongs beside the function that uses it, put it inside',
+            '  that function - a function declaration hoists, and its body is not evaluated',
+            '  until it is called (that is what 934b55f did with the changelog cap).',
+            '',
+            '  This has shipped three times in the Manager: 1.21.0, 1.25.0 (#32) and',
+            '  1.27.0 (#30).'
+        );
+    }
+
+    if (stale.length) {
+        if (lines.length) lines.push('');
+        lines.push(
+            `${stale.length} stale entry(ies) in DEFERRED_FINDINGS for this file matched no finding:`,
+            '',
+            ...stale.map((candidate) => `  - ${candidate.name} (issue #${candidate.issue})`),
+            '',
+            '  The declaration has been moved, renamed or the file replaced. Delete the entry',
+            '  from scripts/check-boot-order.mjs and the expected set in',
+            '  tests/check-boot-order.test.js in the same change.'
+        );
+    }
+
+    if (lines.length) return { file, status: 'failed', lines };
+
+    if (deferred.length) {
+        return {
+            file,
+            status: 'deferred',
+            lines: [
+                `DEFERRED: ${deferred.length} module-scope declaration(s) below the boot block ` +
+                `(${anchorNote}), tracked in ` +
+                `${[...new Set(deferred.map(({ deferral }) => `#${deferral.issue}`))].join(', ')}: ` +
+                deferred.map(({ entry, name }) => `${entry.word} ${name} (line ${entry.line})`).join(', ') +
+                `; ${above.length} above.`
+            ]
+        };
+    }
+
+    return {
+        file,
+        status: 'passed',
+        lines: [
+            `${above.length} module-scope const/let/class declaration(s), all above the boot block ` +
+            `(${anchorNote}).`
+        ]
+    };
+}
+
+// ---- targets -----------------------------------------------------------
+
+function userscriptsIn(directory) {
+    return readdirSync(directory)
+        .filter((name) => name.endsWith('.user.js'))
+        .sort()
+        .map((name) => `${directory}/${name}`);
+}
+
+function resolveTargets(args) {
+    const unknownFlags = args.filter((argument) => argument.startsWith('--'));
+    if (unknownFlags.length) {
+        console.error(`unknown option(s): ${unknownFlags.join(' ')} - this script takes file or directory paths only.`);
+        process.exit(2);
+    }
+
+    const requested = args.map((argument) => argument.replace(/\\/g, '/').replace(/^\.\//, ''));
+    if (!requested.length) {
+        return DEFAULT_DIRECTORIES.filter((directory) => existsSync(directory)).flatMap(userscriptsIn);
+    }
+
+    return requested.flatMap((path) => {
+        if (!existsSync(path)) {
+            console.error(`${path}: no such file or directory.`);
+            process.exit(2);
+        }
+        return statSync(path).isDirectory() ? userscriptsIn(path) : [path];
+    });
+}
+
+// ---- run ---------------------------------------------------------------
+
+const targets = resolveTargets(process.argv.slice(2));
+
+if (!targets.length) {
+    console.error('No .user.js files were found - this check would have checked nothing, so it is failing instead.');
     process.exit(1);
 }
 
-const source = readFileSync(target, 'utf8');
-const { words, problems } = tokenise(source);
+const results = targets.map(checkFile);
 
-if (problems.length) {
-    fail([
-        `${target}: this check could not tokenise the file, so it is not passing it.`,
-        '',
-        ...problems.map((problem) => `  - ${problem}`),
-        '',
-        '  scripts/check-boot-order.mjs lexes by hand (no parser dependency in this',
-        '  repo). An unbalanced result means it mis-read something - most likely a',
-        '  regular expression it took for a division, or the reverse. Fix the check;',
-        '  do not delete it.'
-    ]);
+// A deferral for a file that no longer exists is as stale as one for a moved
+// declaration; only a default run can tell, since an explicit run may
+// legitimately not include the file.
+if (!process.argv.slice(2).length) {
+    for (const entry of DEFERRED_FINDINGS) {
+        if (!targets.includes(entry.file)) {
+            results.push({
+                file: entry.file,
+                status: 'failed',
+                lines: [
+                    `listed in DEFERRED_FINDINGS (${entry.name}, issue #${entry.issue}) but the file no longer exists.`,
+                    '  Delete the entry from scripts/check-boot-order.mjs and the expected set in',
+                    '  tests/check-boot-order.test.js in the same change.'
+                ]
+            });
+        }
+    }
 }
 
-/*
- * The anchor: `document.readyState`, the test the boot block makes. Exactly one
- * is required. Zero means the boot block moved or was rewritten; more than one
- * means the anchor is ambiguous. Either way this check no longer knows where
- * boot is, and a guard that does not know that must fail, not shrug.
- */
-const anchors = words.filter((entry, position) =>
-    entry.word === 'readyState' && entry.afterDot && words[position - 1]?.word === 'document');
+const counts = { passed: 0, deferred: 0, 'not-checked': 0, failed: 0 };
 
-if (anchors.length !== 1) {
-    fail([
-        `${target}: expected exactly one \`document.readyState\` boot test, found ${anchors.length}.`,
-        anchors.length
-            ? `  at line(s) ${anchors.map((anchor) => anchor.line).join(', ')}`
-            : '',
-        '',
-        '  This check finds the boot call site by that test. If the boot block has',
-        '  been rewritten, teach this script the new shape - the temporal-dead-zone',
-        '  trap it guards against (issues #30, #32, and 1.21.0) has cost three',
-        '  shipped Manager versions and is invisible to every other gate.'
-    ].filter(Boolean));
+for (const result of results) {
+    counts[result.status] += 1;
+    if (result.status === 'failed') {
+        console.error('');
+        console.error(`${result.file}: FAILED - ${result.lines[0]}`);
+        for (const line of result.lines.slice(1)) console.error(line);
+        console.error('');
+    } else {
+        console.log(`${result.file}: ${result.lines.join(' ')}`);
+    }
 }
 
-const boot = anchors[0];
+const summary =
+    `Checked ${results.length} file(s): ${counts.passed} passed, ${counts.deferred} with deferred findings, ` +
+    `${counts['not-checked']} not checked, ${counts.failed} failed.`;
 
-/*
- * Module scope, derived rather than assumed: the delimiter stack at the boot
- * test, truncated at and including its last '{' - the innermost enclosing
- * block, which here is the body of the Manager's IIFE. A declaration is at
- * module scope only if its stack matches this exactly.
- */
-const bootScope = boot.scope;
-const lastBlock = bootScope.lastIndexOf('{');
-const moduleScope = lastBlock === -1 ? '' : bootScope.slice(0, lastBlock + 1);
-
-const declarations = words.filter((entry) =>
-    DEAD_ZONE_KEYWORDS.has(entry.word)
-    && !entry.afterDot
-    && entry.scope === moduleScope
-    && introducesBinding(entry.rest));
-
-const above = declarations.filter((entry) => entry.index < boot.index);
-const below = declarations.filter((entry) => entry.index > boot.index);
-
-/*
- * A guard that passes because it found nothing to look at is the failure mode
- * that matters most here, since it looks exactly like a guard that works. The
- * Manager carries scores of module-scope declarations above its boot block; if
- * this run saw none, the scope derivation is wrong, not the file.
- */
-if (!above.length) {
-    fail([
-        `${target}: found no module-scope const/let/class declarations at all.`,
-        '',
-        '  That is not credible for this file, so the scope derivation in this check',
-        '  is what is broken. It is refusing to pass rather than report a clean bill',
-        `  of health it did not earn. (boot test at line ${boot.line}, scope "${moduleScope}")`
-    ]);
+if (counts.failed) {
+    console.error(summary);
+    process.exit(1);
 }
 
-if (below.length) {
-    fail([
-        `${below.length} module-scope declaration(s) below the boot block in ${target}:`,
-        '',
-        ...below.map((entry) =>
-            `  - ${target}:${entry.line}: ${entry.word} ${declaredName(entry.rest)}`),
-        '',
-        `  The boot block is at line ${boot.line}. Tampermonkey injects this script at`,
-        '  document-idle, so readyState is never \'loading\' on a real install and init()',
-        '  runs during the file\'s own top-level evaluation. Anything init() reaches that',
-        '  is declared below that line is read inside its temporal dead zone, throws a',
-        '  ReferenceError into one of the catch blocks below, and leaves the Manager',
-        '  running degraded with nothing on the console.',
-        '',
-        '  Move the declaration above the boot block, where the rest of the module-scope',
-        '  state lives. If it belongs beside the function that uses it, put it inside',
-        '  that function - a function declaration hoists, and its body is not evaluated',
-        '  until it is called (that is what 934b55f did with the changelog cap).',
-        '',
-        '  This has shipped three times: 1.21.0, 1.25.0 (#32) and 1.27.0 (#30).'
-    ]);
-}
-
-console.log(
-    `${target}: ${above.length} module-scope const/let/class declaration(s), all above the ` +
-    `boot block at line ${boot.line}.`
-);
+console.log(summary);
