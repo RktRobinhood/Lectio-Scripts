@@ -82,8 +82,12 @@ const writeMap = (map) => writeFileSync(mapPath, `${JSON.stringify(map, null, 4)
 // two to four digits shorter than anything Lectio issues. Recognising them by
 // shape rather than by "is it a big number" is what lets --check state flatly
 // that every card left in a page is one we put there.
-const CARD_PREFIXES = ['HE', 'T', 'S', 'RO'];
-const PLACEHOLDER_CARD = /^(?:HE|T|S|RO)90\d{5}$/;
+// U turns up on a real document list. A prefix the scan does not know is not
+// skipped harmlessly: the card keeps its real digits through --scan, the
+// generic long-number rule then renumbers them anyway, and --check reports the
+// result as a card that is not a placeholder. Better to know the prefix.
+const CARD_PREFIXES = ['HE', 'T', 'S', 'RO', 'U'];
+const PLACEHOLDER_CARD = /^(?:HE|T|S|RO|U)90\d{5}$/;
 const PERSON_ID_FIELDS = ['elevid', 'laererid', 'studentid', 'teacherid', 'personid', 'brugerid'];
 
 const nextPlaceholder = (map, prefix) => {
@@ -148,16 +152,98 @@ const textNodes = (html) => html
     .map((chunk) => collapse(chunk))
     .filter(Boolean);
 
-const NAME_IN_NODE = /^[A-ZÆØÅ][a-zæøå'-]{1,}(?:\s+[A-ZÆØÅ][a-zæøå'-]{1,}){1,3}(?:\s*\([^)]{1,12}\))?$/;
+// Names are matched with Unicode letter classes, not [A-Za-zÆØÅæøå].
+// JavaScript's \w is ASCII, so a Danish-shaped pattern sees "Anne Andersen"
+// and not "Hana Carska", "Tadeas Jan Novak" or "Gadus-Baraknoyi Andras" - and
+// this is an IB school, so a class roll is full of exactly those. Four real
+// students survived a run that reported itself clean for precisely this
+// reason. \p{L} covers every alphabet Lectio might be asked to print.
+const NAME_IN_NODE = /^\p{Lu}[\p{Ll}'’-]{1,}(?:\s+\p{Lu}[\p{Ll}'’-]{1,}){1,3}(?:\s*\([^)]{1,12}\))?$/u;
 
 // A person in Lectio text is written "Fulde Navn (XX)" - in a tooltip's Laerer:
 // line, in a participant list, in a page title. The initials matter as much as
 // the name: they are what a lesson block shows on its own.
-const PERSON_PATTERN = /([A-ZÆØÅ][\wÆØÅæøå'-]+(?:\s+[A-ZÆØÅ][\wÆØÅæøå'-]+)+)\s*\(([A-ZÆØÅ]{2,4})\)/g;
+// The initials are not always upper case. Lectio prints them as the school
+// enters them, so "Matthew Travers (Tr)" and "(Mlu)" sit next to "(MP)".
+// Requiring [A-ZÆØÅ]{2,4} missed every mixed-case one - and because --check
+// looks for survivors with this same pattern, it then declared the page clean
+// with a real teacher's full name still in it. Accept a capital followed by
+// letters of either case; the leading capital is what keeps this from matching
+// ordinary parenthesised words.
+const PERSON_PATTERN = /(\p{Lu}[\p{L}'’-]+(?:\s+\p{Lu}[\p{L}'’-]+)+)\s*\((\p{Lu}[\p{L}]{1,3})\)/gu;
 
-const PARTICIPANT_LINES = /(?:Lærer|Lærere|Elev|Elever|Deltagere|Deltager):\s*([^\n"]+)/g;
+// These run over attribute text, and Lectio quotes its attributes with ' as
+// often as with ". Stopping only at " ran the capture straight through the
+// closing quote and into the next attribute, so a tooltip's free text was
+// captured as `Unit 1 Test' data-menu-items='AF AE ...'`. Applying that would
+// have replaced a real Lectio attribute along with the prose and left the tag
+// malformed. A literal apostrophe inside an attribute arrives encoded, so
+// excluding ' costs nothing.
+// Staff are written "Navn (MP)". Students are not: they are written
+// "Navn (1i 03)" - class code and roll number instead of initials - and an
+// assignment list puts a whole roster of them in one title= attribute. The
+// staff pattern matches none of that, so a scan found nothing, --check used
+// the same pattern and called the page clean, and a full class of real
+// students' names came within one commit of a public repository. They are the
+// most sensitive names in Lectio and they had the weakest net.
+const STUDENT_PATTERN = /(\p{Lu}[\p{L}'’-]+(?:\s+\p{Lu}[\p{L}'’-]+)+)\s*\((\d\p{Ll}{1,4}\s+\d{1,3})\)/gu;
 
-const FREE_TEXT_LINES = /(?:Lektier|Note|Noter|Emne|Overskrift):\s*([^\n"]{8,})/g;
+const PARTICIPANT_LINES = /(?:Lærer|Lærere|Elev|Elever|Deltagere|Deltager):\s*([^\n"']+)/g;
+
+const FREE_TEXT_LINES = /(?:Lektier|Note|Noter|Emne|Overskrift):\s*([^\n"']{8,})/g;
+
+// Lectio serves this attribute as data-lectioContextCard='HE123', camelCased
+// and single-quoted. A page saved with Chrome's "Webpage, Complete" goes
+// through the DOM serialiser first, which lowercases the name and rewrites the
+// quotes - so a pattern written against one save format silently matches
+// nothing in the other. The first corpus page was serialised, the next four
+// were not, and the scan found zero cards on all four while reporting success.
+// Match the attribute name case-insensitively and accept either quote; the
+// value's own prefix is uppercased before use so the map keys stay stable.
+const CONTEXT_CARD_ATTR = /data-lectiocontextcard\s*=\s*["']([A-Za-z]+)(\d+)["']/gi;
+const CONTEXT_CARD_LABEL = /data-lectiocontextcard\s*=\s*["']([A-Za-z]+\d+)["'][^>]*>([^<]{1,80})</gi;
+const CONTEXT_CARD_VALUE = /data-lectiocontextcard\s*=\s*["']([A-Za-z]+\d+)["']/gi;
+
+const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+
+// A placeholder that happens to equal a real value is worse than a collision
+// between two placeholders. The page then legitimately contains the very
+// string --check is looking for, so the gate can never be satisfied and the
+// real value is indistinguishable from the fake one. It is not hypothetical:
+// person 54's initials are "CC", which is also a real teacher's here. Walk the
+// placeholder space until a candidate clashes with nothing real and nothing
+// already issued. Runs after the whole corpus is scanned, because a real value
+// can arrive on a later page than the placeholder that shadows it.
+const reconcilePlaceholders = (map, found) => {
+    const real = new Set(map.replacements.filter((entry) => !entry.skip).map((entry) => entry.find));
+    const taken = new Set(map.replacements.map((entry) => entry.replace));
+
+    const reissue = (entry, make) => {
+        for (let n = 0; n < 26 * 26; n += 1) {
+            const candidate = make(n);
+            if (real.has(candidate) || taken.has(candidate)) continue;
+            taken.delete(entry.replace);
+            found.push(`placeholder "${entry.replace}" shadowed a real value -> "${candidate}"`);
+            entry.replace = candidate;
+            taken.add(candidate);
+            return;
+        }
+        found.push(`could not find a free placeholder for "${entry.find}"`);
+    };
+
+    for (const entry of map.replacements) {
+        if (entry.skip || !real.has(entry.replace)) continue;
+        if (entry.note === 'person name') reissue(entry, personName);
+        else if (entry.note === 'person initials') reissue(entry, personInitials);
+        else reissue(entry, (n) => `${entry.replace} ${n + 2}`);
+    }
+};
+
+// Vary both words instead of wrapping one: 676 distinct people, each still
+// shaped like a Danish name so the page reads normally and --check's
+// "Navn (XX)" net still recognises it. n = 0 gives Anne Andersen / AA.
+const personName = (n) => `${LETTERS[Math.floor(n / 26) % 26]}nne ${LETTERS[n % 26]}ndersen`;
+const personInitials = (n) => LETTERS[Math.floor(n / 26) % 26] + LETTERS[n % 26];
 
 // Scanning reads the page as --apply will leave it, not as it was saved. The
 // mechanical rules run first either way, and scanning the raw page instead
@@ -166,8 +252,8 @@ const FREE_TEXT_LINES = /(?:Lektier|Note|Noter|Emne|Overskrift):\s*([^\n"]{8,})/
 const scanPage = (raw, map, found) => {
     const html = applyMechanical(raw);
 
-    for (const match of html.matchAll(/data-lectiocontextcard="([A-Z]+)(\d+)"/g)) {
-        const prefix = match[1];
+    for (const match of html.matchAll(CONTEXT_CARD_ATTR)) {
+        const prefix = match[1].toUpperCase();
         const card = prefix + match[2];
         if (!CARD_PREFIXES.includes(prefix)) continue;
         if (PLACEHOLDER_CARD.test(card)) continue;
@@ -210,30 +296,113 @@ const scanPage = (raw, map, found) => {
         found.push(`text "${find}" -> "${replace}" (${note})`);
     };
 
-    // Names carried alongside their initials, wherever they appear.
-    let people = 0;
-    for (const match of decode(html).matchAll(PERSON_PATTERN)) {
-        const letter = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'[people % 26];
-        suggest(match[1], `${letter}nne ${letter}ndersen`, 'person name');
-        suggest(match[2], `${letter}${letter}`, 'person initials');
+    // Both loops below hand out person placeholders, so the counter belongs
+    // above the first of them - declaring it between the two would leave this
+    // one reading it in its temporal dead zone.
+    let people = map.replacements.filter((entry) => entry.note === 'person name').length;
+
+    // Work backwards from the roll, not forwards from the name.
+    //
+    // The name net has now been widened three times against this one page:
+    // for mixed-case initials, for non-ASCII letters, and for a trailing full
+    // stop ("Rodrigo Prieto. (1i 90)"). Each time it reported the page clean
+    // with real students still in it. Guessing how a school types names is a
+    // losing game, so stop guessing: "(1i 90)" is a class and a roll number
+    // and essentially nothing else has that shape, and whatever directly
+    // precedes it is a person. Take the text back to the nearest delimiter and
+    // redact it whatever it looks like. This is the net that does not need to
+    // be right about orthography, and it is deliberately the broad one - over-
+    // redacting a roster is harmless, under-redacting it is not.
+    let rolls = map.replacements.filter((entry) => entry.note === 'student roll').length;
+
+    const ROLL_TOKEN = /\((\d\p{Ll}{1,4}\s+\d{1,3})\)/gu;
+    const flat = decode(html);
+    for (const match of flat.matchAll(ROLL_TOKEN)) {
+        // The roll goes whether or not the name beside it was recognisable.
+        // Claiming only the name left "Hnne Ondersen (1i 55)" on the page -
+        // the class and seat of one real student, with a placeholder sitting
+        // where the name used to be, which reads as redacted and is not.
+        const was = map.replacements.length;
+        suggest(match[1], `${match[1][0]}a ${String((rolls % 99) + 1).padStart(2, '0')}`, 'student roll');
+        if (map.replacements.length > was) rolls += 1;
+
+        const before = flat.slice(Math.max(0, match.index - 80), match.index);
+        const name = before.split(/[)>"'<;]/).pop().trim();
+        if (name.length < 3 || name.length > 60) continue;
+        if (!/\p{L}{2}/u.test(name)) continue;
+        if (known.has(name) || map.allowedText.includes(name)) continue;
+        suggest(name, personName(people), 'person name');
         people += 1;
+    }
+
+    // Students, listed as "Navn (1i 03)". Both halves go: the name obviously,
+    // and the class-and-roll too, because it identifies one person in one room
+    // even after the name is gone. The roll is renumbered rather than dropped
+    // so the "(class NN)" shape a page may render still looks like itself.
+    for (const match of decode(html).matchAll(STUDENT_PATTERN)) {
+        const before = map.replacements.length;
+        suggest(match[1], personName(people), 'person name');
+        if (map.replacements.length > before) people += 1;
+
+        const year = match[2][0];
+        const next = `${year}a ${String((rolls % 99) + 1).padStart(2, '0')}`;
+        const was = map.replacements.length;
+        suggest(match[2], next, 'student roll');
+        if (map.replacements.length > was) rolls += 1;
+    }
+
+    // Names carried alongside their initials, wherever they appear.
+    //
+    // This counter used to start at zero for every page and wrap at twenty-six.
+    // Four pages of one corpus mapped seventy-eight real people onto twenty-six
+    // placeholders: safe, because it only ever merges, but it makes the corpus
+    // lie. "This lesson has two distinct teachers" is exactly the kind of thing
+    // these pages exist to test, and it cannot be tested once two teachers are
+    // the same person. Count what the map already holds, so numbering carries
+    // across pages, and vary both words rather than wrapping - that gives 676
+    // distinct names and initials while keeping the "Navn (XX)" shape --check
+    // looks for. Index 0 is still "Anne Andersen"/"AA", so pages already
+    // redacted against this map do not move.
+    for (const match of decode(html).matchAll(PERSON_PATTERN)) {
+        const before = people;
+        suggest(match[1], personName(people), 'person name');
+        suggest(match[2], personInitials(people), 'person initials');
+        // Only consume a placeholder when this really was somebody new.
+        if (map.replacements.filter((entry) => entry.note === 'person name').length > before) people += 1;
     }
 
     // The short label hung on a context card: a hold's display name, a
     // teacher's initials. These are the strings the tooltips repeat, so they
     // have to move together with the card itself.
-    for (const match of html.matchAll(/data-lectiocontextcard="([A-Z]+\d+)"[^>]*>([^<]{1,80})</g)) {
+    for (const match of html.matchAll(CONTEXT_CARD_LABEL)) {
         const label = collapse(match[2]);
         if (!label || /^[\d\s.,:/-]*$/.test(label)) continue;
         // A longer run of text is a page heading that merely carries a card;
         // the person-name rules below already cover what is personal in it.
         if (label.length > 30) continue;
 
-        const prefix = match[1].match(/^[A-Z]+/)[0];
-        const placeholder = map.contextCards[match[1]] || match[1];
-        const index = Number(placeholder.replace(/^[A-Z]+/, '')) - 9000001;
-        const letter = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'[Math.max(0, index) % 26];
-        suggest(label, prefix === 'HE' ? `1a Fag${Math.max(0, index) + 1} HL` : `${letter}${letter}`, `${prefix} label`);
+        const card = match[1].toUpperCase();
+        const prefix = card.match(/^[A-Z]+/)[0];
+        const placeholder = map.contextCards[card] || card;
+        const index = Math.max(0, Number(placeholder.replace(/^[A-Z]+/, '')) - 9000001);
+
+        if (prefix !== 'HE') {
+            suggest(label, personInitials(index), `${prefix} label`);
+            continue;
+        }
+
+        // A hold label is not just a name: the level (HL/SL), the team number
+        // after a slash, and a leading school year are all structure a parser
+        // may read, and Subject Colours cares about the HL/SL distinction in
+        // particular. Suggesting a flat "1a FagN HL" for every hold threw all
+        // three away - it turned an SL hold into an HL one and dropped the
+        // "2026/27: " a tooltip prints. Keep the shape, replace only the part
+        // that identifies a real class.
+        const year = (label.match(/^\d{4}\/\d{2}:\s*/) || [''])[0];
+        const bare = label.slice(year.length);
+        const level = (bare.match(/\b(HL|SL)\b/i) || [])[1] || '';
+        const team = (bare.match(/\/\d+\s*$/) || [''])[0];
+        suggest(label, `${year}1a Fag${index + 1}${level ? ` ${level.toUpperCase()}` : ''}${team}`, 'HE label');
     }
 
     // People listed in a tooltip without initials in brackets.
@@ -338,14 +507,18 @@ const stripModuleMarkup = (html) => {
 
     // Classes and attributes the modules add to Lectio's own elements rather
     // than to elements of their own.
+    // Lectio single-quotes most of its own class attributes, and a page saved
+    // straight from the server keeps that; only a Chrome "Webpage, Complete"
+    // save rewrites them all to double quotes. Accept either, or the stripping
+    // below quietly does nothing on four fifths of a real page.
     return output
-        .replace(/\sclass="([^"]*)"/gi, (whole, value) => {
+        .replace(/\sclass=(["'])([^"']*)\1/gi, (whole, quote, value) => {
             const kept = value.split(/\s+/).filter((name) => name && !/^lectio-(?:manager|unread|english|chairs|subject|theme|themed|change-radar)/.test(name));
-            return kept.length ? ` class="${kept.join(' ')}"` : '';
+            return kept.length ? ` class=${quote}${kept.join(' ')}${quote}` : '';
         })
         // Every data-lectio-* attribute is ours. Lectio's own is
         // data-lectiocontextcard, with no hyphen, so it is not caught here.
-        .replace(/\sdata-lectio-[a-z-]+="[^"]*"/gi, '')
+        .replace(/\sdata-lectio-[a-z-]+=(["'])[^"']*\1/gi, '')
         // Lectio Theming publishes its palette as --lectio-theme-* custom
         // properties in an inline style on <html>, and a module's own
         // registered colours ride along in the same attribute.
@@ -421,9 +594,18 @@ const checkPage = (name, html, map) => {
         problems.push(`long number that is not a placeholder: ${match[0]}`);
     }
 
+    // Ask the same question --apply answered. It replaces a short string only
+    // on a word boundary, because initials and hold codes sit inside ordinary
+    // words; a plain includes() then reports "ST" as surviving on every page
+    // that contains the word TEST. A gate that cannot be satisfied is a gate
+    // people learn to wave through, which is the one thing this must not be.
     for (const entry of map.replacements) {
         if (entry.skip) continue;
-        if (html.includes(entry.find)) problems.push(`real text "${entry.find}" still present`);
+        const boundary = entry.wordBoundary ?? entry.find.length <= 4;
+        const survives = boundary
+            ? new RegExp(`(?<![\\wÆØÅæøå])${escapeRegExp(entry.find)}(?![\\wÆØÅæøå])`).test(html)
+            : html.includes(entry.find);
+        if (survives) problems.push(`real text "${entry.find}" still present`);
     }
 
     // Independent of the map: anything that still looks like a secret or an
@@ -438,9 +620,10 @@ const checkPage = (name, html, map) => {
         problems.push(`unmapped "Name (XX)" survives: ${match[0]}`);
     }
 
-    for (const match of html.matchAll(/data-lectiocontextcard="([A-Z]+\d+)"/g)) {
-        if (!PLACEHOLDER_CARD.test(match[1])) {
-            problems.push(`context card is not a placeholder: ${match[1]}`);
+    for (const match of html.matchAll(CONTEXT_CARD_VALUE)) {
+        const card = match[1].toUpperCase();
+        if (!PLACEHOLDER_CARD.test(card)) {
+            problems.push(`context card is not a placeholder: ${card}`);
         }
     }
 
@@ -470,6 +653,7 @@ if (mode === '--scan') {
     const map = readMap();
     const found = [];
     for (const input of inputs) scanPage(readFileSync(resolve(input), 'utf8'), map, found);
+    reconcilePlaceholders(map, found);
     writeMap(map);
 
     console.log(found.length ? found.join('\n') : 'Nothing new found.');
