@@ -51,9 +51,52 @@
             });
         }
 
-        /* Long enough that two modules fetching at once overlap visibly, short
-           enough to stay far inside every module's own timeout. */
-        const FETCH_MS = 300;
+        /* How long one stubbed request stays open.
+         *
+         * This is the width of the window the `silent` control below needs,
+         * and it is the only reason that control is not a coin flip. With the
+         * start jitter pinned to zero above, the four modules schedule their
+         * first background request at +0ms (Chairs Up), +0ms (Change Radar),
+         * +700ms (Unread) and +1800ms (Subject Colours) from their own load,
+         * and each then falls through its own answer window SLOT_ANSWER_MS
+         * later - so the requests themselves arrive spread across that same
+         * 1800ms, however the browser is feeling.
+         *
+         * At 300ms only the first two ever overlapped, and only because those
+         * two <script> tags load back to back. That made the control a race
+         * against real time rather than a measurement: on 2026-09-20 a loaded
+         * machine put 840ms of real work between them, the four requests
+         * arrived 1.3s, 2.1s, 2.8s and 3.9s in, nothing overlapped, and the
+         * control asserted itself into a false failure.
+         *
+         * A stubbed request that outlives the whole 1800ms spread removes the
+         * race instead of narrowing it: all four are in flight together, and
+         * the control only fails if *every* pair of them comes apart. Chrome
+         * fast-forwards the idle stretches of its virtual clock, so the extra
+         * length is not real time: measured either side of the change, a
+         * launch came out the same within the machine's own noise.
+         *
+         * There is a ceiling on it, and it is not the modules' fetch timeout
+         * (8s, Chairs Up and Unread) - it is the other 8s, the ceiling a
+         * module will wait for a slot before going anyway. In `real` the
+         * broker queues the four of them, so the last one waits 3 x FETCH_MS;
+         * past about 2600 it would give up on a Manager that is working
+         * perfectly, fetch anyway, and fail the serialisation check. Anyone
+         * widening this further has to move that assertion's scenario too.
+         *
+         * Widening it cannot buy a pass in either direction. Modules that
+         * genuinely take turns never start a second request while one is
+         * still open, whatever this is set to - and in `real` a longer
+         * request only widens the window in which an overlap would be seen.
+         */
+        const FETCH_MS = 2000;
+
+        /* What the ceilings below allow a turn on top of the constants it is
+           made of: scheduling noise, on a machine running the rest of the
+           suite beside this one. Deliberately small next to SLOT_ANSWER_MS,
+           because every ceiling here has to stay clear of it to mean
+           anything. */
+        const TURN_SLACK_MS = 700;
 
         window.fetchLog = [];
         window.maxConcurrentFetches = 0;
@@ -200,16 +243,23 @@
         window.addEventListener('load', async () => {
             const output = document.getElementById('test-result');
 
-            /* Long enough for the slowest scenario: a module that has been
-               acknowledged waits out its own eight-second ceiling, and Subject
-               Colours does not even arm its scan until 1.8s. Chrome runs this
-               on a virtual clock. */
-            await new Promise((done) => setTimeout(done, 30000));
+            /* Long enough for the slowest scenario, which is now `real`:
+               twelve requests taken strictly in turn, at FETCH_MS each, after
+               Subject Colours arms its scan at 1.8s - about 25s of virtual
+               time. `acked` is the other long one, where every module waits
+               out its own eight-second ceiling. Chrome runs all of this on a
+               virtual clock, so the wait costs no real time; the
+               --virtual-time-budget the test hands Chrome has to cover it. */
+            await new Promise((done) => setTimeout(done, 45000));
 
             const report = {
                 scenario: window.SCENARIO,
                 maxConcurrentFetches: window.maxConcurrentFetches,
                 fetches: window.fetchLog.length,
+                /* Only the first request of each module - four spans, which
+                   is what both the overlap and its absence are made of. */
+                spans: window.fetchLog.slice(0, ASKERS.length)
+                    .map((entry) => `${entry.startedAt}-${entry.endedAt}`),
                 turns: Object.fromEntries(ASKERS.map((id) => [id, firstTurn(id)])),
                 lastTurns: Object.fromEntries(ASKERS.map((id) => [id, lastTurn(id)]))
             };
@@ -232,21 +282,28 @@
                        answers, so every module has to fall through to its own
                        timer. The ceiling below is the answer window plus the
                        stubbed request; anything past it means a module is
-                       waiting on a reply that is never coming. */
+                       waiting on a reply that is never coming. Spelling out
+                       FETCH_MS rather than folding it into a round number is
+                       what keeps this exactly as tight when the stub's length
+                       moves - it was `SLOT_ANSWER_MS + 1000` against a 300ms
+                       stub, which is this same number. */
                     for (const moduleId of ASKERS) {
                         const turn = report.turns[moduleId];
-                        assert(turn.cost <= SLOT_ANSWER_MS + 1000,
+                        assert(turn.cost <= SLOT_ANSWER_MS + FETCH_MS + TURN_SLACK_MS,
                             `${moduleId} waited ${turn.cost}ms on a Manager that never answered`);
                     }
 
                     /* And only once. "Proceeds immediately with no wait" is
                        the acceptance criterion, and a module that paid the
                        answer window on every request would turn a room
-                       discovery pass into a minute and a half of nothing. */
+                       discovery pass into a minute and a half of nothing. A
+                       repeat request may cost the stubbed request and nothing
+                       else; paying the answer window again would cost
+                       SLOT_ANSWER_MS more than this allows. */
                     for (const moduleId of ASKERS) {
                         const turn = report.lastTurns[moduleId];
                         if (turn.asks < 2) continue;
-                        assert(turn.cost !== null && turn.cost < SLOT_ANSWER_MS,
+                        assert(turn.cost !== null && turn.cost < FETCH_MS + TURN_SLACK_MS,
                             `${moduleId} paid the answer window again on request ${turn.asks}`
                             + ` (${turn.cost}ms), so a page with no Manager pays it every time`);
                     }
@@ -260,21 +317,44 @@
                         const turn = report.turns[moduleId];
                         assert(turn.cost > SLOT_ANSWER_MS,
                             `${moduleId} ignored the acknowledgement and went at ${turn.cost}ms`);
-                        assert(turn.cost <= SLOT_MAX_WAIT_MS + 1000,
+                        assert(turn.cost <= SLOT_MAX_WAIT_MS + FETCH_MS + TURN_SLACK_MS,
                             `${moduleId} waited ${turn.cost}ms on a Manager that never came back`);
                     }
                 }
 
                 if (window.SCENARIO === 'real') {
                     /* The acceptance criterion: with a Manager present, the
-                       modules take turns instead of firing together. */
+                       modules take turns instead of firing together.
+
+                       Shown to fail when the broker stops brokering: with the
+                       Manager's SLOT_CONCURRENCY raised from 1 to 9 and
+                       nothing else touched, this went red three times out of
+                       three at 4 overlapping requests. The same mutation
+                       against the old 300ms stub was caught at 2 - by the one
+                       pair of modules that load back to back, which is the
+                       same fragile pair the control below was relying on. So
+                       FETCH_MS is not only the control's window: it is this
+                       assertion's sensitivity too, and that is why both arms
+                       use the one constant rather than the brokered run
+                       keeping a short stub of its own. */
                     assert(window.maxConcurrentFetches === 1,
                         `${window.maxConcurrentFetches} background requests overlapped with the broker running`);
                 }
 
                 if (window.SCENARIO === 'silent') {
                     /* And the proof that the line above is worth asserting:
-                       without a broker these same four modules do collide. */
+                       without a broker these same four modules do collide.
+                       The same stub, the same FETCH_MS and the same four
+                       modules as `real` - the only difference is the broker,
+                       which is what makes the pair a comparison rather than
+                       two separate measurements.
+
+                       This is the one assertion here that can only be made
+                       true by widening a window rather than by naming a
+                       constant, so FETCH_MS carries the reasoning for how
+                       wide, and the report carries the four fetch spans so a
+                       failure says how far apart they landed instead of only
+                       that they did. */
                     assert(window.maxConcurrentFetches > 1,
                         'nothing overlapped even without a broker, so the serialisation check proves nothing');
                 }

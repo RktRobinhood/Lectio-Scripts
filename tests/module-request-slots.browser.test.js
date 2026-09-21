@@ -79,15 +79,20 @@ test('every module fetches whatever the Manager does, and takes turns when there
                 const profileDirectory = await createProfile(`lectio-module-slots-${scenario}-`);
 
                 try {
-                    /* Subject Colours does not arm a scan until 1.8s, and an
-                       acknowledged module waits out its own eight-second
-                       ceiling on top of that. Chrome runs it on a virtual
-                       clock, so a virtual minute costs about a second. */
+                    /* The budget has to cover the fixture's own observation
+                       window, which is 45s: the brokered run takes twelve
+                       stubbed requests strictly in turn, and an acknowledged
+                       module waits out its own eight-second ceiling on top of
+                       Subject Colours not arming a scan until 1.8s. Chrome
+                       runs it on a virtual clock and fast-forwards the idle
+                       stretches, so a virtual minute and a half costs a few
+                       seconds of real time - the same few seconds the 60s
+                       budget before it did. */
                     const { stdout } = await runChrome([
                         '--headless=new',
                         '--disable-gpu',
                         `--user-data-dir=${profileDirectory}`,
-                        '--virtual-time-budget=60000',
+                        '--virtual-time-budget=90000',
                         '--dump-dom',
                         `http://127.0.0.1:${port}${PAGE_PATH}?scenario=${scenario}`
                     ], { maxBuffer: 64 * 1024 * 1024, env: chromeEnvironment(profileDirectory) });
