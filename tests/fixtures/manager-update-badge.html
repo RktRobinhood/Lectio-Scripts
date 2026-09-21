@@ -38,17 +38,59 @@
 
         // One module installed and already current: installed modules exist, so
         // an empty badge here is "nothing to update", not "nothing to compare".
+        //
+        // And a stored problem log that has been read in full - one entry a
+        // module owns, one the Manager could not attribute, and a seen marker
+        // newer than both. Issue #62 reported the problem mark flashing on
+        // the gear on a page refresh with nothing unread; the observer below
+        // watches the gear from before the Manager runs, so a mark that is
+        // drawn and then taken back is caught rather than missed.
+        const readLog = [
+            { at: Date.now() - 7200000, kind: 'drift', moduleId: 'current', code: 'lesson-blocks',
+                found: 0, message: '', where: 'other', count: 3 },
+            { at: Date.now() - 7200000, kind: 'error', moduleId: '', code: 'uncaught',
+                found: null, message: 'TypeError: <text>', where: 'other', count: 1 }
+        ];
+
         const storage = new Map([
             ['lectioManager.catalogue.v1', JSON.stringify(catalogue)],
             ['lectioManager.lastRefresh.v1', Date.now()],
             ['lectioManager.updateTipDismissed.v1', true],
             ['lectioManager.installed.v1', JSON.stringify({
                 current: { name: 'Current', version: '2.0.0', lastSeenAt: Date.now() - 60000 }
-            })]
+            })],
+            ['lectioManager.log.v1', JSON.stringify(readLog)],
+            ['lectioManager.logSeen.v1', Date.now() - 3600000]
         ]);
 
         window.GM_getValue = (key, fallback) => storage.has(key) ? storage.get(key) : fallback;
         window.GM_setValue = (key, value) => storage.set(key, value);
+
+        // Every value the gear's class attribute has held, from its insertion
+        // on. A --dump-dom sees only the final DOM; a transient mark is exactly
+        // what it cannot see, and what this records. The records are delivered
+        // after the Manager's boot has run to completion, so what a record
+        // carries is the value *before* each change (attributeOldValue) - the
+        // one a live read would already have lost - and a class the gear was
+        // inserted with and then stripped shows up as the old value of the
+        // change that stripped it.
+        window.gearStates = [];
+        new MutationObserver((records) => {
+            for (const record of records) {
+                if (record.type === 'childList') {
+                    for (const node of record.addedNodes) {
+                        const gear = node.id === 'lectio-manager-toggle'
+                            ? node
+                            : node.querySelector?.('#lectio-manager-toggle');
+                        if (gear) window.gearStates.push('inserted');
+                    }
+                } else if (record.target.id === 'lectio-manager-toggle' && record.attributeName === 'class') {
+                    window.gearStates.push(`class:${record.oldValue ?? ''}>${record.target.className}`);
+                }
+            }
+        }).observe(document.documentElement, {
+            subtree: true, childList: true, attributes: true, attributeOldValue: true
+        });
         // No network at all, in either direction: the badge must not cause one.
         let networkCalls = 0;
         window.GM_xmlhttpRequest = () => { networkCalls += 1; };
@@ -89,6 +131,15 @@
                 assert(badge() === null, `A badge appeared with nothing to update: ${badge()}`);
                 assert(label() === 'Lectio Tools', `The gear's name changed with nothing to update: ${label()}`);
                 assert(!document.querySelector('[data-dock-key]'), 'The update badge put something in the dock');
+
+                // 1b. Nothing unread either, at any point: the stored log has
+                //     been read in full, so the problem mark must never have
+                //     been drawn - not even for the instant between the gear
+                //     being built and its state being known (issue #62).
+                assert(window.gearStates.length > 0, 'The observer never saw the gear being built');
+                assert(!window.gearStates.some((state) => state.includes('has-problems')),
+                    `The gear carried a problem mark with nothing unread: ${window.gearStates.join(', ')}`);
+                assert(!gear.classList.contains('has-problems'), 'The gear shows a problem mark with nothing unread');
 
                 // 2. One update, with the panel still never opened. This is the
                 //    whole point: the count is state, not rendered panel DOM.
@@ -220,6 +271,35 @@
                 assert(networkCalls === 0, `The badge caused ${networkCalls} network requests`);
                 assert(window.pageErrors.length === 0,
                     `The update badge threw: ${window.pageErrors.join(' | ')}`);
+
+                // 11. The mark follows the log's read state, not this page's
+                //     memory of it (issue #62). A page cannot read the log by
+                //     itself, so the marker moving under it means another
+                //     Lectio tab opened the log - or this page is back from
+                //     the bfcache and the log was read while it was away. The
+                //     mark from step 5 is still up; the marker advances as the
+                //     other tab's Manager would advance it; and the moment
+                //     this page is looked at again, the mark is gone, without
+                //     waiting for a reload.
+                assert(gear.classList.contains('has-problems'), 'The problem mark from step 5 was lost');
+                storage.set('lectioManager.logSeen.v1', Date.now());
+                document.dispatchEvent(new Event('visibilitychange'));
+                assert(!gear.classList.contains('has-problems'),
+                    'The gear kept a problem mark the log had been read out from under');
+                assert(!label().includes('problem'),
+                    `The gear's name kept a stale problem count: ${label()}`);
+
+                // 11b. And it goes on being one signal: a report after that
+                //      marks the gear again, so this is a fresh read of the
+                //      marker and not the mark being switched off for good.
+                //      Spun rather than awaited, because --dump-dom prints the
+                //      page at load and a timer here would land after it; the
+                //      marker and the report must not share a millisecond.
+                for (const until = Date.now() + 2; Date.now() < until;) { /* wait */ }
+                window.dispatchEvent(new CustomEvent('lectio-module:report', {
+                    detail: { moduleId: 'alpha', kind: 'drift', code: 'room-links', found: 0 }
+                }));
+                assert(gear.classList.contains('has-problems'), 'A report after the marker moved did not mark the gear');
 
                 document.documentElement.dataset.testResult = 'pass';
             } catch (error) {

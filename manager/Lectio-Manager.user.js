@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.31.1
+// @version      1.31.2
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules, including their settings and shared dock controls.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
@@ -402,7 +402,7 @@
     // Kept in step with the @version header by scripts/check-versions.mjs. The
     // header is metadata Tampermonkey reads; this is the only copy the running
     // script can see, and it is what the self-update notice compares.
-    const MANAGER_VERSION = '1.31.1';
+    const MANAGER_VERSION = '1.31.2';
 
     const STABLE_CATALOGUE_URL =
         'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/catalogue/modules.json';
@@ -798,6 +798,12 @@
         window.addEventListener(DOCK_UPDATE_EVENT, handleDockUpdate);
         window.addEventListener(DOCK_REMOVE_EVENT, handleDockRemove);
         window.addEventListener('resize', updateDockFit, { passive: true });
+        // The gear is recomputed when this page comes back into view, because
+        // that is when a mark the log was read out from under (issue #62,
+        // see unseenLogCount) would otherwise sit stale until a reload. Two
+        // listeners for the life of the page, never re-added.
+        document.addEventListener('visibilitychange', handleVisibilityReturn);
+        window.addEventListener('pageshow', handleVisibilityReturn);
         requestDiscovery();
 
         const stableAge = Date.now() - lastRefresh;
@@ -2032,10 +2038,43 @@
     }
 
     function unseenLogCount() {
+        const log = loadProblemLog();
+
+        /*
+         * The seen marker is read back from storage every time rather than
+         * kept from the first read (issue #62). A page cannot mark the log as
+         * read by itself, so the only way its copy of the marker goes stale
+         * is another Lectio tab - or this page's earlier life, before a
+         * bfcache restore - reading or clearing the log. Until then this
+         * page's gear kept the mark, and on the next reload the fresh marker
+         * put it out: a stale mark that lasts exactly as long as the reload,
+         * which is the flash that was reported. GM_getValue is a synchronous
+         * cache read that Tampermonkey keeps current across tabs, so the
+         * marker costs nothing to consult; the newer of the two copies wins
+         * in case a write of this page's own failed.
+         */
+        let storedSeenAt = 0;
+
+        try {
+            storedSeenAt = Number(GM_getValue(STORAGE_LOG_SEEN, 0)) || 0;
+        } catch (_) {
+            // A marker that cannot be read leaves this page's own copy in charge.
+        }
+
+        logSeenAt = Math.max(logSeenAt || 0, storedSeenAt);
+
         // Only what this project is answerable for nags. An uncaught error is
         // still recorded, but the Manager cannot tell whose script threw it -
         // Lectio's own included - so it does not put a mark on the gear.
-        return loadProblemLog().filter((entry) => entry.moduleId && entry.at > (logSeenAt || 0)).length;
+        return log.filter((entry) => entry.moduleId && entry.at > logSeenAt).length;
+    }
+
+    // Also the bfcache restore case: a page put back the way it was shows the
+    // gear the way it was, and the log may have been read in the meantime.
+    function handleVisibilityReturn() {
+        if (document.visibilityState === 'hidden') return;
+        updateLauncherIndicators();
+        renderLogUnseenCount();
     }
 
     function markLogSeen() {
