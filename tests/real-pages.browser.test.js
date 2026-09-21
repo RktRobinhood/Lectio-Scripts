@@ -1144,3 +1144,61 @@ test('Unread Message Notifications reads 4 unread off the real Forside without f
 
     assert.equal(result, 'pass', detail || result || 'no result reported');
 });
+
+// Issue #68: English Mode translates data-tooltip now, and the timetable's
+// lesson blocks carry that attribute in the Danish shape Chairs Up, Subject
+// Colours and Change Radar parse. Run it over the real week and require every
+// block's tooltip to be exactly what the page was served with.
+test('English Mode leaves every lesson block tooltip on the real week untouched', async () => {
+    const { result, detail } = await runAgainstPage({
+        page: 'skemany.html',
+        path: '/lectio/223/SkemaNy.aspx',
+        prelude: `
+            // The GM_* grants English Mode runs under, with the switch on EN
+            // and a fallback that never answers, so anything that changes
+            // was changed by the module's own local pass.
+            window.GM_getValue = (key, fallback) => key === 'lectioEnglish.mode' ? 'en' : fallback;
+            window.GM_setValue = () => {};
+            window.GM_xmlhttpRequest = () => {};
+            window.__tooltipWrites = [];
+            new MutationObserver((records) => {
+                for (const record of records) {
+                    window.__tooltipWrites.push({
+                        block: !!record.target.closest('.s2skemabrik, .s2brik, [data-lectiocontextcard]'),
+                        from: record.oldValue,
+                        to: record.target.getAttribute('data-tooltip')
+                    });
+                }
+            }).observe(document.documentElement, {
+                subtree: true, attributes: true, attributeOldValue: true, attributeFilter: ['data-tooltip']
+            });
+        `,
+        modules: ['/modules-unstable/Lectio-English-Mode.user.js'],
+        postlude: `${REPORTER}
+            setTimeout(async () => {
+                check(document.documentElement.lang === 'en', 'English Mode did not switch the page to en');
+                check([...document.querySelectorAll('a')].some((link) => link.textContent.trim() === 'Messages'),
+                    'English Mode translated nothing on the real week (no Messages link)');
+
+                // The served page, parsed again without any script running.
+                const served = new DOMParser().parseFromString(await (await fetch(location.pathname)).text(), 'text/html');
+                const before = [...served.querySelectorAll('.s2skemabrik[data-tooltip]')].map((element) => element.getAttribute('data-tooltip'));
+                const after = [...document.querySelectorAll('.s2skemabrik[data-tooltip]')].map((element) => element.getAttribute('data-tooltip'));
+
+                check(before.length === 29, 'expected 29 lesson blocks in the served page, got ' + before.length);
+                check(after.length === before.length, 'expected ' + before.length + ' lesson blocks after English Mode, got ' + after.length);
+                before.forEach((tooltip, index) => {
+                    check(after[index] === tooltip, 'lesson block ' + index + ' tooltip changed: ' + JSON.stringify(after[index]));
+                });
+
+                const blockWrites = window.__tooltipWrites.filter((write) => write.block);
+                check(blockWrites.length === 0,
+                    'data-tooltip was written on a lesson block: ' + JSON.stringify(blockWrites.slice(0, 3)));
+
+                publish();
+            }, 4000);
+        `
+    });
+
+    assert.equal(result, 'pass', detail || result || 'no result reported');
+});

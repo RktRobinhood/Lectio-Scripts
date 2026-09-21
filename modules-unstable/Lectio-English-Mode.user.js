@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio English Mode
 // @namespace    lectio-english-mode
-// @version      1.11.4
+// @version      1.11.5
 // @description  Context-aware English layer for Lectio with instant core UI translation, persistent cache and Google fallback.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-start
@@ -66,7 +66,7 @@
     (function registerWithLectioManager() {
         const MODULE_ID = 'english-mode';
         const MODULE_NAME = 'Lectio English Mode';
-        const MODULE_VERSION = '1.11.4';
+        const MODULE_VERSION = '1.11.5';
 
         /*
          * The settings panel's own words, in both languages (ADR-0013). The
@@ -2442,14 +2442,27 @@
                 );
         }
 
+        /*
+         * A weekday abbreviation before a date, at the start of the
+         * string and after " - ", so the Study Plan calendar's week
+         * range "ma 6/7-26 - sø 12/7-26" comes out "Mon 6/7-26 - Sun
+         * 12/7-26" rather than stopping at the first day (issue #68).
+         */
         result =
             result.replace(
-                /^([A-Za-zÆØÅæøå]{2,3})(?=\s+\d{1,2}\/\d{1,2})/i,
-                match =>
-                    SHORT_DAYS[
-                        match.toLowerCase()
-                    ] ||
-                    match
+                /(^| - )([A-Za-zÆØÅæøå]{2,3})(?=\s+\d{1,2}\/\d{1,2})/gi,
+                (
+                    _,
+                    lead,
+                    day
+                ) =>
+                    lead +
+                    (
+                        SHORT_DAYS[
+                            day.toLowerCase()
+                        ] ||
+                        day
+                    )
             );
 
         result =
@@ -4122,7 +4135,77 @@
             );
         }
 
+        processTooltip(element);
         processInput(element);
+    }
+
+    /*
+     * Lectio's own hover text is a data-tooltip attribute, and on
+     * the Study Plan calendar it is the only text of the cell
+     * ("ma 6/7-26 - sø 12/7-26" on div.columnContainer, "2i
+     * Aktivitet" on the column headers). It is translated in place
+     * like a title, with one exception: a timetable lesson block.
+     * Chairs Up, Subject Colours and Change Radar parse that
+     * attribute as Danish - the "Hold:" and "Lokale(r):" lines, an
+     * "Aflyst!" prefix - and a lesson block is what carries it on
+     * SkemaNy, Forside and the absence page (AGENTS.md, "Timetable
+     * lesson elements"; ADR-0011 on who owns a block). So a block,
+     * anything inside one, and any tooltip shaped like a block's
+     * are left byte-identical, whatever page they are on. The
+     * class check runs only on an element that carries the
+     * attribute, never per text node (issue #68).
+     *
+     * The MutationObserver watches childList only, so a tooltip
+     * Lectio rewrites on an existing element is picked up by the
+     * next uiRepair() pass, the same as a rewritten title.
+     */
+    const LESSON_BLOCK_SELECTOR =
+        '.s2skemabrik, ' +
+        '.s2brik, ' +
+        '[data-lectiocontextcard]';
+
+    const LESSON_TOOLTIP_START =
+        /^\s*Aflyst!/;
+
+    const LESSON_TOOLTIP_LINE =
+        /^\s*(?:Hold|Lokale(?:r|\(r\))?|Lærer(?:e|\(e\))?)\s*:/m;
+
+    function isLessonTooltip(element) {
+        if (
+            element.closest(
+                LESSON_BLOCK_SELECTOR
+            )
+        ) {
+            return true;
+        }
+
+        const text =
+            element.getAttribute(
+                'data-tooltip'
+            ) || '';
+
+        return (
+            LESSON_TOOLTIP_START
+                .test(text) ||
+            LESSON_TOOLTIP_LINE
+                .test(text)
+        );
+    }
+
+    function processTooltip(element) {
+        if (
+            !element.hasAttribute(
+                'data-tooltip'
+            ) ||
+            isLessonTooltip(element)
+        ) {
+            return;
+        }
+
+        processAttr(
+            element,
+            'data-tooltip'
+        );
     }
 
     /*

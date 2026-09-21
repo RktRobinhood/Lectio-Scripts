@@ -110,6 +110,22 @@
     <img id="unmark" alt="Afmarkér alle">
     <span id="no-credit">Der er ingen lærere at kreditere</span>
 
+    <!--
+        Issue #68: data-tooltip. The Study Plan calendar's week cell and
+        column header carry their only text in that attribute and must be
+        translated; a timetable lesson block (the SkemaNy shape, tooltip
+        verbatim), the decoration Lectio hangs .s2skemabrik on, anything
+        inside a block and a cancelled tooltip outside any block are left
+        byte-identical, because other modules parse them as Danish. The
+        guarded ones deliberately carry a word the dictionary would
+        translate on its own, so a guard that stops working shows.
+    -->
+    <div id="sp-week" class="columnContainer" data-tooltip="ma 6/7-26 - sø 12/7-26">6/7</div>
+    <div id="sp-header" class="columnContainer" data-tooltip="2i Aktivitet">2i</div>
+    <a id="lesson" class="s2skemabrik s2brik" data-tooltip="7/9-2026 08:15 til 09:25&#10;Hold: 1a Fag1&#10;Lokale(r): 205"><span id="lesson-inner" data-tooltip="Aktivitet"><span data-lectioContextCard="HE1000001">1a Fag1</span></span></a>
+    <div id="decoration" class="prepend-fonticon-activity s2skemabrik" data-tooltip="Aktivitet"></div>
+    <span id="cancelled-tip" data-tooltip="Aflyst! Aktivitet">Aflyst</span>
+
     <pre id="detail"></pre>
 
     <script src="/modules-unstable/Lectio-English-Mode.user.js"></script>
@@ -129,6 +145,7 @@
         }
         const text = (id) => document.getElementById(id).textContent.trim();
         const titleOf = (id) => document.getElementById(id).getAttribute('title');
+        const tooltipOf = (id) => document.getElementById(id).getAttribute('data-tooltip');
         const shortcut = (id) => document.getElementById(id).querySelector('.shortcutletter').textContent;
 
         function check() {
@@ -204,6 +221,24 @@
             assert(text('version-link') === 'Lectio version 24.035', `version line: "${text('version-link')}"`);
             assert(text('mere') === 'More', `Mere: "${text('mere')}"`);
             assert(text('tidsreg') === 'Time reg.', `Tidsreg.: "${text('tidsreg')}"`);
+
+            // 13. Issue #68: data-tooltip translated on the Study Plan cells, and only there.
+            assert(tooltipOf('sp-week') === 'Mon 6/7-26 - Sun 12/7-26', `Study Plan week cell: "${tooltipOf('sp-week')}"`);
+            assert(tooltipOf('sp-header') === '2i Activity', `Study Plan column header: "${tooltipOf('sp-header')}"`);
+            checkLessonTooltips();
+        }
+
+        // The tooltips other modules parse, byte for byte as they were served.
+        const LESSON_TOOLTIPS = [
+            ['lesson', '7/9-2026 08:15 til 09:25\nHold: 1a Fag1\nLokale(r): 205'],
+            ['decoration', 'Aktivitet'],
+            ['lesson-inner', 'Aktivitet'],
+            ['cancelled-tip', 'Aflyst! Aktivitet']
+        ];
+        function checkLessonTooltips() {
+            for (const [id, original] of LESSON_TOOLTIPS) {
+                assert(tooltipOf(id) === original, `lesson block tooltip changed (#${id}): "${tooltipOf(id)}"`);
+            }
         }
 
         function checkNearMisses() {
@@ -242,10 +277,16 @@
                 'Arbejde: 232,7, Barns sygdom: 7,4, Ferie: 185,0, Sygdom: 14,8', 'Timer uden ferie/helligdage: 254,9',
                 'Registreret: 439,9 Forventet: 429,2 Saldo: 10,7', 'Dagsnorm: 7,4', 'Budgetterede timer: 0 + 0 Realiserede timer: 4,4 + 0 + 0',
                 'Lærerkred. - Summen af afholdte og planlagte moduler med læreren.', '21/9-2026 kl. 21:00', 'Lectio version 24.035',
-                'Mere', 'Tidsreg.', 'Hurtignavigering', 'Se versioninformation', 'Afmarkér alle', 'Der er ingen lærere at kreditere'
+                'Mere', 'Tidsreg.', 'Hurtignavigering', 'Se versioninformation', 'Afmarkér alle', 'Der er ingen lærere at kreditere',
+                // Issue #68: the Study Plan week range resolves locally.
+                'ma 6/7-26 - sø 12/7-26'
             ];
             for (const source of shouldStayLocal) {
                 assert(!window.googleRequests.includes(source), `sent to the fallback instead of resolving locally: "${source}"`);
+            }
+            // Issue #68: a lesson block's tooltip is never read, so nothing of its shape is ever sent.
+            for (const source of window.googleRequests) {
+                assert(!/Hold:|Lokale|Aflyst!/.test(source), `a lesson block tooltip was sent to the fallback: "${source}"`);
             }
         }
 

@@ -135,3 +135,29 @@ test('a copy whose label-before-figure rule no longer looks labels up is caught'
     assert.match(result, /^fail/, `the mutated module passed the fixture: ${detail}`);
     assert.match(detail, /Time Tracking breakdown: "Arbejde: 232,7/, detail);
 });
+
+// Issue #68 (a): the lesson-block guard removed, so data-tooltip is translated
+// everywhere it appears. The SkemaNy-shaped block's "Hold:" line is what the
+// other modules parse, and the fixture must name that block as changed.
+test('a copy that translates data-tooltip on lesson blocks too is caught', async () => {
+    const { result, detail } = await runPatternFixture(replacing(
+        'isLessonTooltip(element)\n        ) {\n            return;',
+        'false\n        ) {\n            return;'
+    ));
+
+    assert.match(result, /^fail/, `the mutated module passed the fixture: ${detail}`);
+    assert.match(detail, /lesson block tooltip changed \(#lesson\): "/, detail);
+});
+
+// Issue #68 (b): the data-tooltip pass removed altogether, back to 1.11.4. The
+// Study Plan week cell has no other text, so it stays Danish and the fixture
+// must name it.
+test('a copy that never reads data-tooltip is caught', async () => {
+    const { result, detail } = await runPatternFixture(replacing(
+        'processTooltip(element);',
+        ';'
+    ));
+
+    assert.match(result, /^fail/, `the mutated module passed the fixture: ${detail}`);
+    assert.match(detail, /Study Plan week cell: "ma 6\/7-26 - sø 12\/7-26"/, detail);
+});
