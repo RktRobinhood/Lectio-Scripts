@@ -2,13 +2,13 @@
   "schemaVersion": 1,
   "generatedAt": "2026-09-20T18:00:00Z",
   "manager": {
-    "version": "1.31.3",
-    "changelog": "The button that installs an experimental module now just says Install, like the one for a stable module: the Experimental tag on the card already says which kind it is.",
+    "version": "1.31.4",
+    "changelog": "Danish wording tidied: the dock is now called Dock, the Problem log is Problemlog, a notice is a Bemærkning, the Manager's own preferences have one name, and the line about a channel's target version reads as a sentence.",
     "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/manager/Lectio-Manager.user.js",
     "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
     "i18n": {
       "da": {
-        "changelog": "Knappen, der installerer et eksperimentelt modul, siger nu bare Installer ligesom knappen til et stabilt modul: mærkatet Eksperimentel på kortet siger allerede, hvilken slags det er."
+        "changelog": "Dansk sprog rettet til: docken hedder nu Dock, Fejllog hedder Problemlog, en note hedder Bemærkning, Managerens egne indstillinger har ét navn, og linjen om en kanals målversion er nu en sætning."
       }
     }
   },

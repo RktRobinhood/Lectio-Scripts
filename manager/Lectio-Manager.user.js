@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.31.3
+// @version      1.31.4
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules, including their settings and shared dock controls.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
@@ -200,14 +200,14 @@
         },
         da: {
             appTitle: 'Lectio Tools',
-            settingsBtn: 'Indstillinger for Manager',
-            settingsBtnChannel: (channel) => `Indstillinger for Manager — kanal: ${channel}`,
+            settingsBtn: 'Manager-indstillinger',
+            settingsBtnChannel: (channel) => `Manager-indstillinger — kanal: ${channel}`,
             helpBtn: 'Sådan slår du et script fra, opdaterer eller fjerner det',
             refreshBtn: 'Opdater kataloget',
             close: 'Luk',
             closePanel: 'Luk panelet',
             dockToolbar: 'Lectio-værktøjer',
-            dockPanel: 'Dokpanel',
+            dockPanel: 'Dockpanel',
             dockItemWithBadge: (label, badge) => `${label}, ${badge} notifikationer`,
             dockBadge: (badge) => `${badge} notifikationer`,
             language: 'Sprog',
@@ -219,7 +219,7 @@
             unstableNote: 'Eksperimentel tilbyder også moduler, der stadig er under udvikling og test. At skifte kanal ændrer kun, hvad Manageren tilbyder dig. Den installerer, deaktiverer eller fjerner aldrig et userscript af sig selv.',
             stable: 'Stabil',
             unstable: 'Eksperimentel',
-            dock: 'Dok',
+            dock: 'Dock',
             screenEdge: 'Skærmkant',
             positionOnEdge: 'Placering på kanten',
             iconSize: 'Ikonstørrelse',
@@ -233,12 +233,12 @@
             sizeSmall: 'Lille',
             sizeNormal: 'Normal',
             sizeLarge: 'Stor',
-            dockOpacity: 'Dokkens baggrund',
+            dockOpacity: 'Dockens baggrund',
             itemOpacity: 'Ikonernes baggrund',
             shrinkToFit: 'Formindsk ikoner, så de passer til skærmen',
             autoHide: 'Skjul automatisk, indtil musen eller fokus er på den',
-            resetDockOrder: 'Nulstil dokkens rækkefølge',
-            dockWarning: 'Dokken vises kun, når et modul bruger den. Træk et ikon, eller hold Ctrl nede og brug piletasterne, for at ændre rækkefølgen.',
+            resetDockOrder: 'Nulstil dockens rækkefølge',
+            dockWarning: 'Docken vises kun, når et modul bruger den. Træk et ikon, eller hold Ctrl nede og brug piletasterne, for at ændre rækkefølgen.',
             helpPanel: 'Manageren viser tilgængelige modulopdateringer og åbner Tampermonkeys egen bekræftelsesside. For at slå et script fra, tjekke manuelt eller fjerne det skal du klikke på Tampermonkey-ikonet i browserens værktøjslinje og vælge <strong>Dashboard</strong>.',
             updateTip: 'Få automatiske opdateringer: åbn Tampermonkey → Indstillinger → slå "Check for updates" til.',
             dismissTip: 'Skjul tippet',
@@ -272,8 +272,8 @@
             noneMatch: 'Ingen tilgængelige moduler matcher dette filter.',
             updateAvailable: (version, installed) => `Opdatering tilgængelig: v${version} (installeret v${installed})`,
             whatsNew: 'Nyt i denne version:',
-            channelTarget: (channel, version, installed) => `${channel} mål: v${version} (installeret v${installed})`,
-            selectedTarget: 'Valgt',
+            channelTarget: (channel, version, installed) => `Mål for ${channel}: v${version} (installeret v${installed})`,
+            selectedTarget: 'den valgte kanal',
             lastRefreshed: (time) => `Sidst opdateret: ${time}`,
             neverRefreshed: 'ikke opdateret endnu',
             refreshedJustNow: 'Kataloget er lige opdateret',
@@ -283,7 +283,7 @@
             choose: 'Vælg',
             run: 'Kør',
             reportIssue: 'Rapportér en fejl eller idé',
-            problemLog: 'Fejllog',
+            problemLog: 'Problemlog',
             problemLogEmpty: 'Der er ikke registreret noget i denne browser.',
             problemLogHelp: 'Gemmes kun i denne browser og sendes aldrig nogen steder hen. Navne, beskedtekst og webadresser fjernes, mens loggen skrives, men læs den igennem, før du indsætter den i en fejlrapport.',
             problemLogCopy: 'Kopiér rapport',
@@ -294,7 +294,7 @@
             updatesWaiting: (count) => count === 1 ? '1 opdatering tilgængelig' : `${count} opdateringer tilgængelige`,
             logKindError: 'Fejl',
             logKindDrift: 'Ikke fundet',
-            logKindNotice: 'Note',
+            logKindNotice: 'Bemærkning',
             logDrift: (code, found) => `ledte efter ${code}, fandt ${found}`,
             logRepeated: (count) => `×${count}`,
             logManager: 'Lectio Manager',
@@ -315,7 +315,7 @@
             storageClearLabel: (what) => `Ryd ${what}`,
             storageRecheck: 'Tjek igen',
             settingsFile: 'Sikkerhedskopi og deling',
-            settingsFileHelp: 'En indstillingsfil indeholder de valg, du har truffet: dine Manager-indstillinger og indstillingerne for hvert modul, der kører på denne side. Den indeholder ingen adgangskoder og intet fra Lectio selv, men den kan nævne din skole og de farver og valg, du har foretaget, så læs den, før du sender den til nogen. Den kan ikke indeholde et baggrundsbillede fra Theming, en fejllog eller noget, et modul har lært eller gemt i cache.',
+            settingsFileHelp: 'En indstillingsfil indeholder de valg, du har truffet: dine Manager-indstillinger og indstillingerne for hvert modul, der kører på denne side. Den indeholder ingen adgangskoder og intet fra Lectio selv, men den kan nævne din skole og de farver og valg, du har foretaget, så læs den, før du sender den til nogen. Den kan ikke indeholde et baggrundsbillede fra Theming, en problemlog eller noget, et modul har lært eller gemt i cache.',
             settingsFileExport: 'Gem en indstillingsfil',
             settingsFileCopy: 'Kopiér',
             settingsFileCopied: 'Kopieret',
@@ -367,7 +367,6 @@
             Interface: 'Brugerflade',
             Timetable: 'Skema',
             Messages: 'Beskeder',
-            Schedule: 'Skema',
             Testing: 'Test',
             General: 'Generelt',
             student: 'elev',
@@ -398,7 +397,7 @@
     // Kept in step with the @version header by scripts/check-versions.mjs. The
     // header is metadata Tampermonkey reads; this is the only copy the running
     // script can see, and it is what the self-update notice compares.
-    const MANAGER_VERSION = '1.31.3';
+    const MANAGER_VERSION = '1.31.4';
 
     const STABLE_CATALOGUE_URL =
         'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/catalogue/modules.json';
