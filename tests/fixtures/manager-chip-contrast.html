@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio Manager count-chip contrast fixture</title>
+</head>
+<body>
+    <script>
+        // Issue #56. Both count chips - the update count on the gear and the
+        // unseen count on the Problem log summary - are a ringed pill filled
+        // with the theme's surface colour. Until 1.30.1 each drew its numeral
+        // in the colour of its own ring (accent, danger), a pairing no theme
+        // is designed around: across Lectio Theming's palettes the update
+        // numeral fell to 2.53:1 and the problem numeral to 2.46:1, against a
+        // 4.5:1 threshold for 12px bold text.
+        //
+        // This walks every palette Lectio Theming offers - read off the module's
+        // own registered preset list, so a theme added later is covered without
+        // anyone remembering this file - applies it for real, and measures what
+        // Chrome actually resolves for the two chips. It also holds the chip
+        // geometry from #50 still, since the fix is a colour change and must
+        // stay one.
+        const catalogue = {
+            schemaVersion: 1,
+            generatedAt: '2026-09-20T00:00:00.000Z',
+            manager: {
+                version: '1.0.0',
+                installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/manager/Lectio-Manager.user.js'
+            },
+            modules: ['alpha', 'beta', 'gamma'].map((id) => ({
+                id,
+                name: id[0].toUpperCase() + id.slice(1),
+                description: `Catalogue entry for ${id}.`,
+                category: 'Interface',
+                audience: ['student'],
+                status: 'stable',
+                version: '2.0.0',
+                installUrl: `https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/${id}.user.js`
+            }))
+        };
+
+        const storage = new Map([
+            ['lectioManager.catalogue.v1', JSON.stringify(catalogue)],
+            ['lectioManager.lastRefresh.v1', Date.now()],
+            ['lectioManager.updateTipDismissed.v1', true]
+        ]);
+
+        window.GM_getValue = (key, fallback) => storage.has(key) ? storage.get(key) : fallback;
+        window.GM_setValue = (key, value) => storage.set(key, value);
+        window.GM_xmlhttpRequest = () => {};
+
+        window.pageErrors = [];
+        window.addEventListener('error', (event) => window.pageErrors.push(String(event.message)));
+
+        window.registrations = new Map();
+        window.addEventListener('lectio-module:register', (event) => {
+            window.registrations.set(event.detail.id, event.detail);
+        });
+    </script>
+    <script src="../../modules/Lectio-Theming.user.js"></script>
+    <script src="../../manager/Lectio-Manager.user.js"></script>
+    <script>
+        function assert(condition, message) {
+            if (!condition) throw new Error(message);
+        }
+
+        const tick = () => new Promise((done) => setTimeout(done, 0));
+
+        /* Chrome serialises a themed colour as rgb()/rgba(), a color-mix() as
+           color(srgb ...) and an oklch() as oklab(...), so all three have to
+           come back as plain 0-255 channels before anything is computed. */
+        function toRgb(value) {
+            const srgb = value.match(/^color\(srgb ([\d.-]+) ([\d.-]+) ([\d.-]+)(?: \/ [\d.]+)?\)$/);
+            if (srgb) return [srgb[1], srgb[2], srgb[3]].map(Number).map((c) => Math.min(255, Math.max(0, c * 255)));
+
+            const oklab = value.match(/^oklab\(([\d.-]+%?) ([\d.-]+) ([\d.-]+)(?: \/ [\d.]+)?\)$/);
+            if (oklab) {
+                const L = oklab[1].endsWith('%') ? Number.parseFloat(oklab[1]) / 100 : Number(oklab[1]);
+                const a = Number(oklab[2]);
+                const b = Number(oklab[3]);
+                const l_ = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3;
+                const m_ = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3;
+                const s_ = (L - 0.0894841775 * a - 1.2914855480 * b) ** 3;
+                return [
+                    +4.0767434036 * l_ - 3.3077115913 * m_ + 0.2309699292 * s_,
+                    -1.2684380046 * l_ + 2.6097574011 * m_ - 0.3413193965 * s_,
+                    -0.0041960863 * l_ - 0.7034186147 * m_ + 1.7076147010 * s_
+                ].map((channel) => {
+                    const clamped = Math.min(1, Math.max(0, channel));
+                    const encoded = clamped <= 0.0031308
+                        ? clamped * 12.92
+                        : 1.055 * clamped ** (1 / 2.4) - 0.055;
+                    return encoded * 255;
+                });
+            }
+
+            const rgba = value.match(/^rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)$/);
+            if (rgba) {
+                assert(rgba[4] === undefined || Number(rgba[4]) === 1,
+                    `A chip colour is translucent, so nothing can be measured against it: ${value}`);
+                return [rgba[1], rgba[2], rgba[3]].map(Number);
+            }
+
+            throw new Error(`Unsupported colour value: ${value}`);
+        }
+
+        function relativeLuminance(rgb) {
+            const channels = rgb.map((channel) => channel / 255)
+                .map((channel) => channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4);
+            return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+        }
+
+        function contrastRatio(first, second) {
+            const values = [relativeLuminance(first), relativeLuminance(second)];
+            return (Math.max(...values) + 0.05) / (Math.min(...values) + 0.05);
+        }
+
+        function distance(first, second) {
+            return Math.hypot(...first.map((value, index) => value - second[index]));
+        }
+
+        const round = (value) => Math.round(value * 100) / 100;
+
+        window.addEventListener('load', async () => {
+            try {
+                const theming = window.registrations.get('lectio-theming');
+                assert(theming, 'Lectio Theming did not register, so there are no palettes to walk');
+
+                /* The list of palettes is the module's own: the options of the
+                   preset control it registers. Nothing here parses the theme
+                   table, so a palette added to Lectio Theming later is walked
+                   by this test the day it lands. */
+                const presetControl = theming.settingsSchema.find((control) => control.key === 'preset');
+                assert(presetControl && Array.isArray(presetControl.options),
+                    'Lectio Theming no longer registers a preset control with options');
+
+                const themes = presetControl.options
+                    .map((option) => option.value)
+                    .filter((value) => value !== 'custom');
+                assert(themes.length >= 40,
+                    `Only ${themes.length} palettes were found, so the walk is not covering the theme list`);
+
+                const gear = document.querySelector('#lectio-manager-toggle');
+                assert(gear, 'The gear was not built');
+
+                /* Something to count on each chip: three outdated modules for
+                   the gear, one recorded problem for the summary. */
+                for (const id of ['alpha', 'beta', 'gamma']) {
+                    window.dispatchEvent(new CustomEvent('lectio-module:register', {
+                        detail: { id, name: id, version: '1.0.0', settingsSchema: [] }
+                    }));
+                }
+                window.dispatchEvent(new CustomEvent('lectio-module:report', {
+                    detail: { moduleId: 'alpha', kind: 'drift', code: 'lesson-blocks', found: 0 }
+                }));
+
+                /* The log lives in the header's preferences flyout, which has
+                   to be open for the summary to be on screen at all. The
+                   section itself stays collapsed - opening it is what marks
+                   the entries seen and takes the count away. */
+                gear.click();
+                document.querySelector('.lectio-manager-channel-btn').click();
+                await tick();
+
+                const logChip = document.querySelector('.lectio-manager-log-unseen');
+                assert(logChip && !logChip.hidden, 'The Problem log summary chip is not showing a count');
+                assert(gear.getAttribute('data-update-count') === '3',
+                    `The gear is not showing a count: ${gear.getAttribute('data-update-count')}`);
+
+                const setSetting = (key, value) => window.dispatchEvent(new CustomEvent(
+                    'lectio-manager:set-setting',
+                    { detail: { id: 'lectio-theming', key, value } }
+                ));
+
+                const chips = () => {
+                    const update = getComputedStyle(gear, '::before');
+                    const log = getComputedStyle(logChip);
+                    return {
+                        update: {
+                            ink: toRgb(update.color),
+                            fill: toRgb(update.backgroundColor),
+                            ring: toRgb(update.borderTopColor)
+                        },
+                        log: {
+                            ink: toRgb(log.color),
+                            fill: toRgb(log.backgroundColor),
+                            ring: toRgb(log.borderTopColor)
+                        }
+                    };
+                };
+
+                const failures = [];
+                const measured = [];
+
+                for (const preset of themes) {
+                    setSetting('preset', preset);
+                    const { update, log } = chips();
+
+                    const updateRatio = contrastRatio(update.ink, update.fill);
+                    const logRatio = contrastRatio(log.ink, log.fill);
+                    const ringGap = distance(update.ring, log.ring);
+                    measured.push({ preset, updateRatio, logRatio, ringGap });
+
+                    if (updateRatio < 4.5) {
+                        failures.push(`${preset}: update numeral ${round(updateRatio)}:1`);
+                    }
+                    if (logRatio < 4.5) {
+                        failures.push(`${preset}: problem numeral ${round(logRatio)}:1`);
+                    }
+                    /* The ring is where the meaning lives, so the two chips
+                       must not arrive in the same colour. */
+                    if (ringGap < 24) {
+                        failures.push(`${preset}: the two chips' rings are ${Math.round(ringGap)} apart`);
+                    }
+                }
+
+                /* A hand-picked custom palette is not in the list above and
+                   cannot be: the person chooses the page colour and the accent
+                   themselves. The worst case anyone can build by hand is an
+                   accent that matches the panel it is drawn on - here a pale
+                   pink accent on a near-white page - which is exactly what the
+                   old accent-coloured numeral could not survive. */
+                setSetting('colourBackground', '#fff4f9');
+                setSetting('colourText', '#fbe7f0');
+                setSetting('colourAccent', '#ffd9ea');
+                setSetting('colourAccentAlt', '#ffe8f2');
+                await tick();
+
+                const custom = chips();
+                const customUpdate = contrastRatio(custom.update.ink, custom.update.fill);
+                const customLog = contrastRatio(custom.log.ink, custom.log.fill);
+                if (customUpdate < 4.5) failures.push(`custom palette: update numeral ${round(customUpdate)}:1`);
+                if (customLog < 4.5) failures.push(`custom palette: problem numeral ${round(customLog)}:1`);
+
+                /* Theming off: no --lectio-theme-* variables at all, so both
+                   chips fall back to the Manager's own hard-coded colours and
+                   must still be readable. This is also every browser with the
+                   Manager and no Lectio Theming installed. */
+                setSetting('enabled', false);
+                await tick();
+                const bare = chips();
+                const bareUpdate = contrastRatio(bare.update.ink, bare.update.fill);
+                const bareLog = contrastRatio(bare.log.ink, bare.log.fill);
+                if (bareUpdate < 4.5) failures.push(`no theme: update numeral ${round(bareUpdate)}:1`);
+                if (bareLog < 4.5) failures.push(`no theme: problem numeral ${round(bareLog)}:1`);
+                setSetting('enabled', true);
+                setSetting('preset', 'catppuccin-latte');
+                await tick();
+
+                /* #50's geometry, which this fix is not allowed to move: the
+                   chip grows with the digits, keeps its height and its 2px
+                   overhang, stays inside the 44px gear, and keeps clear of the
+                   problem mark below it.
+
+                   The widths are reported, not pinned to the numbers measured
+                   on the live page: the chip is sized by its text, and the
+                   digit advance of Roboto on Windows, Arial in a headless
+                   Chrome and whatever the CI runner has installed are three
+                   different numbers. What is font-independent - the growth,
+                   the fixed height, the offsets and the fit - is asserted. */
+                const box = (count) => {
+                    gear.setAttribute('data-update-count', String(count));
+                    const style = getComputedStyle(gear, '::before');
+                    const border = parseFloat(style.borderTopWidth);
+                    return {
+                        width: Math.round(
+                            parseFloat(style.width)
+                            + parseFloat(style.paddingLeft) + parseFloat(style.paddingRight)
+                            + 2 * border
+                        ),
+                        height: Math.round(parseFloat(style.height) + 2 * border),
+                        top: parseFloat(style.top),
+                        right: parseFloat(style.right)
+                    };
+                };
+
+                const one = box(1);
+                const two = box(12);
+                const three = box(123);
+                gear.setAttribute('data-update-count', '3');
+
+                const geometry = `${one.width}/${two.width}/${three.width} x ${one.height} at ${one.top}/${one.right}`;
+                assert(one.width < two.width && two.width < three.width,
+                    `The chip stopped growing with the digits: ${geometry}`);
+                assert(one.height === 22 && two.height === 22 && three.height === 22,
+                    `The chip's height moved: ${geometry}`);
+                assert(one.top === -2 && one.right === -2,
+                    `The chip's 2px overhang moved: ${geometry}`);
+                assert(three.width <= 44, `A three-digit chip no longer fits the 44px gear: ${geometry}`);
+
+                const mark = getComputedStyle(gear, '::after');
+                const clearance = 44
+                    - (one.top + one.height)
+                    - (parseFloat(mark.bottom) + parseFloat(mark.height) + 2 * parseFloat(mark.borderTopWidth));
+                assert(Math.round(clearance) === 8,
+                    `The clearance between the chip and the problem mark moved from 8px: ${Math.round(clearance)}px`);
+
+                assert(window.pageErrors.length === 0,
+                    `Something threw while the palettes were walked: ${window.pageErrors.join(' | ')}`);
+
+                const worstUpdate = measured.reduce((a, b) => a.updateRatio <= b.updateRatio ? a : b);
+                const worstLog = measured.reduce((a, b) => a.logRatio <= b.logRatio ? a : b);
+                document.documentElement.dataset.testThemes = String(measured.length);
+                document.documentElement.dataset.testWorst = [
+                    `update ${round(worstUpdate.updateRatio)}:1 (${worstUpdate.preset})`,
+                    `problem ${round(worstLog.logRatio)}:1 (${worstLog.preset})`,
+                    `custom ${round(customUpdate)}:1 / ${round(customLog)}:1`,
+                    `unthemed ${round(bareUpdate)}:1 / ${round(bareLog)}:1`,
+                    `geometry ${geometry}`
+                ].join(', ');
+
+                assert(failures.length === 0,
+                    `${failures.length} chip(s) below 4.5:1 across ${measured.length} palettes — ${failures.join('; ')}`);
+
+                document.documentElement.dataset.testResult = 'pass';
+            } catch (error) {
+                document.documentElement.dataset.testResult = `fail: ${error.message}`;
+            }
+        });
+    </script>
+</body>
+</html>

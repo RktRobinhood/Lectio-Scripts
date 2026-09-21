@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.30.0
+// @version      1.30.1
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules, including their settings and shared dock controls.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
@@ -392,7 +392,7 @@
     // Kept in step with the @version header by scripts/check-versions.mjs. The
     // header is metadata Tampermonkey reads; this is the only copy the running
     // script can see, and it is what the self-update notice compares.
-    const MANAGER_VERSION = '1.30.0';
+    const MANAGER_VERSION = '1.30.1';
 
     const STABLE_CATALOGUE_URL =
         'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/catalogue/modules.json';
@@ -6679,14 +6679,63 @@
                 border: 2px solid #ffffff;
             }
 
+            /* The ink both count chips are drawn in (issue #56).
+
+               Until 1.30.1 each chip drew its numeral in its own ring colour -
+               accent on the gear, danger on the Problem log summary - over a
+               surface-coloured fill. Nothing guarantees that pair. Measured
+               across Lectio Theming's 46 palettes the update numeral fell to
+               2.53:1 (Everforest Light) and the problem numeral to 2.46:1
+               (Nord), against the 4.5:1 that 12px bold text needs. So the
+               meaning stays in the ring - 2px of colour nobody has to read -
+               and the numeral moves to the one pairing every theme is built
+               around: the theme's own text colour on its own surface.
+
+               That alone is right in 45 of the 46. Solarized Light pairs its
+               body text with its panel at 3.91:1 by its own design, and a
+               two-digit numeral is not the place to argue with the theme, so
+               the @supports block pushes the text colour the last of the way
+               away from the fill: 15% toward black on a light chip and toward
+               white on a dark one, which the relative-colour expression
+               decides by reading the fill's own lightness. That takes the
+               worst palette to 5.08:1 and leaves every theme recognisably its
+               own colour.
+
+               The @supports test is load-bearing rather than decorative: a
+               declaration carrying var() is never invalid at parse time, so
+               the usual two-declarations fallback would leave a browser
+               without relative colour syntax with no colour at all instead of
+               with the line above it.
+
+               A hand-picked custom palette is covered by the same move.
+               Lectio Theming already nudges a chosen text colour until it
+               clears 4.5:1 against both the page and the panel it derives, so
+               taking the numeral off the accent and onto the text is what puts
+               the chip under that existing guarantee - the accent has no such
+               guarantee and, on a pale accent over a pale page, measured 4.00:1
+               before this change. */
+            :root {
+                --lectio-manager-chip-ink: var(--lectio-theme-text, #10201e);
+            }
+
+            @supports (color: oklch(from white l c h)) {
+                :root {
+                    --lectio-manager-chip-ink: color-mix(
+                        in srgb,
+                        var(--lectio-theme-text, #10201e) 85%,
+                        oklch(
+                            from var(--lectio-theme-surface, #ffffff)
+                            clamp(0, (0.6 - l) * 100, 1) 0 0
+                        )
+                    );
+                }
+            }
+
             /* The count chip, and the same chip the Problem log summary wears:
-               a ringed pill, filled with the surface colour and drawn in the
+               a ringed pill, filled with the surface colour and ringed in the
                colour of whatever it is counting. Here that is the accent, so
-               it cannot vanish into the accent-coloured gear, and it is the
-               Manager's own outlined-control pairing - accent on surface, as
-               the log's buttons already use - rather than the text-on-surface
-               inversion 1.24.0 guessed at, which no theme is designed around
-               (ADR-0006).
+               it cannot vanish into the accent-coloured gear and so it reads
+               apart from the problem colour the other chip is ringed in.
 
                18px tall with 5px of side padding, so two digits are legible
                and unsquashed. Absolute and pointer-events: none, so it neither
@@ -6705,7 +6754,7 @@
                 border-radius: 11px;
                 border: 2px solid var(--lectio-theme-accent, #0f6f6f);
                 background: var(--lectio-theme-surface, #ffffff);
-                color: var(--lectio-theme-accent, #0f6f6f);
+                color: var(--lectio-manager-chip-ink, var(--lectio-theme-text, #10201e));
                 font: 700 12px/18px Roboto, Arial, sans-serif;
                 font-variant-numeric: tabular-nums;
                 text-align: center;
@@ -7074,10 +7123,14 @@
                 padding: 10px 4px;
             }
 
-            /* The gear's count chip, indoors: same pill, same ring, drawn in
-               the problem colour instead of the accent, so the mark on the
-               gear and the count on the section read as one signal arriving
-               in two places rather than two inventions. */
+            /* The gear's count chip, indoors: same pill, ringed in the problem
+               colour instead of the accent, so the mark on the gear and the
+               count on the section read as one signal arriving in two places
+               rather than two inventions - and so the two chips are told apart
+               by their rings. The numeral is the same ink as the gear's, for
+               the reasons set out where that is defined (issue #56): danger on
+               surface was the worse of the two pairings, down to 2.46:1 on
+               Nord and under 4.5:1 in fourteen of the 46 palettes. */
             .lectio-manager-log-unseen {
                 display: inline-block;
                 box-sizing: content-box;
@@ -7088,7 +7141,7 @@
                 border: 1px solid var(--lectio-theme-danger, #b42318);
                 border-radius: 9px;
                 background: var(--lectio-theme-surface, #ffffff);
-                color: var(--lectio-theme-danger, #b42318);
+                color: var(--lectio-manager-chip-ink, var(--lectio-theme-text, #2a4250));
                 font-size: 10px;
                 font-weight: 700;
                 line-height: 15px;
