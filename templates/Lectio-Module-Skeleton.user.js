@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Module Skeleton
 // @namespace    https://github.com/RktRobinhood/Lectio-Scripts
-// @version      0.3.0
+// @version      0.3.1
 // @description  A complete, do-nothing module you copy to start a new one. Registers, renders one control of every type, themes itself, speaks both languages, and tears down cleanly.
 // @author       RktRobinhood
 // @match        https://www.lectio.dk/lectio/*
@@ -51,7 +51,7 @@
     // next to this file; `node scripts/check-versions.mjs` enforces it.
     const MODULE_ID = 'module-skeleton';
     const MODULE_NAME = 'Lectio - Module Skeleton';
-    const MODULE_VERSION = '0.3.0';
+    const MODULE_VERSION = '0.3.1';
 
     const STYLE_ID = 'lectio-module-skeleton-styles';
     const SETTINGS_KEY = 'lectioModuleSkeleton.settings.v1';
@@ -316,6 +316,15 @@
      * nothing fetched at runtime. Order of authority: the Manager's published
      * choice, then whatever Lectio (or English Mode) put on <html lang>, then
      * Danish, because Lectio is Danish and a module on its own stays Danish.
+     *
+     * The settings schema is built from this at announce() time and
+     * re-announced on lectio-manager:language, because the Manager renders
+     * schema strings exactly as given. Keep the two literals between the
+     * i18n markers: scripts/check-i18n.mjs reads the keys on each side and
+     * fails on one that is missing from the other, so a string forgotten in
+     * one language is caught before a Danish reader sees English (or a bare
+     * key) for it. Only display strings go here - never a key, a type, a
+     * default or an option value.
      * ---------------------------------------------------------------- */
 
     function labels() {
@@ -323,6 +332,7 @@
         const language = (preferred || document.documentElement.lang || 'da').toLowerCase();
 
         return language.startsWith('en')
+            // i18n:en
             ? {
                 sectionMain: 'Skeleton',
                 sectionAdvanced: 'Advanced',
@@ -342,6 +352,7 @@
                 panelTitle: 'Module skeleton',
                 panelBody: 'Nothing to see - this is a starting point, not a feature.'
             }
+            // i18n:da
             : {
                 sectionMain: 'Skabelon',
                 sectionAdvanced: 'Avanceret',
@@ -361,6 +372,7 @@
                 panelTitle: 'Modulskabelon',
                 panelBody: 'Ikke noget at se - det her er et udgangspunkt, ikke en funktion.'
             };
+            // i18n:end
     }
 
     /* ---------------------------------------------------------------- *
@@ -580,9 +592,12 @@
     window.addEventListener('lectio-manager:clear-setting-preview', handleClearPreview, { signal: lifecycle.signal });
     window.addEventListener('lectio-manager:dock:render-panel', handleDockPanelRender, { signal: lifecycle.signal });
 
-    // The dock label and the panel are captured in whichever language was
-    // current when they were built, so rebuild them when the Manager changes it.
+    // The settings schema, the dock label and the panel are captured in
+    // whichever language was current when they were built, so rebuild them
+    // when the Manager changes it. Re-announcing is what re-words the
+    // Manager's settings view for this module.
     window.addEventListener('lectio-manager:language', () => {
+        announce();
         registerDockItem();
         renderDockPanel();
     }, { signal: lifecycle.signal });
