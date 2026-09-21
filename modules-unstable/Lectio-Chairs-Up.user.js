@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Chairs Up
 // @namespace    https://www.lectio.dk/
-// @version      1.4.0
+// @version      1.4.1
 // @description  Shows when a lesson is the final active booking of the day in its room. Universal Lectio version.
 // @match        https://www.lectio.dk/lectio/*
 // @grant        none
@@ -53,7 +53,7 @@
   (function registerWithLectioManager() {
     const MODULE_ID = 'chairs-up';
     const MODULE_NAME = 'Lectio - Chairs Up';
-    const MODULE_VERSION = '1.4.0';
+    const MODULE_VERSION = '1.4.1';
 
     function announce() {
       window.dispatchEvent(new CustomEvent('lectio-module:register', {
@@ -1105,6 +1105,29 @@
   ].join(', ');
 
 
+  /*
+   * The notice watchers' shared state, scoped to the lifetime of
+   * a notice: both watchers are torn down again as soon as no
+   * notice is left on the page. Declared up here with the rest of
+   * the page-view state rather than beside the watchers themselves
+   * (NOTICE WATCHERS, far below), because main() is called in the
+   * START block during this file's own evaluation, and a
+   * module-scope let declared after that call would still be in
+   * its temporal dead zone when reached. Nothing main() does
+   * synchronously reaches these today; the rule is the same one
+   * every module follows, checked by scripts/check-boot-order.mjs
+   * (issue #58).
+   */
+  let noticeObserver =
+    null;
+
+  let noticeFrame =
+    0;
+
+  let noticeNeedsPlacement =
+    false;
+
+
   // =========================================================
   // START
   // =========================================================
@@ -1752,17 +1775,10 @@
   // =========================================================
 
   /*
-   * Scoped to the lifetime of a notice: both watchers are torn
-   * down again as soon as no notice is left on the page.
+   * The state these share - noticeObserver, noticeFrame and
+   * noticeNeedsPlacement - is declared above the START block with
+   * the rest of the page-view state, under ACTIVITY NOTICE LAYOUT.
    */
-  let noticeObserver =
-    null;
-
-  let noticeFrame =
-    0;
-
-  let noticeNeedsPlacement =
-    false;
 
 
   function watchNoticeSurroundings() {

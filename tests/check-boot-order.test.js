@@ -41,11 +41,7 @@ const script = resolve(repoRoot, 'scripts', 'check-boot-order.mjs');
 const EXPECTED_DEFERRED = [
     'modules/Lectio-Chairs-Up.user.js: let noticeObserver',
     'modules/Lectio-Chairs-Up.user.js: let noticeFrame',
-    'modules/Lectio-Chairs-Up.user.js: let noticeNeedsPlacement',
-    'modules-unstable/Lectio-Chairs-Up.user.js: let noticeObserver',
-    'modules-unstable/Lectio-Chairs-Up.user.js: let noticeFrame',
-    'modules-unstable/Lectio-Chairs-Up.user.js: let noticeNeedsPlacement',
-    'modules-unstable/Lectio-Change-Radar.user.js: const ASSIGNMENT_STATUS_PATTERN'
+    'modules/Lectio-Chairs-Up.user.js: let noticeNeedsPlacement'
 ].sort();
 
 // Files carrying `// boot-order: not-checked — <reason>`. None today.
@@ -133,13 +129,14 @@ test('bites on Chairs Up (#36): the fetch safety-net state moved below the START
             return source.replace(declaration, '').replace(routerBanner, declaration + '\n' + routerBanner);
         });
 
-        // The control at a scratch path does not match its DEFERRED_FINDINGS
-        // entries, so the three notice-watcher lets fail there - and only those.
-        assert.equal(control.status, 1, control.output);
-        assert.deepEqual(failureNames(control.output), ['let noticeObserver', 'let noticeFrame', 'let noticeNeedsPlacement']);
+        // Since #58 moved the notice-watcher lets above START, the Experimental
+        // copy is clean, so the control passes on its own merits at a scratch
+        // path - with no DEFERRED_FINDINGS entry to lean on.
+        assert.equal(control.status, 0, control.output);
+        assert.match(control.stdout, /all above the boot block \(first module-scope call at line \d+\)/);
 
         assert.equal(edited.status, 1, edited.output);
-        assert.ok(failureNames(edited.output).includes('let fetchInFlight'), edited.output);
+        assert.deepEqual(failureNames(edited.output), ['let fetchInFlight'], edited.output);
         assert.match(edited.output, /module-scope declaration\(s\) below the boot block \(first module-scope call at line \d+\)/);
     } finally {
         await rm(directory, { recursive: true, force: true });

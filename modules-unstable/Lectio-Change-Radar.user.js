@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Change Radar
 // @namespace    https://github.com/RktRobinhood/Lectio-Scripts
-// @version      0.9.2
+// @version      0.9.3
 // @description  Watches Lectio for the changes you choose to track - timetable, assignments, absence, documents - and keeps a compact recent-change HUD.
 // @author       RktRobinhood
 // @match        https://www.lectio.dk/lectio/*
@@ -20,7 +20,7 @@
     id: 'change-radar',
     aliases: ['schedule-change-radar', 'lectio-change-radar', 'change-log'],
     name: 'Lectio Change Radar',
-    version: '0.9.2',
+    version: '0.9.3',
     channel: 'unstable'
   });
 
@@ -153,6 +153,13 @@
   // The Danish 7-point scale, as a closed set. Matching a grade against a fixed
   // list rather than "a number in a cell" keeps room numbers and counts out.
   const GRADE_TOKENS = Object.freeze(['-3', '00', '02', '4', '7', '10', '12']);
+
+  // The words an assignment row's status cell can hold, in either language, as
+  // a whole cell. Used only by the assignment parser far below, but declared
+  // here with the other patterns: init() is called during this file's own
+  // evaluation, and a module-scope const after that call would still be in its
+  // temporal dead zone when reached (issue #58, scripts/check-boot-order.mjs).
+  const ASSIGNMENT_STATUS_PATTERN = /^(?:Afleveret|Ikke afleveret|Mangler|Afventer|Venter|Afsluttet|Godkendt|Ikke godkendt|Handed in|Not handed in|Missing|Awaiting|Closed|Approved|Not approved)$/i;
 
   const SETTING_SCHEMA = Object.freeze([
     makeSelectSetting('displayMode', 'Radar location', 'Where the radar lives. Automatic uses Lectio Manager\'s shared dock when the Manager is installed, and falls back to a floating radar when it is not.', 'auto', [
@@ -1093,8 +1100,6 @@
   // (issue #59). So each parser also reports drift to the Manager's problem
   // log for the one unambiguous case: the page is plainly the right list, has
   // data rows, and none of them was read.
-
-  const ASSIGNMENT_STATUS_PATTERN = /^(?:Afleveret|Ikke afleveret|Mangler|Afventer|Venter|Afsluttet|Godkendt|Ikke godkendt|Handed in|Not handed in|Missing|Awaiting|Closed|Approved|Not approved)$/i;
 
   // A Lectio table row's cells lined up with its header, rowspan and colspan
   // resolved. OpgaveListe groups rows by week with a rowspan on the week cell,

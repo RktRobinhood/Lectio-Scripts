@@ -140,9 +140,12 @@
  * an opt-out marker cannot be written into it at all.
  *
  * Those findings are therefore listed in DEFERRED_FINDINGS below, by file and
- * declared name, with the issue that tracks moving them. A deferred finding is
- * still printed on every run, marked DEFERRED with its issue number; it just
- * does not fail the run. The list is not an allow-list in the usual sense:
+ * declared name, with the issue that tracks moving them. Issue #58 moved the
+ * Experimental ones (Chairs Up 1.4.1, Change Radar 0.9.3); what remains is the
+ * frozen Stable copy of Chairs Up, whose three entries the promotion commit
+ * must delete. A deferred finding is still printed on every run, marked
+ * DEFERRED with its issue number; it just does not fail the run. The list is
+ * not an allow-list in the usual sense:
  *   - it matches one declared name in one file, so a NEW declaration below the
  *     same boot block still fails;
  *   - an entry that matches nothing any more FAILS the run, so a fixed or
@@ -190,11 +193,7 @@ const DEFAULT_DIRECTORIES = ['manager', 'modules', 'modules-unstable', 'template
 const DEFERRED_FINDINGS = [
     { file: 'modules/Lectio-Chairs-Up.user.js', name: 'noticeObserver', issue: 58 },
     { file: 'modules/Lectio-Chairs-Up.user.js', name: 'noticeFrame', issue: 58 },
-    { file: 'modules/Lectio-Chairs-Up.user.js', name: 'noticeNeedsPlacement', issue: 58 },
-    { file: 'modules-unstable/Lectio-Chairs-Up.user.js', name: 'noticeObserver', issue: 58 },
-    { file: 'modules-unstable/Lectio-Chairs-Up.user.js', name: 'noticeFrame', issue: 58 },
-    { file: 'modules-unstable/Lectio-Chairs-Up.user.js', name: 'noticeNeedsPlacement', issue: 58 },
-    { file: 'modules-unstable/Lectio-Change-Radar.user.js', name: 'ASSIGNMENT_STATUS_PATTERN', issue: 58 }
+    { file: 'modules/Lectio-Chairs-Up.user.js', name: 'noticeNeedsPlacement', issue: 58 }
 ];
 
 // `// boot-order: not-checked — <reason>`, on a line of its own.

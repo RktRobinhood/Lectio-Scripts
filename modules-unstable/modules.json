@@ -34,15 +34,15 @@
         "teacher"
       ],
       "status": "unstable",
-      "version": "1.4.0",
-      "changelog": "With the Lectio Manager installed, Chairs Up now waits its turn before a background room lookup, so the modules stop hitting Lectio all at once. With no Manager, an older one, or one that does not answer, nothing waits.",
+      "version": "1.4.1",
+      "changelog": "An internal tidy-up so the module cannot trip over its own start-up order: the state behind the lesson notice now sits with the rest of its start-up state. Nothing visible changes.",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Chairs-Up.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
       "i18n": {
         "da": {
           "name": "Stole Op",
           "description": "Markerer en lektion, når den er dagens sidste aktive booking i det lokale.",
-          "changelog": "Med Lectio Manager installeret venter Stole Op nu på tur, før den slår et lokale op i baggrunden, så modulerne ikke rammer Lectio på én gang. Uden Manager, med en ældre en eller en, der ikke svarer, venter intet."
+          "changelog": "En intern oprydning, så modulet ikke kan snuble over sin egen opstartsrækkefølge: tilstanden bag lektionsbeskeden ligger nu sammen med resten af opstartstilstanden. Intet synligt ændrer sig."
         }
       }
     },
@@ -61,15 +61,15 @@
         "teacher"
       ],
       "status": "unstable",
-      "version": "0.9.2",
-      "changelog": "Assignment and absence watching now actually see the rows on your Lectio pages; both were read with the wrong link names, so nothing was ever reported. A deadline is read from the Frist column, and a count is no longer taken for a grade.",
+      "version": "0.9.3",
+      "changelog": "An internal tidy-up so the module cannot trip over its own start-up order: the list of assignment status words now sits with the module's other constants. Nothing visible changes.",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Change-Radar.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
       "i18n": {
         "da": {
           "name": "Lectio Ændringsradar",
           "description": "Eksperimentel Lectio-vagt med en kompakt radar-HUD i temaets farver. Du vælger selv, hvad den holder øje med - aflysninger, flytninger, lokaler, lærere og lektier i skemaet, plus valgfri overvågning af opgaver, fravær og dokumenter - plus kommende opgavefrister, der meldes, når de kommer inden for det valgte tidsrum - med hastestatus, styr på usete ændringer og en roterende lokal ændringslog.",
-          "changelog": "Opgave- og fraværsovervågning ser nu faktisk rækkerne på dine Lectio-sider; begge blev læst med forkerte linknavne, så intet blev meldt. En frist læses fra Frist-kolonnen, og et antal forveksles ikke længere med en karakter."
+          "changelog": "En intern oprydning, så modulet ikke kan snuble over sin egen opstartsrækkefølge: listen over opgavestatusord ligger nu sammen med modulets øvrige konstanter. Intet synligt ændrer sig."
         }
       }
     },
