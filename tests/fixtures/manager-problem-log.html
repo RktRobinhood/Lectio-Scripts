@@ -101,11 +101,30 @@
                     `A module drift report was not recorded as sent: ${JSON.stringify(drift)}`);
 
                 // 2. Redaction. Nothing personal from that message survived
-                //    anywhere in the stored log.
-                const storedText = storage.get('lectioManager.log.v1');
-                for (const secret of mustNotSurvive) {
-                    assert(!storedText.includes(secret),
-                        `"${secret}" survived redaction into the stored log: ${storedText}`);
+                //    into any field of the stored log that can hold text.
+                //
+                //    Field by field rather than over the raw JSON: `at` is a
+                //    13-digit epoch stamp, and about one run in fifty produces
+                //    one whose digits contain "223" - a school id by accident,
+                //    not a leak. Every number the log stores (`at`, `found`,
+                //    `count`) is generated here rather than read off a page, so
+                //    text is the only way anything can get out. The unchecked
+                //    guard keeps that true: a new string field on an entry
+                //    fails here instead of quietly going unredacted.
+                const textFields = ['kind', 'moduleId', 'code', 'message', 'where'];
+
+                for (const entry of storedLog()) {
+                    const unchecked = Object.keys(entry).filter(
+                        (field) => typeof entry[field] === 'string' && !textFields.includes(field));
+                    assert(unchecked.length === 0,
+                        `The log grew a text field this test does not check for leaks: ${unchecked.join(', ')}`);
+
+                    for (const field of textFields) {
+                        for (const secret of mustNotSurvive) {
+                            assert(!String(entry[field] ?? '').includes(secret),
+                                `"${secret}" survived redaction into the ${field} of a stored log entry: ${JSON.stringify(entry)}`);
+                        }
+                    }
                 }
 
                 const caught = capturedEarly[1];
