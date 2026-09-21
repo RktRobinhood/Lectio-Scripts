@@ -105,15 +105,15 @@
         "teacher"
       ],
       "status": "unstable",
-      "version": "0.11.0",
-      "changelog": "With the Lectio Manager installed, Subject Colours now waits its turn before scanning a week, so the modules stop hitting Lectio all at once. With no Manager, an older one, or one that does not answer, nothing waits.",
+      "version": "0.11.1",
+      "changelog": "The Automatic colour key location now finds the Manager's dock whichever script starts first, so the key no longer drops back to floating on the page after a reload or on the next page.",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Subject-Colours.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
       "i18n": {
         "da": {
           "name": "Fagfarver",
           "description": "Lærer ud fra dit eget skema, hvilke hold der rent faktisk er dine, og giver hvert af dem sin egen farve, med et separat dæmpet farvespektrum til enkeltstående aktiviteter som morgensamlinger og møder. En valgfri figurmarkør pr. hold hjælper, når farve alene ikke er nok.",
-          "changelog": "Med Lectio Manager installeret venter Fagfarver nu på tur, før modulet scanner en uge, så modulerne ikke rammer Lectio på én gang. Uden Manager, med en ældre en eller en, der ikke svarer, venter intet."
+          "changelog": "Automatisk placering af farvenøglen finder nu Managerens dock, uanset hvilket script starter først, så nøglen ikke længere falder tilbage til at flyde på siden efter en genindlæsning eller på næste side."
         }
       }
     },

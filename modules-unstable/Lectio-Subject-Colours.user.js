@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Subject Colours
 // @namespace    https://www.lectio.dk/
-// @version      0.11.0
+// @version      0.11.1
 // @description  Learns which classes are actually yours from your own timetable and gives each one its own colour, with a separate muted spectrum for one-off activities like assemblies and meetings.
 // @match        https://www.lectio.dk/lectio/*
 // @grant        none
@@ -15,7 +15,7 @@
 
     const MODULE_ID = 'subject-colours';
     const MODULE_NAME = 'Lectio - Subject Colours';
-    const MODULE_VERSION = '0.11.0';
+    const MODULE_VERSION = '0.11.1';
     const LOG = '[Lectio Subject Colours]';
     const STYLE_ID = 'lectio-subject-colours-styles';
 
@@ -48,6 +48,13 @@
     const LEGEND_PANEL_ID = 'lectio-subject-colours-legend-panel';
     const DOCK_ITEM_ID = 'colour-key';
     const HIGHLIGHT_CLASS = 'lectio-subject-colours-highlight';
+    // The Manager builds this element during its own boot, before it fires its
+    // one start-up Discovery, and never removes it. It is read here and never
+    // touched: it is how Automatic knows the dock is on the page when the
+    // Manager was evaluated first, because Tampermonkey injects both scripts at
+    // document-idle in an order nothing controls, and a Discovery fired before
+    // this module was listening is simply never heard (issue #67).
+    const MANAGER_DOCK_ROOT_ID = 'lectio-manager-dock-root';
 
     const SETTINGS_KEY = 'lectioSubjectColours.settings.v1';
     // Bumped when a stored setting needs rewriting rather than merely
@@ -145,9 +152,11 @@
         { value: 'dock', label: 'Always the Manager dock' },
         { value: 'floating', label: 'Always floating on the page' }
     ];
-    // The Manager announces itself by asking every module to register. Automatic
-    // mode waits that long before falling back to the floating key, so a page
-    // with the Manager installed does not flash a key that then jumps away.
+    // The Manager announces itself by asking every module to register, and that
+    // is the only signal there is when it is evaluated after this module.
+    // Automatic mode waits this long for it before falling back to the floating
+    // key, so a page with the Manager installed does not flash a key that then
+    // jumps away. (The other order needs no wait: see MANAGER_DOCK_ROOT_ID.)
     const MANAGER_GRACE_MS = 2500;
     const REGULARITY_THRESHOLDS = Object.freeze({
         loose: { minWeeks: 1, minOccurrences: 2 },
@@ -1876,15 +1885,36 @@
         window.clearTimeout(managerGraceTimer);
         managerGraceTimer = 0;
         announce();
+
+        // A key still waiting for this answer moves into the dock now, and one
+        // already there re-registers its item, which the dock contract asks
+        // for on every Discovery. Neither may wait for the next redraw - the
+        // grace timer was just cleared, so nothing else would render it.
+        if (resolveLegendLocation() === 'dock') renderLegend();
     }
 
-    // 'auto' resolves to the dock once the Manager has spoken, and to the
-    // floating key once it is clear no Manager is going to. 'waiting' is the gap.
+    /*
+     * Whether the Manager is on this page. Discovery is the answer when the
+     * Manager is evaluated after this module; when it was evaluated first, its
+     * Discovery has already fired into a page with no listener for it, so the
+     * dock root it built during that same boot is the answer instead. Either
+     * one settles it for the life of the page.
+     */
+    function managerOnPage() {
+        if (!managerSeen && document.getElementById(MANAGER_DOCK_ROOT_ID)) {
+            managerSeen = true;
+        }
+        return managerSeen;
+    }
+
+    // 'auto' resolves to the dock whenever the Manager is on the page, and to
+    // the floating key once it is clear no Manager is going to be. 'waiting' is
+    // the gap.
     function resolveLegendLocation() {
         if (settings.legendLocation === 'dock' || settings.legendLocation === 'floating') {
             return settings.legendLocation;
         }
-        if (managerSeen) return 'dock';
+        if (managerOnPage()) return 'dock';
         return Date.now() - loadedAt < MANAGER_GRACE_MS ? 'waiting' : 'floating';
     }
 
