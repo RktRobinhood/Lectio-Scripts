@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio Manager storage readout with Theming and Schedule Summary</title>
+</head>
+<body>
+    <script>
+        /*
+         * Issue #47's last acceptance box, checked against the real Manager
+         * and the real Experimental modules rather than the stand-ins in
+         * manager-storage.html: Lectio Theming and Schedule Summary appear in
+         * the readout as claimed, under their catalogue names, with exactly
+         * the rows they declared; the one Clear button is on the background
+         * picture and nowhere else; pressing it goes through the module and
+         * leaves the palette beside it untouched; and a key nobody claims is
+         * still listed, so adding two claimants took nothing off the list.
+         *
+         * Both modules load from modules-unstable/, because that is the only
+         * copy that declares anything - the copies in modules/ are frozen.
+         */
+        const catalogue = {
+            schemaVersion: 1,
+            generatedAt: '2026-09-21T00:00:00.000Z',
+            manager: {
+                version: '0.0.1',
+                installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/manager/Lectio-Manager.user.js'
+            },
+            modules: [
+                {
+                    id: 'lectio-theming',
+                    name: 'Lectio Theming',
+                    description: 'Themes Lectio.',
+                    category: 'Interface',
+                    audience: ['student', 'teacher'],
+                    status: 'experimental',
+                    version: '0.18.1',
+                    installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Theming.user.js'
+                },
+                {
+                    id: 'schedule-summary',
+                    name: 'Schedule Summary',
+                    description: 'Collapses the week information row.',
+                    category: 'Timetable',
+                    audience: ['student', 'teacher'],
+                    status: 'experimental',
+                    version: '0.2.5',
+                    installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Schedule-Summary.user.js'
+                }
+            ]
+        };
+
+        const gmStorage = new Map([
+            ['lectioManager.catalogue.v1', JSON.stringify(catalogue)],
+            ['lectioManager.lastRefresh.v1', Date.now()],
+            ['lectioManager.updateTipDismissed.v1', true]
+        ]);
+
+        window.GM_getValue = (key, fallback) => gmStorage.has(key) ? gmStorage.get(key) : fallback;
+        window.GM_setValue = (key, value) => gmStorage.set(key, value);
+        window.GM_xmlhttpRequest = (options) => { setTimeout(() => options.onerror && options.onerror(), 0); };
+
+        window.THEMING_SETTINGS_KEY = 'lectioTheming.settings.v2';
+        window.THEMING_BACKGROUND_KEY = 'lectioTheming.background.v1';
+        window.SCHEDULE_SUMMARY_SETTINGS_KEY = 'lectioScheduleSummary.settings.v1';
+
+        /* A hand-picked palette, a real 1x1 PNG as the background (the module
+           validates the stored picture on load and drops anything else), a
+           Schedule Summary settings blob, and one key belonging to nobody. */
+        const SEEDED = {
+            [window.THEMING_SETTINGS_KEY]: JSON.stringify({
+                enabled: true, preset: 'custom', mode: 'dark',
+                customColours: { background: '#1b2a41', text: '#f2e9e4', accent: '#f4a259', accentAlt: '#5b8e7d' }
+            }),
+            [window.THEMING_BACKGROUND_KEY]: JSON.stringify({
+                dataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+                name: 'holiday.png'
+            }),
+            [window.SCHEDULE_SUMMARY_SETTINGS_KEY]: JSON.stringify({ stripSize: 'slim', hoverPreview: false }),
+            'somethingElse.v1': 'w'.repeat(50)
+        };
+
+        localStorage.clear();
+        for (const [key, value] of Object.entries(SEEDED)) localStorage.setItem(key, value);
+
+        window.pageErrors = [];
+        window.addEventListener('error', (event) => window.pageErrors.push(String(event.message)));
+
+        // Every prune request the Manager sends, so the test can tell one
+        // aimed request from a Manager helping itself.
+        window.pruneRequests = [];
+        window.addEventListener('lectio-manager:prune-storage', (event) => {
+            window.pruneRequests.push(JSON.stringify(event.detail || {}));
+        });
+    </script>
+    <script src="../../modules-unstable/Lectio-Theming.user.js"></script>
+    <script src="../../modules-unstable/Lectio-Schedule-Summary.user.js"></script>
+    <script src="../../manager/Lectio-Manager.user.js"></script>
+    <script>
+        function assert(condition, message) {
+            if (!condition) throw new Error(message);
+        }
+
+        function storageSection() {
+            return document.querySelector('.lectio-manager-storage-section');
+        }
+
+        function rowsFor(name) {
+            for (const group of document.querySelectorAll('.lectio-manager-storage-group')) {
+                if (group.querySelector('strong').textContent.trim() === name) {
+                    return [...group.querySelectorAll('.lectio-manager-storage-row')];
+                }
+            }
+            return [];
+        }
+
+        function rowText(row) {
+            return row.querySelector('.lectio-manager-storage-row-label').textContent.trim();
+        }
+
+        function unclaimedKeys() {
+            return [...document.querySelectorAll('.lectio-manager-storage-group.is-unclaimed .lectio-manager-storage-row')]
+                .map(rowText);
+        }
+
+        async function openStorageSection() {
+            const section = storageSection();
+            section.open = true;
+            // `toggle` is queued rather than dispatched synchronously.
+            await new Promise((done) => setTimeout(done, 0));
+        }
+
+        window.addEventListener('load', async () => {
+            try {
+                await new Promise((done) => setTimeout(done, 50));
+
+                document.querySelector('#lectio-manager-toggle').click();
+                assert(storageSection(), 'The panel opened without a storage section');
+                await openStorageSection();
+
+                // 1. Both modules are claimed, under their catalogue names,
+                //    with exactly the rows they declared.
+                const themingRows = rowsFor('Lectio Theming');
+                assert(themingRows.map(rowText).sort().join('|') === 'Background picture|Settings and custom palette',
+                    `Theming's rows are not the two it declared: ${themingRows.map(rowText)}`);
+
+                const summaryRows = rowsFor('Schedule Summary');
+                assert(summaryRows.map(rowText).join('|') === 'Settings',
+                    `Schedule Summary's rows are not its one settings row: ${summaryRows.map(rowText)}`);
+
+                // 2. Nothing either module owns is left over as unclaimed, and
+                //    the key nobody owns is still listed - adding two claimants
+                //    took nothing off the list.
+                const unclaimed = unclaimedKeys();
+                assert(unclaimed.includes('somethingElse.v1'),
+                    `The unclaimed key went missing from the readout: ${unclaimed}`);
+                assert(!unclaimed.some((key) => key.startsWith('lectioTheming.') || key.startsWith('lectioScheduleSummary.')),
+                    `A declared key was still listed as unclaimed: ${unclaimed}`);
+
+                // 3. One Clear button on the page, and it is the background's.
+                const clearable = [...document.querySelectorAll('.lectio-manager-storage-row')]
+                    .filter((row) => row.querySelector('.lectio-manager-storage-clear'))
+                    .map(rowText);
+                assert(clearable.join('|') === 'Background picture',
+                    `The wrong rows offered to clear: ${clearable}`);
+
+                // 4. Names and sizes only: the palette's colours are in the
+                //    stored value, and the readout must not have shown them.
+                assert(!storageSection().textContent.includes('#f4a259'),
+                    'The readout showed the contents of the settings blob');
+
+                // 5. Two clicks, and the module does the deleting: the picture
+                //    goes, the palette beside it does not, and neither does
+                //    anything belonging to anyone else.
+                const backgroundRow = themingRows.find((row) => rowText(row) === 'Background picture');
+                const clearButton = backgroundRow.querySelector('.lectio-manager-storage-clear');
+                const settingsBefore = localStorage.getItem(window.THEMING_SETTINGS_KEY);
+
+                clearButton.click();
+                assert(window.pruneRequests.length === 0, 'The first click on Clear already asked for a prune');
+                assert(localStorage.getItem(window.THEMING_BACKGROUND_KEY), 'The first click on Clear already deleted the picture');
+
+                clearButton.click();
+                await new Promise((done) => setTimeout(done, 10));
+
+                assert(window.pruneRequests.length === 1,
+                    `A confirmed clear sent ${window.pruneRequests.length} requests`);
+                assert(window.pruneRequests[0] === JSON.stringify({ id: 'lectio-theming', key: window.THEMING_BACKGROUND_KEY }),
+                    `The prune request was not the declared entry: ${window.pruneRequests[0]}`);
+                assert(localStorage.getItem(window.THEMING_BACKGROUND_KEY) === null,
+                    'The background picture survived a confirmed Clear');
+                assert(localStorage.getItem(window.THEMING_SETTINGS_KEY) === settingsBefore,
+                    'Clearing the background changed the settings blob that holds the palette');
+                assert(localStorage.getItem(window.SCHEDULE_SUMMARY_SETTINGS_KEY) && localStorage.getItem('somethingElse.v1'),
+                    'Clearing the background reached a key Theming does not own');
+
+                // 6. The readout catches up: the picture's row is gone because
+                //    there is nothing left under it, and the palette's row is
+                //    still there.
+                document.querySelector('.lectio-manager-storage-recheck').click();
+                const afterRows = rowsFor('Lectio Theming').map(rowText);
+                assert(afterRows.join('|') === 'Settings and custom palette',
+                    `After the Clear, Theming's rows should be its settings alone: ${afterRows}`);
+                assert(rowsFor('Schedule Summary').map(rowText).join('|') === 'Settings',
+                    'Schedule Summary lost its row when Theming cleared its picture');
+
+                assert(window.pageErrors.length === 0,
+                    `Something threw: ${window.pageErrors.join(' | ')}`);
+
+                document.documentElement.dataset.testResult = 'pass';
+            } catch (error) {
+                document.documentElement.dataset.testResult = `fail: ${error.message}`;
+            }
+        });
+    </script>
+</body>
+</html>

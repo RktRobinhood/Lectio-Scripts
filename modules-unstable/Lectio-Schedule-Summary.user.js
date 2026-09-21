@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Schedule Summary
 // @namespace    https://www.lectio.dk/
-// @version      0.2.4
+// @version      0.2.5
 // @description  Collapses the schedule's week information into a compact, previewable summary strip.
 // @match        https://www.lectio.dk/lectio/*/SkemaNy.aspx*
 // @grant        none
@@ -15,7 +15,7 @@
 
     const MODULE_ID = 'schedule-summary';
     const MODULE_NAME = 'Lectio - Schedule Summary';
-    const MODULE_VERSION = '0.2.4';
+    const MODULE_VERSION = '0.2.5';
     const STYLE_ID = 'lectio-schedule-summary-styles';
     const ENHANCED_ATTRIBUTE = 'data-lectio-schedule-summary';
     const SETTINGS_KEY = 'lectioScheduleSummary.settings.v1';
@@ -69,9 +69,39 @@
                         options: INITIAL_STATE_OPTIONS
                     }
                 ],
-                currentValues: { ...settings }
+                currentValues: { ...settings },
+                /*
+                 * What this module keeps in the browser, so the Manager can
+                 * show it without knowing what it is (issue #47,
+                 * docs/manager-storage-api.md). One key, and it is a setting:
+                 * the blob is replaced on every save rather than accumulating,
+                 * so there is nothing here to expire, and nothing is offered
+                 * up for deletion - a setting never is.
+                 */
+                storage: [
+                    {
+                        key: SETTINGS_KEY,
+                        kind: 'setting',
+                        label: { en: 'Settings', da: 'Indstillinger' }
+                    }
+                ]
             }
         }));
+    }
+
+    /*
+     * The Manager asks; the module deletes. Nothing this module declares is
+     * prunable, so a request aimed here removes nothing - and a request naming
+     * another module's key is not this module's to act on either way. The
+     * listener exists so the contract is answered rather than ignored, and so
+     * a prunable cache added later has its handler waiting.
+     */
+    function handlePruneStorage(event) {
+        const detail = event?.detail;
+
+        if (detail?.id !== MODULE_ID) return;
+
+        // Nothing declared prunable: deliberately nothing to do.
     }
 
     function loadSettings() {
@@ -97,7 +127,17 @@
         try {
             localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
         } catch (_) {
-            // Continue with in-memory settings when storage is unavailable.
+            // Continue with in-memory settings when storage is unavailable -
+            // and say so once, so a setting that stops sticking has a cause
+            // the person can see in the Manager's problem log
+            // (docs/manager-storage-api.md). Nothing listens without a
+            // Manager, which is the point.
+            if (!saveSettings.reported) {
+                saveSettings.reported = true;
+                window.dispatchEvent(new CustomEvent('lectio-module:report', {
+                    detail: { moduleId: MODULE_ID, kind: 'error', code: 'storage-write' }
+                }));
+            }
         }
     }
 
@@ -187,6 +227,9 @@
     window.addEventListener('lectio-manager:set-setting', handleSetting, {
         signal: lifecycle.signal
     });
+    window.addEventListener('lectio-manager:prune-storage', handlePruneStorage, {
+        signal: lifecycle.signal
+    });
     // Deliberately not { once: true }, and deliberately split on
     // event.persisted. A page frozen for the back/forward cache fires pagehide
     // with persisted set and may be restored without this script ever running
@@ -201,9 +244,9 @@
     // omission: unlike its siblings this module has nothing running to
     // suspend - no fetch, no poll, no interval, no observer - so a frozen page
     // has nothing to give up and a restored one has nothing to restart. Its
-    // whole runtime is the four lifecycle-scoped listeners above and below
-    // (Discovery, set-setting, the toggle's click, the strip's mouseleave),
-    // and not aborting them is the entire resume. A pageshow handler would
+    // whole runtime is the five lifecycle-scoped listeners above and below
+    // (Discovery, set-setting, prune-storage, the toggle's click, the strip's
+    // mouseleave), and not aborting them is the entire resume. A pageshow handler would
     // only exist to need a guard against reviving a page that had already
     // gone. If background work is ever added here, it wants suspend/resume and
     // the pageshow half that goes with it - see the skeleton in templates/.

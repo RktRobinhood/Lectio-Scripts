@@ -127,15 +127,37 @@
         "teacher"
       ],
       "status": "unstable",
-      "version": "0.2.4",
-      "changelog": "Coming back to the schedule with the browser's Back button no longer leaves the summary strip stuck. Its button, its hover preview and its settings kept working before you navigated away and now keep working after you return.",
+      "version": "0.2.5",
+      "changelog": "Schedule Summary now tells the Lectio Manager what it keeps in the browser, so the Storage list shows its settings under its own name instead of as unclaimed. Its settings are never offered for clearing.",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Schedule-Summary.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
       "i18n": {
         "da": {
           "name": "Skemaoversigt",
           "description": "Folder skemaets ugeinformation sammen til en kompakt stribe med forhåndsvisning ved musen og klik for at udfolde.",
-          "changelog": "Når du vender tilbage til skemaet med browserens Tilbage-knap, går oversigtsstriben ikke længere i stå. Dens knap, forhåndsvisningen ved musen og indstillingerne virker nu også, efter du er kommet tilbage."
+          "changelog": "Skemaoversigt fortæller nu Lectio Manager, hvad den gemmer i browseren, så lagerlisten viser dens indstillinger under dens eget navn i stedet for som ikke meldt. Indstillingerne bliver aldrig tilbudt til rydning."
+        }
+      }
+    },
+    {
+      "id": "lectio-theming",
+      "name": "Lectio Theming",
+      "description": "Gives Lectio a soft, translucent glass shell with 46 built-in colour schemes, each with its own distinct background photo, or derives one from a website or image. Supports your own background picture and hand-picked colours.",
+      "category": "Interface",
+      "audience": [
+        "student",
+        "teacher"
+      ],
+      "status": "unstable",
+      "version": "0.18.1",
+      "changelog": "Lectio Theming now tells the Lectio Manager what it keeps in the browser. Your background picture is listed under its own name with a Clear that does what Remove does; your settings and hand-picked colours are never offered for clearing.",
+      "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Theming.user.js",
+      "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
+      "i18n": {
+        "da": {
+          "name": "Lectio-temaer",
+          "description": "Giver Lectio en blød, gennemsigtig glasflade med 46 indbyggede farvetemaer, hvert med sit eget baggrundsbillede, eller udleder et tema fra en hjemmeside eller et billede. Understøtter dit eget baggrundsbillede og håndplukkede farver.",
+          "changelog": "Lectio-temaer fortæller nu Lectio Manager, hvad den gemmer i browseren. Dit baggrundsbillede står under modulets eget navn med en Ryd-knap, der gør det samme som Fjern; dine indstillinger og håndplukkede farver tilbydes aldrig til rydning."
         }
       }
     }

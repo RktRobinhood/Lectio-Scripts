@@ -104,6 +104,17 @@ test('manager measures storage generically and prunes only what a module declare
     await runFixture('manager-storage.html', 'lectio-manager-storage-', '', ['--virtual-time-budget=6000']);
 });
 
+// The same readout against the two real modules that joined it last (issue
+// #47), loaded from modules-unstable/ because those are the copies that
+// declare anything. Lectio Theming and Schedule Summary are listed as claimed
+// under their catalogue names with exactly the rows they declared, the one
+// Clear is the background picture's, pressing it goes through the module and
+// leaves the hand-built palette beside it untouched, and a key nobody claims
+// is still listed afterwards.
+test('manager lists Theming and Schedule Summary as claimed and clears only the background picture', async () => {
+    await runFixture('manager-storage-modules.html', 'lectio-manager-storage-modules-', '', ['--virtual-time-budget=6000']);
+});
+
 // A settings file leaves this browser and comes back into an authenticated
 // Lectio session, so both directions are checked: that a file carries the
 // declared settings and nothing else - no learned data, no caches, no problem

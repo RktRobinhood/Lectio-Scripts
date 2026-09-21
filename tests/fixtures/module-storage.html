@@ -15,6 +15,16 @@
            browser that opens Lectio and learns nothing new, none of them ran
            at all. Issue #29 is that they now run on load.
 
+           Two more modules with nothing to expire (issue #47): Lectio Theming,
+           carrying a hand-built custom palette in its settings and a
+           background picture in its own key, and Schedule Summary, carrying
+           only a settings blob. Neither has a stale cache; what they gain is
+           the labelling, and the one Clear that is genuinely useful - the
+           background picture, which is the largest thing a person can be
+           carrying here and already has its own Remove control. The palette
+           must survive that Clear, because a key name cannot tell anyone it
+           holds an afternoon's worth of colour picking.
+
            There is no Manager here on purpose. The declaration is a one-way
            dispatch and the prune request is one-way the other way, so this
            page stands in for the Manager at both ends and the modules must
@@ -62,6 +72,19 @@
         window.CURRENT_ROOM_WEEK_KEY =
             `lectioChairsUp.v104.223.roomWeek.RO1.${thisWeek.year}.${thisWeek.week}`;
 
+        /* Theming's two keys, seeded the way a previous session leaves them:
+           a custom palette someone picked by hand, and a real 1x1 PNG as the
+           background - the module validates the stored picture on load and
+           drops anything that is not a self-contained image, so it has to be
+           genuine to survive to the prune. */
+        window.THEMING_SETTINGS_KEY = 'lectioTheming.settings.v2';
+        window.THEMING_BACKGROUND_KEY = 'lectioTheming.background.v1';
+        window.SCHEDULE_SUMMARY_SETTINGS_KEY = 'lectioScheduleSummary.settings.v1';
+        window.HAND_PICKED_PALETTE = {
+            background: '#1b2a41', text: '#f2e9e4', accent: '#f4a259', accentAlt: '#5b8e7d'
+        };
+        window.STORED_BACKGROUND = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
         /* Keys that must survive, and keys that must not. Split explicitly so
            a prune that took too much fails as loudly as one that took too
            little. */
@@ -105,6 +128,16 @@
         };
 
         window.MUST_STAY[window.CURRENT_ROOM_WEEK_KEY] = JSON.stringify({ bookings: [] });
+        // Theming and Schedule Summary: settings that must survive everything
+        // on this page, and a background that must survive every prune but
+        // the one aimed at it.
+        window.MUST_STAY[window.THEMING_SETTINGS_KEY] = JSON.stringify({
+            enabled: true, preset: 'custom', mode: 'dark', customColours: window.HAND_PICKED_PALETTE
+        });
+        window.MUST_STAY[window.THEMING_BACKGROUND_KEY] = JSON.stringify({
+            dataUrl: window.STORED_BACKGROUND, name: 'holiday.png'
+        });
+        window.MUST_STAY[window.SCHEDULE_SUMMARY_SETTINGS_KEY] = JSON.stringify({ stripSize: 'slim' });
 
         localStorage.clear();
         for (const [key, value] of Object.entries(window.MUST_GO)) localStorage.setItem(key, value);
@@ -120,6 +153,8 @@
     <script src="/modules-unstable/Lectio-Chairs-Up.user.js"></script>
     <script src="/modules-unstable/Lectio-Unread-Message-Notifications.user.js"></script>
     <script src="/modules-unstable/Lectio-Change-Radar.user.js"></script>
+    <script src="/modules-unstable/Lectio-Theming.user.js"></script>
+    <script src="/modules-unstable/Lectio-Schedule-Summary.user.js"></script>
     <script>
         function assert(condition, message) {
             if (!condition) throw new Error(message);
@@ -150,7 +185,8 @@
                 // 3. Every module says what it stores, in the shape the
                 //    Manager renders without understanding.
                 for (const moduleId of [
-                    'subject-colours', 'chairs-up', 'message-notifications', 'change-radar'
+                    'subject-colours', 'chairs-up', 'message-notifications', 'change-radar',
+                    'lectio-theming', 'schedule-summary'
                 ]) {
                     const registration = window.registrations.get(moduleId);
                     assert(registration, `${moduleId} did not register at all`);
@@ -177,6 +213,28 @@
                         `${moduleId} offered to delete a setting: ${JSON.stringify(prunableSettings)}`);
                 }
 
+                // 3b. The two declaration-only modules (issue #47), entry by
+                //     entry. They declare exactly the keys they write and no
+                //     others - a key a module does not own, declared, is a key
+                //     a Clear could lose - and the one thing offered up is the
+                //     background picture.
+                const scheduleSummary = window.registrations.get('schedule-summary').storage;
+                assert(scheduleSummary.length === 1 &&
+                    scheduleSummary[0].key === window.SCHEDULE_SUMMARY_SETTINGS_KEY &&
+                    scheduleSummary[0].kind === 'setting' &&
+                    scheduleSummary[0].prunable !== true,
+                    `Schedule Summary should declare its settings blob alone, as a setting with no Clear: ${JSON.stringify(scheduleSummary)}`);
+
+                const theming = window.registrations.get('lectio-theming').storage;
+                const themingSettings = theming.find((entry) => entry.key === window.THEMING_SETTINGS_KEY);
+                const themingBackground = theming.find((entry) => entry.key === window.THEMING_BACKGROUND_KEY);
+                assert(theming.length === 2 && themingSettings && themingBackground,
+                    `Theming should declare exactly its settings and its background: ${JSON.stringify(theming)}`);
+                assert(themingSettings.kind === 'setting' && themingSettings.prunable !== true,
+                    `Theming offered its palette up for deletion: ${JSON.stringify(themingSettings)}`);
+                assert(themingBackground.prunable === true && themingBackground.kind !== 'setting',
+                    `Theming's background should be the one prunable entry, and not a setting: ${JSON.stringify(themingBackground)}`);
+
                 // 4. A prune is carried out by the owner and matched exactly.
                 //    Aimed at the wrong module, or at a key the owner never
                 //    declared, it removes nothing at all.
@@ -188,6 +246,28 @@
                 }));
                 window.dispatchEvent(new CustomEvent('lectio-manager:prune-storage', {
                     detail: { id: 'chairs-up', prefix: 'lectioChairsUp.settings.v1' }
+                }));
+                // Issue #47: aimed at a setting the owner declared but did not
+                // offer, at another module's key under the wrong owner, at a
+                // prefix nobody declared, and at the background from modules
+                // that do not own it.
+                window.dispatchEvent(new CustomEvent('lectio-manager:prune-storage', {
+                    detail: { id: 'lectio-theming', key: window.THEMING_SETTINGS_KEY }
+                }));
+                window.dispatchEvent(new CustomEvent('lectio-manager:prune-storage', {
+                    detail: { id: 'schedule-summary', key: window.SCHEDULE_SUMMARY_SETTINGS_KEY }
+                }));
+                window.dispatchEvent(new CustomEvent('lectio-manager:prune-storage', {
+                    detail: { id: 'lectio-theming', key: 'lectioSubjectColours.settings.v1' }
+                }));
+                window.dispatchEvent(new CustomEvent('lectio-manager:prune-storage', {
+                    detail: { id: 'lectio-theming', prefix: 'lectioTheming.' }
+                }));
+                window.dispatchEvent(new CustomEvent('lectio-manager:prune-storage', {
+                    detail: { id: 'schedule-summary', key: window.THEMING_BACKGROUND_KEY }
+                }));
+                window.dispatchEvent(new CustomEvent('lectio-manager:prune-storage', {
+                    detail: { id: 'chairs-up', key: window.THEMING_BACKGROUND_KEY }
                 }));
 
                 for (const key of Object.keys(window.MUST_STAY)) {
@@ -206,6 +286,32 @@
                     'Pruning a cache took the owning module\'s settings with it');
                 assert(localStorage.getItem('lectioSubjectColours.settings.v1') !== null,
                     'Pruning one module\'s cache reached another module\'s keys');
+
+                // 6. Theming's background, aimed correctly (issue #47): the
+                //    picture goes, through the same path as its own Remove
+                //    control, and the hand-picked palette beside it is still
+                //    there, byte for byte, in storage and in what the module
+                //    re-announced afterwards.
+                window.dispatchEvent(new CustomEvent('lectio-manager:prune-storage', {
+                    detail: { id: 'lectio-theming', key: window.THEMING_BACKGROUND_KEY }
+                }));
+
+                assert(localStorage.getItem(window.THEMING_BACKGROUND_KEY) === null,
+                    'The background picture survived a prune request from its own module');
+                assert(localStorage.getItem(window.THEMING_SETTINGS_KEY) === window.MUST_STAY[window.THEMING_SETTINGS_KEY],
+                    'Pruning the background changed the settings blob that holds the custom palette');
+                const announced = window.registrations.get('lectio-theming').currentValues;
+                assert(announced.preset === 'custom' &&
+                    announced.colourAccent === window.HAND_PICKED_PALETTE.accent &&
+                    announced.colourBackground === window.HAND_PICKED_PALETTE.background,
+                    `Theming re-announced without its palette after the background was cleared: ${JSON.stringify(announced)}`);
+                assert(localStorage.getItem(window.SCHEDULE_SUMMARY_SETTINGS_KEY) !== null,
+                    'Pruning the background reached Schedule Summary\'s settings');
+                for (const key of Object.keys(window.MUST_STAY)) {
+                    if (key === window.THEMING_BACKGROUND_KEY || key === window.CURRENT_ROOM_WEEK_KEY) continue;
+                    assert(localStorage.getItem(key) !== null,
+                        `Pruning the background took something else with it: ${key}`);
+                }
 
                 assert(window.pageErrors.length === 0,
                     `A module threw while pruning with no Manager installed: ${window.pageErrors.join(' | ')}`);
