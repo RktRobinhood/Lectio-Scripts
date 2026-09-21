@@ -30,6 +30,8 @@ Stable identifiers are required. `moduleId` and `itemId` must start with a lette
 
 The Manager owns icon size, badge rendering, tooltip placement, item order, adaptive overflow, screen position, z-index, and flyout chrome. Do not include positioning data or raw button HTML in a registration.
 
+This page is the module-facing side. What the Manager signals on its own behalf — the update count and problem mark on its gear — and why none of it ever goes on the dock is [`docs/manager-signals.md`](./manager-signals.md).
+
 ### `label` and `tooltip` may be translated
 
 Either field may be a plain string, or the same `{ en, da }` object a catalogue entry's `i18n` block uses:
