@@ -88,6 +88,23 @@ test('the shipped catalogues carry a real changelog, in the shape the Manager re
         }
     }
 
+    // The Manager's own entry may carry the same field (#46), read by the
+    // self-update notice with the same cap, and it fails the same silent way
+    // when the shape is wrong: the line simply never appears.
+    const managerEntry = catalogues[0].manager;
+    assert.ok(managerEntry && typeof managerEntry === 'object', 'the stable catalogue has no manager entry');
+
+    for (const [where, value] of [
+        ['manager', managerEntry.changelog],
+        ...Object.entries(managerEntry.i18n ?? {}).map(([code, fields]) => [`manager (${code})`, fields?.changelog])
+    ]) {
+        if (value === undefined) continue;
+
+        assert.equal(typeof value, 'string', `${where}: changelog is not a string`);
+        assert.ok(value.trim().length > 0, `${where}: changelog is blank`);
+        assert.ok(value.length <= 240, `${where}: changelog is ${value.length} characters and will be cut off at 240`);
+    }
+
     // Every required field an old Manager reads is still there, unrenamed. The
     // real proof is catalogue-compat running the Managers themselves; this is
     // the cheap version that fails first and says why.

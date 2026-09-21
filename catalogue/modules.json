@@ -2,9 +2,15 @@
   "schemaVersion": 1,
   "generatedAt": "2026-09-20T18:00:00Z",
   "manager": {
-    "version": "1.30.1",
+    "version": "1.31.0",
+    "changelog": "The notice offering a newer Manager now says what that version changes, the way a module update already does — this line is the first one.",
     "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/manager/Lectio-Manager.user.js",
-    "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues"
+    "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
+    "i18n": {
+      "da": {
+        "changelog": "Beskeden om en nyere Manager fortæller nu, hvad den version ændrer, ligesom en moduludgave allerede gør — denne linje er den første."
+      }
+    }
   },
   "modules": [
     {

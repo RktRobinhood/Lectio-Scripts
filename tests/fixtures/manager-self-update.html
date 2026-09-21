@@ -16,22 +16,48 @@
         // 'older' one behind anything it has ever shipped; 'unapproved' points
         // the install link somewhere other than this repository's raw host; and
         // 'missing' is a catalogue from before the manager entry existed.
+        //
+        // The entry may also carry a `changelog` (issue #46), the same optional
+        // field a module entry has, and the notice shows it under the version
+        // line. 'newer' has none, so it is also the proof that the notice
+        // without one is the notice it always was. The rest exercise the field:
+        //
+        //   noted    - a changelog, in English, with a Danish translation the
+        //              English-language Manager must not pick.
+        //   noted-da - the same entry with Danish stored as the language, so
+        //              the translation is what appears.
+        //   hostile  - a changelog full of markup. The Catalogue is fetched over
+        //              HTTPS into an authenticated Lectio session; it is data,
+        //              and must reach the screen as characters.
+        //   huge     - a changelog nobody would write, to prove the notice is
+        //              bounded by the Manager rather than by good manners.
         const phase = new URLSearchParams(location.search).get('phase') || 'newer';
 
+        const INSTALL_URL = 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/manager/Lectio-Manager.user.js';
+
+        const MARKUP =
+            '<img src=x onerror="window.pwned=1"><script>window.pwned=1;<\/script>' +
+            '<b>bold</b> & <a href="javascript:window.pwned=1">link</a>';
+
+        const HUGE = ('Everything about the Manager changed in ways too numerous to list here. ').repeat(40);
+        const UNBROKEN = 'x'.repeat(600);
+
+        const noted = {
+            version: '99.0.0',
+            installUrl: INSTALL_URL,
+            changelog: 'The panel now remembers which view you had open.',
+            i18n: { da: { changelog: 'Panelet husker nu, hvilken visning du havde åben.' } }
+        };
+
         const managerEntry = {
-            newer: {
-                version: '99.0.0',
-                installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/manager/Lectio-Manager.user.js'
-            },
-            older: {
-                version: '0.0.1',
-                installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/manager/Lectio-Manager.user.js'
-            },
-            unapproved: {
-                version: '99.0.0',
-                installUrl: 'https://example.invalid/Lectio-Manager.user.js'
-            },
-            missing: undefined
+            newer: { version: '99.0.0', installUrl: INSTALL_URL },
+            older: { version: '0.0.1', installUrl: INSTALL_URL },
+            unapproved: { version: '99.0.0', installUrl: 'https://example.invalid/Lectio-Manager.user.js' },
+            missing: undefined,
+            noted,
+            'noted-da': noted,
+            hostile: { version: '99.0.0', installUrl: INSTALL_URL, changelog: MARKUP },
+            huge: { version: '99.0.0', installUrl: INSTALL_URL, changelog: `${HUGE} ${UNBROKEN}` }
         }[phase];
 
         const catalogue = {
@@ -53,9 +79,14 @@
             ['lectioManager.updateTipDismissed.v1', true]
         ]);
 
+        if (phase === 'noted-da') storage.set('lectioManager.language.v1', 'da');
+
         window.GM_getValue = (key, fallback) => storage.has(key) ? storage.get(key) : fallback;
         window.GM_setValue = (key, value) => storage.set(key, value);
         window.GM_xmlhttpRequest = () => {};
+
+        window.pageErrors = [];
+        window.addEventListener('error', (event) => window.pageErrors.push(String(event.message)));
     </script>
     <script src="../../manager/Lectio-Manager.user.js"></script>
     <script>
@@ -70,6 +101,8 @@
                 const notice = document.querySelector('.lectio-manager-self-update');
                 const text = document.querySelector('.lectio-manager-self-update-text');
                 const link = document.querySelector('.lectio-manager-self-update-link');
+                const note = () => notice.querySelector('.lectio-manager-self-update-changelog');
+                const children = () => [...notice.children].map((child) => child.className).join('|');
 
                 assert(notice, 'the Manager has no self-update notice at all');
 
@@ -83,6 +116,13 @@
                     // The running version has to appear too, or there is no way
                     // to tell whether the notice is stale.
                     assert(/you have v\d+\.\d+\.\d+/.test(text.textContent), `the notice did not name the running version: ${text.textContent}`);
+
+                    // No changelog, and the notice is exactly the notice this
+                    // Manager drew before the field existed: the same two
+                    // children in the same order, with nothing added.
+                    assert(note() === null, 'an entry with no changelog rendered one anyway');
+                    assert(children() === 'lectio-manager-self-update-text|lectio-manager-self-update-link',
+                        `the notice without a changelog gained structure: ${children()}`);
                 }
 
                 // An entry whose install link is not this repository's raw host
@@ -90,7 +130,97 @@
                 // notice can point a person at someone else's userscript.
                 if (phase === 'unapproved' || phase === 'missing' || phase === 'older') {
                     assert(notice.hidden, `phase ${phase} still raised an update notice`);
+                    assert(note() === null, `phase ${phase} rendered a changelog with nothing offered`);
                 }
+
+                // Every phase with a changelog is a newer Manager, so the notice
+                // is up, and the version line and the link are what they are in
+                // 'newer' - the changelog is added under them, not in their place.
+                if (['noted', 'noted-da', 'hostile', 'huge'].includes(phase)) {
+                    assert(!notice.hidden, `phase ${phase} raised no notice`);
+                    assert(/99\.0\.0/.test(text.textContent), `the notice lost the offered version: ${text.textContent}`);
+                    assert(link.getAttribute('href') === INSTALL_URL, `the notice lost its link: ${link.getAttribute('href')}`);
+                    assert(note(), `phase ${phase} rendered no changelog`);
+                    assert(children() === 'lectio-manager-self-update-text|lectio-manager-self-update-link|lectio-manager-card-changelog lectio-manager-self-update-changelog',
+                        `the changelog is not one note after the version line and the link: ${children()}`);
+
+                    // Under the version line and the Update link, not beside
+                    // them: the row is one line, and prose belongs below it.
+                    assert(note().getBoundingClientRect().top >= link.getBoundingClientRect().bottom - 1,
+                        'the changelog sits beside the version line rather than under it');
+
+                    // The card note's wrapping rule is what keeps one unbroken
+                    // run of characters folding into the panel instead of
+                    // widening it; it has to hold on this note too.
+                    assert(getComputedStyle(note()).overflowWrap === 'anywhere',
+                        `the changelog does not wrap anywhere: ${getComputedStyle(note()).overflowWrap}`);
+                }
+
+                if (phase === 'noted') {
+                    assert(note().textContent.includes('The panel now remembers which view you had open.'),
+                        `the changelog text is missing: ${note().textContent}`);
+                    assert(note().textContent.includes('What’s new'),
+                        `the changelog is unlabelled: ${note().textContent}`);
+                    assert(!note().textContent.includes('Panelet husker'),
+                        `the English Manager picked the Danish changelog: ${note().textContent}`);
+                }
+
+                // The changelog follows the Manager's language the same way a
+                // module's does: the translation when the entry has one.
+                if (phase === 'noted-da') {
+                    assert(document.documentElement.dataset.lectioLanguage === 'da', 'the Manager did not start in Danish');
+                    assert(note().textContent.includes('Panelet husker nu, hvilken visning du havde åben.'),
+                        `Danish did not pick the Danish changelog: ${note().textContent}`);
+                    assert(note().textContent.includes('Nyt i denne version'),
+                        `the label did not follow the language: ${note().textContent}`);
+                    assert(!note().textContent.includes('The panel now remembers'),
+                        `the Danish Manager showed the English changelog: ${note().textContent}`);
+
+                    // And switching back re-renders the notice in English, so
+                    // the note is replaced rather than left in the old language.
+                    const select = document.querySelector('.lectio-manager-language-select');
+                    assert(select, 'the Manager has no language control');
+                    select.value = 'en';
+                    select.dispatchEvent(new Event('change', { bubbles: true }));
+                    assert(notice.querySelectorAll('.lectio-manager-self-update-changelog').length === 1,
+                        `switching language left ${notice.querySelectorAll('.lectio-manager-self-update-changelog').length} changelog notes`);
+                    assert(note().textContent.includes('The panel now remembers which view you had open.'),
+                        `switching to English did not re-render the changelog: ${note().textContent}`);
+                }
+
+                // Catalogue text is data. The markup arrives as characters: no
+                // element it named exists, and nothing it asked for ran.
+                if (phase === 'hostile') {
+                    assert(note().textContent.includes('<img src=x onerror='),
+                        `the markup did not survive as literal text: ${note().textContent}`);
+                    assert(note().textContent.includes('<b>bold</b>') && note().textContent.includes('<\/script>'),
+                        `tags were swallowed instead of shown: ${note().textContent}`);
+                    assert(!note().querySelector('img, b, a, script'), 'the changelog was parsed as HTML');
+                    assert(note().children.length === 2, `the changelog grew elements from its own text: ${note().innerHTML}`);
+                    assert(window.pwned === undefined, 'script in a catalogue changelog executed');
+                    assert(!document.querySelector('img[src="x"]'), 'the catalogue injected an element into the page');
+                }
+
+                // An absurd changelog is bounded by the Manager, not by the
+                // author being reasonable: capped at 240 characters, marked as
+                // cut, and unable to push the notice or the panel sideways.
+                if (phase === 'huge') {
+                    const body = note().lastElementChild.textContent;
+                    assert(body.length <= 240, `an over-long changelog was rendered in full: ${body.length} characters`);
+                    assert(body.trimEnd().endsWith('…'), `a truncated changelog does not say it was cut: ${body.slice(-40)}`);
+
+                    const panel = document.querySelector('#lectio-manager-panel');
+                    assert(notice.scrollWidth <= notice.clientWidth + 1,
+                        `the changelog widened the notice: ${notice.scrollWidth} > ${notice.clientWidth}`);
+                    assert(panel.scrollWidth <= panel.clientWidth + 1,
+                        `the changelog gave the panel a horizontal scrollbar: ${panel.scrollWidth} > ${panel.clientWidth}`);
+                    assert(note().getBoundingClientRect().right <= notice.getBoundingClientRect().right + 1,
+                        'the changelog spills out past the edge of the notice');
+                    assert(notice.getBoundingClientRect().height < 200,
+                        `the changelog took over the panel: ${notice.getBoundingClientRect().height}px tall`);
+                }
+
+                assert(window.pageErrors.length === 0, `the notice threw: ${window.pageErrors.join(' | ')}`);
 
                 document.documentElement.dataset.testResult = 'pass';
             } catch (error) {

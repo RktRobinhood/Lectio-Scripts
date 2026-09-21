@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.30.1
+// @version      1.31.0
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules, including their settings and shared dock controls.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
@@ -392,7 +392,7 @@
     // Kept in step with the @version header by scripts/check-versions.mjs. The
     // header is metadata Tampermonkey reads; this is the only copy the running
     // script can see, and it is what the self-update notice compares.
-    const MANAGER_VERSION = '1.30.1';
+    const MANAGER_VERSION = '1.31.0';
 
     const STABLE_CATALOGUE_URL =
         'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/catalogue/modules.json';
@@ -1127,7 +1127,16 @@
             return null;
         }
 
-        return { version, installUrl };
+        // The same optional `changelog` a module entry may carry, bounded and
+        // translated by the same two helpers, so the Manager's own update is
+        // described the way a module's is. Absent is the ordinary case and
+        // costs nothing: null here, and the notice renders as it always has.
+        return {
+            version,
+            installUrl,
+            changelog: boundedChangelog(entry.changelog),
+            i18n: validateTranslations(entry.i18n)
+        };
     }
 
     /*
@@ -1137,12 +1146,21 @@
      * install page - so this is a notice, not an updater. Deliberately not
      * dismissible: unlike the Tampermonkey tip, it goes away by being acted on,
      * and it only ever appears when there is genuinely something newer.
+     *
+     * When the entry carries a changelog it goes under the version line, built
+     * by the same function a module card uses, so the one update a person
+     * cannot switch away from is at least explained before they take it. The
+     * note is replaced on every render rather than updated in place: a language
+     * change re-renders, and an entry that has lost its changelog must lose the
+     * note too.
      */
     function renderManagerUpdateNotice() {
         if (!elements?.selfUpdate) return;
 
         const entry = catalogue?.manager;
         const comparison = entry ? compareVersions(MANAGER_VERSION, entry.version) : null;
+
+        elements.selfUpdate.querySelector('.lectio-manager-self-update-changelog')?.remove();
 
         if (comparison === null || comparison >= 0) {
             elements.selfUpdate.hidden = true;
@@ -1151,6 +1169,13 @@
 
         elements.selfUpdateText.textContent = t('selfUpdate', entry.version, MANAGER_VERSION);
         elements.selfUpdateLink.href = entry.installUrl;
+
+        const note = buildChangelogNote(entry);
+        if (note) {
+            note.classList.add('lectio-manager-self-update-changelog');
+            elements.selfUpdate.appendChild(note);
+        }
+
         elements.selfUpdate.hidden = false;
     }
 
@@ -5502,9 +5527,14 @@
      *
      * The field is optional, and absent is the ordinary case: no field, no
      * element, and the card is exactly the card it was before this existed.
+     *
+     * The entry is a module's, or the Manager's own from the catalogue's
+     * `manager` block (issue #46): both carry the field in the same shape and
+     * both are rendered by this one function, so there is a single place where
+     * Catalogue prose reaches the screen.
      */
-    function buildChangelogNote(module) {
-        const text = localizedField(module, 'changelog');
+    function buildChangelogNote(entry) {
+        const text = localizedField(entry, 'changelog');
 
         if (!isNonEmptyString(text)) return null;
 
@@ -7691,6 +7721,7 @@
                about the Manager being out of date rather than a suggestion. */
             .lectio-manager-self-update {
                 display: flex;
+                flex-wrap: wrap;
                 align-items: center;
                 gap: 10px;
                 margin: 6px 12px 0;
@@ -7729,6 +7760,27 @@
             .lectio-manager-self-update-link:focus-visible {
                 background: #8a5200;
                 color: #ffffff;
+            }
+
+            /*
+             * The Manager's own changelog (issue #46): the card note, placed on
+             * its own line under the version and the Update link by taking the
+             * whole width of the wrapping row. It keeps the card note's bound -
+             * length-capped at validation, anywhere-wrapped here - and takes
+             * the notice's own amber as its fallbacks so an unthemed panel
+             * reads as one box rather than a teal card inside an amber one.
+             */
+            .lectio-manager-self-update-changelog {
+                flex: 1 1 100%;
+                margin-top: 0;
+                font-weight: 400;
+                border-left-color: var(--lectio-theme-accent-alt, #c08324);
+                background: var(--lectio-theme-surface, #fffdf7);
+                color: var(--lectio-theme-text, #7a4a00);
+            }
+
+            .lectio-manager-self-update-changelog .lectio-manager-card-changelog-label {
+                color: var(--lectio-theme-accent, #8a5200);
             }
 
             .lectio-manager-tip {

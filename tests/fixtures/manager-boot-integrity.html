@@ -74,7 +74,12 @@
         const stableCatalogue = {
             schemaVersion: 1,
             generatedAt: '2026-09-20T00:00:00.000Z',
-            manager: { version: '1.0.0', installUrl: `${RAW}/manager/Lectio-Manager.user.js` },
+            manager: {
+                version: '1.0.0',
+                changelog: 'Stable line for the Manager itself.',
+                installUrl: `${RAW}/manager/Lectio-Manager.user.js`,
+                i18n: { da: { changelog: 'Dansk ændringstekst for Manageren.' } }
+            },
             modules: [
                 {
                     id: 'boot-alpha',

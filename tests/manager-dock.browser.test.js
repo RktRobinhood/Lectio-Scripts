@@ -116,9 +116,12 @@ test('manager exports only declared settings and imports nothing it cannot valid
 
 // Nothing else can tell the Manager it is stale, so it reads its own catalogue
 // entry. The notice must appear only for a genuinely newer version behind an
-// install link on this repository's raw host.
+// install link on this repository's raw host. The entry may carry a changelog
+// (#46), shown under the version line with the bounds a module's has: absent
+// renders the notice exactly as before, markup arrives as characters, an
+// over-long line is capped, and Danish picks the translation.
 test('manager notices when the catalogue advertises a newer Manager than itself', async () => {
-    for (const phase of ['newer', 'older', 'unapproved', 'missing']) {
+    for (const phase of ['newer', 'older', 'unapproved', 'missing', 'noted', 'noted-da', 'hostile', 'huge']) {
         await runFixture('manager-self-update.html', 'lectio-manager-self-', `?phase=${phase}`);
     }
 });

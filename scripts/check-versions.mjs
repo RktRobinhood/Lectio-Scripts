@@ -59,10 +59,10 @@ function moduleId(source) {
  * find out about later: the line just never appears. Wrong shape is caught
  * here instead, where it is a failing check rather than a silent omission.
  */
-function checkChangelog(path, entry) {
+function checkChangelog(path, entry, label = `'${entry.id}'`) {
     for (const [where, value] of [
-        [`'${entry.id}'`, entry.changelog],
-        ...Object.entries(entry.i18n ?? {}).map(([code, fields]) => [`'${entry.id}' (${code})`, fields?.changelog])
+        [label, entry.changelog],
+        ...Object.entries(entry.i18n ?? {}).map(([code, fields]) => [`${label} (${code})`, fields?.changelog])
     ]) {
         if (value === undefined) continue;
 
@@ -98,6 +98,11 @@ const catalogueFor = (path) => (path.startsWith('modules-unstable/') ? unstableC
 // fails silently: the notice simply never appears, and the Manager goes on
 // looking current forever.
 const managerEntry = JSON.parse(readFileSync('catalogue/modules.json', 'utf8')).manager ?? null;
+
+// The manager entry may carry the same optional changelog a module entry does
+// (issue #46), shown on the self-update notice, and it fails the same silent
+// way when its shape is wrong.
+if (managerEntry) checkChangelog('catalogue/modules.json', managerEntry, 'the manager entry');
 
 const userscripts = [
     ...readdirSync('modules').map((name) => join('modules', name)),
