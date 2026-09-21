@@ -77,6 +77,12 @@ jobs:
       - name: No module-scope state below a userscript's boot block
         run: node scripts/check-boot-order.mjs
 
+      # The Manager's en and da string tables name the same keys. t() falls
+      # back to English silently, so a key missing on one side is a Danish
+      # reader seeing English with nothing to say so (#21).
+      - name: Manager string tables agree
+        run: node scripts/check-i18n.mjs
+
       # The browser tests shell out to Chrome via CHROME_PATH, falling back to a
       # Windows path that does not exist here, so the runner's Chrome is found
       # and exported instead. CHROME_PATH points at a small wrapper rather than

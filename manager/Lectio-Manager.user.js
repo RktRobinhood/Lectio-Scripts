@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.31.0
+// @version      1.31.1
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules, including their settings and shared dock controls.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
@@ -97,8 +97,12 @@
             selfUpdate: (available, running) => `Lectio Manager v${available} is available (you have v${running}).`,
             update: 'Update',
             downgrade: 'Downgrade',
+            updateLinkTitle: 'Open Tampermonkey’s update/install page',
+            downgradeLinkTitle: (channel) => `Open Tampermonkey with the selected ${channel} version`,
             install: 'Install',
-            installTest: 'Install test',
+            // The channel is "Experimental" to the person (issue #34), so the
+            // button that installs from it says the same word.
+            installTest: 'Install experimental',
             installed: 'Installed',
             backToInstalled: '← Installed',
             available: 'Available',
@@ -109,8 +113,10 @@
             teacher: 'Teacher',
             category: 'Category',
             sortByName: 'A–Z',
+            sortModules: 'Sort modules',
             experimental: 'Experimental',
             notActiveHere: 'Not active on this page',
+            notActiveHereTitle: (name) => `${name} is installed but does not run on this Lectio page, so its settings cannot be changed from here.`,
             notDetected: 'Not detected',
             settings: 'Settings',
             remove: 'Remove',
@@ -242,8 +248,10 @@
             selfUpdate: (available, running) => `Lectio Manager v${available} er tilgængelig (du har v${running}).`,
             update: 'Opdater',
             downgrade: 'Nedgrader',
+            updateLinkTitle: 'Åbn Tampermonkeys opdaterings-/installationsside',
+            downgradeLinkTitle: (channel) => `Åbn Tampermonkey med den valgte version fra ${channel}`,
             install: 'Installer',
-            installTest: 'Installer test',
+            installTest: 'Installer eksperimentel',
             installed: 'Installeret',
             backToInstalled: '← Installeret',
             available: 'Tilgængelige',
@@ -254,8 +262,10 @@
             teacher: 'Lærer',
             category: 'Kategori',
             sortByName: 'A–Å',
+            sortModules: 'Sortér moduler',
             experimental: 'Eksperimentel',
             notActiveHere: 'Ikke aktiv på denne side',
+            notActiveHereTitle: (name) => `${name} er installeret, men kører ikke på denne Lectio-side, så modulets indstillinger kan ikke ændres herfra.`,
             notDetected: 'Ikke fundet',
             settings: 'Indstillinger',
             remove: 'Fjern',
@@ -392,7 +402,7 @@
     // Kept in step with the @version header by scripts/check-versions.mjs. The
     // header is metadata Tampermonkey reads; this is the only copy the running
     // script can see, and it is what the self-update notice compares.
-    const MANAGER_VERSION = '1.31.0';
+    const MANAGER_VERSION = '1.31.1';
 
     const STABLE_CATALOGUE_URL =
         'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/catalogue/modules.json';
@@ -1362,6 +1372,12 @@
 
         const tabs = root.querySelector('.lectio-manager-tabs');
         if (tabs) tabs.setAttribute('aria-label', t('modules'));
+
+        // The sort group's name is only ever read by a screen reader, which is
+        // exactly why it sat in the template in English for eleven versions
+        // without anyone seeing it (issue #21).
+        const sort = root.querySelector('.lectio-manager-sort');
+        if (sort) sort.setAttribute('aria-label', t('sortModules'));
 
         const installedTab = root.querySelector('[data-primary-view="installed"]');
         const availableTab = root.querySelector('[data-primary-view="all"]');
@@ -5447,8 +5463,7 @@
                 const idle = document.createElement('span');
                 idle.className = 'lectio-manager-status-idle';
                 idle.textContent = t('notActiveHere');
-                idle.title =
-                    `${module.name} is installed but does not run on this Lectio page, so its settings cannot be changed from here.`;
+                idle.title = t('notActiveHereTitle', module.name);
                 status.appendChild(idle);
             }
 
@@ -5462,8 +5477,8 @@
                 updateLink.textContent = hasDowngrade ? t('downgrade') : t('update');
 
                 updateLink.title = hasDowngrade
-                    ? `Open Tampermonkey with the selected ${releaseChannel === 'stable' ? 'Stable' : 'Experimental'} version`
-                    : "Open Tampermonkey's update/install page";
+                    ? t('downgradeLinkTitle', releaseChannel === 'stable' ? t('stable') : t('unstable'))
+                    : t('updateLinkTitle');
 
                 actions.appendChild(updateLink);
             }

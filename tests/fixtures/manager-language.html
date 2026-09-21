@@ -25,7 +25,14 @@
         const storage = new Map([
             ['lectioManager.catalogue.v1', JSON.stringify(catalogue)],
             ['lectioManager.lastRefresh.v1', Date.now()],
-            ['lectioManager.updateTipDismissed.v1', true]
+            ['lectioManager.updateTipDismissed.v1', true],
+            // Installed at an older version and not registering on this page,
+            // so the Installed tab renders an update link and a "not active
+            // here" note - both of which carried hard-coded English titles
+            // that applyStaticText() never touched (issue #21).
+            ['lectioManager.installed.v1', JSON.stringify({
+                example: { name: 'Example', version: '0.9.0', lastSeenAt: Date.now() - 60000 }
+            })]
         ]);
 
         if (phase === 'stored-da') storage.set('lectioManager.language.v1', 'da');
@@ -100,6 +107,21 @@
                 assert(/Installeret/.test(installedTab.textContent), `the tabs stayed English: ${installedTab.textContent}`);
                 assert(title.textContent === 'Lectio Tools', 'the product name should not be translated');
 
+                // Strings that lived only in the panel template or in a
+                // render function's own quotes, and so never switched
+                // (issue #21): the sort group's accessible name, the update
+                // link's tooltip, and the note on an installed module that is
+                // not running on this page.
+                const sortGroup = document.querySelector('.lectio-manager-sort');
+                const updateLink = document.querySelector('.lectio-manager-update-btn');
+                const idleNote = document.querySelector('.lectio-manager-status-idle');
+                assert(sortGroup, 'the sort group is missing');
+                assert(updateLink, 'the Installed tab did not render an update link for the outdated module');
+                assert(idleNote, 'the Installed tab did not render the not-active-here note');
+                assert(sortGroup.getAttribute('aria-label') === 'Sortér moduler', `the sort group stayed English: ${sortGroup.getAttribute('aria-label')}`);
+                assert(/^Åbn Tampermonkeys/.test(updateLink.title), `the update link tooltip stayed English: ${updateLink.title}`);
+                assert(/kører ikke på denne Lectio-side/.test(idleNote.title), `the not-active-here note stayed English: ${idleNote.title}`);
+
                 // Re-selecting the language already in force changes nothing and
                 // must not announce a change nobody made.
                 const quiet = window.languageAnnouncements.length;
@@ -109,6 +131,9 @@
                 choose('en');
                 assert(/Release channel/.test(channelLabel.textContent), `switching back left Danish behind: ${channelLabel.textContent}`);
                 assert(/Installed/.test(installedTab.textContent), `switching back left Danish tabs: ${installedTab.textContent}`);
+                assert(sortGroup.getAttribute('aria-label') === 'Sort modules', `switching back left the sort group Danish: ${sortGroup.getAttribute('aria-label')}`);
+                assert(/^Open Tampermonkey/.test(document.querySelector('.lectio-manager-update-btn').title), 'switching back left the update link tooltip Danish');
+                assert(/does not run on this Lectio page/.test(document.querySelector('.lectio-manager-status-idle').title), 'switching back left the not-active-here note Danish');
 
                 document.documentElement.dataset.testResult = 'pass';
             } catch (error) {
