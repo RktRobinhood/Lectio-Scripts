@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Chairs Up
 // @namespace    https://www.lectio.dk/
-// @version      1.4.2
+// @version      1.4.3
 // @description  Shows when a lesson is the final active booking of the day in its room. Universal Lectio version.
 // @match        https://www.lectio.dk/lectio/*
 // @grant        none
@@ -53,7 +53,7 @@
   (function registerWithLectioManager() {
     const MODULE_ID = 'chairs-up';
     const MODULE_NAME = 'Lectio - Chairs Up';
-    const MODULE_VERSION = '1.4.2';
+    const MODULE_VERSION = '1.4.3';
 
     /*
      * The settings panel's own words, in both languages (ADR-0013). The
@@ -326,6 +326,7 @@
 
 
     pruneStaleRoomWeeks();
+    pruneLegacyStorage();
   }
 
 
@@ -395,6 +396,60 @@
       }
 
 
+      for (const key of doomed) {
+        localStorage.removeItem(key);
+      }
+    }
+
+    catch (_) {
+      // Storage unavailable; there is nothing to prune and nothing to say.
+    }
+  }
+
+
+  /*
+   * Every cache-key scheme this module used before ROOM_MAP_KEY_PREFIX and
+   * ROOM_WEEK_KEY_PREFIX (a bare `v1`, then `v3` through `v7`, each
+   * abandoned in place rather than migrated when the format next changed)
+   * is dead: no version since has ever read or written under one of those
+   * old prefixes again. They were never declared to the Manager either, so
+   * all they ever did was pile up as bytes nobody could see or clear (the
+   * Manager's storage readout shows them as "Not claimed by a running
+   * module" precisely because it holds no table of any module's key names -
+   * see docs/manager-storage-api.md). Dropping them is this module's job,
+   * not the Manager's guess.
+   */
+  function pruneLegacyStorage() {
+    const legacyKeyShape =
+      /^lectioChairsUp\.(v\d+\.|roomMap\.v\d+)/;
+
+    try {
+      const doomed = [];
+
+      for (
+        let index = 0;
+        index < localStorage.length;
+        index += 1
+      ) {
+        const key =
+          localStorage.key(index);
+
+        if (
+          typeof key !== 'string' ||
+          key === SETTINGS_KEY ||
+          key.startsWith(ROOM_MAP_KEY_PREFIX) ||
+          key.startsWith(ROOM_WEEK_KEY_PREFIX)
+        ) {
+          continue;
+        }
+
+        if (legacyKeyShape.test(key)) {
+          doomed.push(key);
+        }
+      }
+
+      // Collected first: removing while enumerating renumbers the keys
+      // behind the cursor and silently skips every other one.
       for (const key of doomed) {
         localStorage.removeItem(key);
       }

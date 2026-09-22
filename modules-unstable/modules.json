@@ -34,15 +34,15 @@
         "teacher"
       ],
       "status": "unstable",
-      "version": "1.4.2",
-      "changelog": "Its two settings now read in Danish as well as English. They follow the Manager’s language and switch with it while Settings is open, without closing and reopening it.",
+      "version": "1.4.3",
+      "changelog": "Removes cache keys left behind by older cache-format versions, which the Manager's storage readout could only ever show as unclaimed. Nothing reads those keys any more, so they're now cleared on load.",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Chairs-Up.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
       "i18n": {
         "da": {
           "name": "Stole Op",
           "description": "Markerer en lektion, når den er dagens sidste aktive booking i det lokale.",
-          "changelog": "Modulets to indstillinger kan nu læses på dansk såvel som engelsk. De følger Managerens sprog og skifter med det, mens Indstillinger er åben, uden at du skal lukke og åbne igen."
+          "changelog": "Fjerner cache-nøgler efterladt af ældre cache-formater, som Managerens lagerplads-oversigt kun kunne vise som ikke-tilknyttede. Ingen version læser dem længere, så de ryddes nu ved indlæsning."
         }
       }
     },
