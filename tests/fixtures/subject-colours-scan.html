@@ -33,14 +33,66 @@
 
     <script src="/modules/Lectio-Subject-Colours.user.js"></script>
     <script>
-        // The scan starts on a timer and then walks its weeks, so what the
-        // module ended up believing is posted back once it has settled. The
-        // test does the judging: it is the side that knows which week it
-        // answered with an error page.
-        setTimeout(() => {
-            const store = localStorage.getItem('lectioSubjectColours.schedule.v1.223');
-            fetch('/verdict', { method: 'POST', body: store || 'null' });
-        }, 6000);
+        /* The scan starts on a timer and then walks its weeks, so what the
+           module ended up believing is posted back once it has settled. The
+           test does the judging: it is the side that knows which week it
+           answered with an error page.
+
+           "Settled" is waited for rather than assumed. This used to post after
+           a flat 6000ms, which charged to the scan every millisecond before it:
+           Chrome starting, the module being fetched over the test's own server,
+           the module's own start delay, and the request-slot window it waits
+           out because there is no Manager on this page to answer it. Under
+           suite load that was the whole margin, the store was still empty when
+           the verdict went out, and the test read an unfinished scan as a
+           module that had recorded nothing - failing on `no week was recorded
+           even though timetables were served` with nothing wrong in the module.
+           That is issue #57's failure exactly, and the sibling fixture
+           subject-colours-scan-safety.html already stopped measuring this way
+           for the same reason; this one was left on the old shape and first bit
+           CI on 2026-09-22.
+
+           Quiescence alone would not do it: the module writes the store once
+           from the page's own block long before the first week request, so a
+           bare "unchanged for 2s" would settle in that gap and post an empty
+           scan - the same bug wearing a different hat. So a recorded week is
+           required as well. The bad week is the first one asked for, so by the
+           time any other week is in the store its fate is already decided and
+           waiting longer cannot change what this test asserts about it. */
+        const STORE_KEY = 'lectioSubjectColours.schedule.v1.223';
+        const read = () => localStorage.getItem(STORE_KEY);
+        const recordedWeeks = (raw) => {
+            try {
+                return Object.keys((JSON.parse(raw || 'null') || {}).weeks || {}).length;
+            } catch (_) {
+                return 0;
+            }
+        };
+
+        const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+        (async () => {
+            let previous = read();
+            let stableFor = 0;
+
+            // 30s, inside the test's own 40s ceiling: a scan that never
+            // records anything still reports, and fails on its merits.
+            for (let attempt = 0; attempt < 600; attempt += 1) {
+                await wait(50);
+                const current = read();
+
+                if (current !== previous) {
+                    previous = current;
+                    stableFor = 0;
+                    continue;
+                }
+
+                stableFor += 50;
+                if (recordedWeeks(current) > 0 && stableFor >= 2000) break;
+            }
+
+            fetch('/verdict', { method: 'POST', body: read() || 'null' });
+        })();
     </script>
 </body>
 </html>
