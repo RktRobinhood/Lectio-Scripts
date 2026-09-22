@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Chairs Up
 // @namespace    https://www.lectio.dk/
-// @version      1.1.1
+// @version      1.4.4
 // @description  Shows when a lesson is the final active booking of the day in its room. Universal Lectio version.
 // @match        https://www.lectio.dk/lectio/*
 // @grant        none
@@ -14,6 +14,24 @@
 
   const SETTINGS_KEY =
     'lectioChairsUp.settings.v1';
+
+
+  /*
+   * Everything this module keeps in localStorage, named here rather than
+   * further down beside the code that uses it, because the Manager handshake
+   * below runs during this file's own evaluation and would otherwise read a
+   * const that is still in its temporal dead zone.
+   *
+   * Both cache prefixes are deliberately school-independent. A key is
+   * per-school underneath, but a browser that has been used at two schools is
+   * carrying both, and a readout that only admitted to the current one would
+   * under-report exactly the case worth seeing.
+   */
+  const ROOM_MAP_KEY_PREFIX =
+    'lectioChairsUp.v102.';
+
+  const ROOM_WEEK_KEY_PREFIX =
+    'lectioChairsUp.v104.';
 
   const DEFAULT_SETTINGS = {
     markerStyle: 'badge',
@@ -35,9 +53,52 @@
   (function registerWithLectioManager() {
     const MODULE_ID = 'chairs-up';
     const MODULE_NAME = 'Lectio - Chairs Up';
-    const MODULE_VERSION = '1.1.1';
+    const MODULE_VERSION = '1.4.4';
+
+    /*
+     * The settings panel's own words, in both languages (ADR-0013). The
+     * Manager renders these strings exactly as given, so the schema is built
+     * from whichever language is current each time announce() runs, and
+     * lectio-manager:language re-announces it. Order of authority: the
+     * Manager's published choice, then whatever Lectio (or English Mode) put
+     * on <html lang>, then Danish, because Lectio is Danish and a module on
+     * its own stays Danish.
+     *
+     * The two literals sit between i18n markers so scripts/check-i18n.mjs can
+     * hold their keys in step. Only display strings live here - never a key,
+     * a type, a default or an option value.
+     */
+    function labels() {
+      const preferred = document.documentElement?.dataset?.lectioLanguage;
+      const language = (preferred || document.documentElement.lang || 'da').toLowerCase();
+
+      return language.startsWith('en')
+        // i18n:en
+        ? {
+          markerStyleLabel: 'Timetable marker',
+          markerStyleHelp: 'Choose how strongly the final lesson stands out.',
+          markerBadge: 'Chair badge',
+          markerOutline: 'Outline',
+          markerQuiet: 'Quiet dot',
+          lessonNoticeLabel: 'Lesson-page notice',
+          lessonNoticeHelp: 'Show the large Chairs Up notice on activity pages.'
+        }
+        // i18n:da
+        : {
+          markerStyleLabel: 'Markering i skemaet',
+          markerStyleHelp: 'Vælg, hvor tydeligt dagens sidste lektion skal skille sig ud.',
+          markerBadge: 'Stolemærke',
+          markerOutline: 'Ramme',
+          markerQuiet: 'Diskret prik',
+          lessonNoticeLabel: 'Besked på aktivitetssiden',
+          lessonNoticeHelp: 'Vis den store Chairs Up-besked på aktivitetssider.'
+        };
+        // i18n:end
+    }
 
     function announce() {
+      const text = labels();
+
       window.dispatchEvent(new CustomEvent('lectio-module:register', {
         detail: {
           id: MODULE_ID,
@@ -47,24 +108,77 @@
             {
               key: 'markerStyle',
               type: 'select',
-              label: 'Timetable marker',
-              description: 'Choose how strongly the final lesson stands out.',
+              label: text.markerStyleLabel,
+              description: text.markerStyleHelp,
               options: [
-                { value: 'badge', label: 'Chair badge' },
-                { value: 'outline', label: 'Outline' },
-                { value: 'quiet', label: 'Quiet dot' }
+                { value: 'badge', label: text.markerBadge },
+                { value: 'outline', label: text.markerOutline },
+                { value: 'quiet', label: text.markerQuiet }
               ]
             },
             {
               key: 'showLessonNotice',
               type: 'toggle',
-              label: 'Lesson-page notice',
-              description: 'Show the large Chairs Up notice on activity pages.'
+              label: text.lessonNoticeLabel,
+              description: text.lessonNoticeHelp
             }
           ],
-          currentValues: { ...settings }
+          currentValues: { ...settings },
+          /*
+           * What this module keeps in the browser, so the Manager can show it
+           * without knowing anything about it (issue #29,
+           * docs/manager-storage-api.md). Only the two caches are prunable:
+           * both are rebuilt by harvesting Lectio again, which costs a few
+           * background requests. The settings blob is not - losing it silently
+           * resets someone's chosen marker.
+           */
+          storage: [
+            {
+              key: SETTINGS_KEY,
+              kind: 'setting',
+              label: { en: 'Settings', da: 'Indstillinger' }
+            },
+            {
+              prefix: ROOM_MAP_KEY_PREFIX,
+              kind: 'cache',
+              prunable: true,
+              label: {
+                en: 'Harvested room list',
+                da: 'Indsamlet lokaleliste'
+              }
+            },
+            {
+              prefix: ROOM_WEEK_KEY_PREFIX,
+              kind: 'cache',
+              prunable: true,
+              label: {
+                en: 'Cached room timetables',
+                da: 'Gemte lokaleskemaer'
+              }
+            }
+          ]
         }
       }));
+    }
+
+    /*
+     * The Manager asks; this does the deleting. It matches on the prefix it
+     * declared and nothing else, so a request naming another module's key, or
+     * a key this module never claimed, removes nothing.
+     */
+    function handlePrune(event) {
+      const detail = event?.detail;
+
+      if (detail?.id !== MODULE_ID) {
+        return;
+      }
+
+      if (
+        detail.prefix === ROOM_MAP_KEY_PREFIX ||
+        detail.prefix === ROOM_WEEK_KEY_PREFIX
+      ) {
+        dropKeysWithPrefix(detail.prefix);
+      }
     }
 
     function handleSetting(event) {
@@ -92,8 +206,260 @@
 
     window.addEventListener('lectio-manager:discover', announce);
     window.addEventListener('lectio-manager:set-setting', handleSetting);
+    window.addEventListener('lectio-manager:prune-storage', handlePrune);
+    // The schema was worded in whichever language was current when it was
+    // announced, so a language chosen later is answered with a fresh one.
+    window.addEventListener('lectio-manager:language', announce);
     announce();
   })();
+
+
+  // =========================================================
+  // OWN STORAGE: PRUNE AND REPORT
+  // =========================================================
+
+  /*
+   * A write that fails is still caught and still carried in memory - that rule
+   * has not changed. What is new is that it says so, once per page load, as a
+   * token with nothing from the page in it. With no Manager installed nothing
+   * listens and this is a no-op. See docs/manager-problem-log.md.
+   *
+   * The once-per-page flag hangs off the function rather than sitting beside
+   * it as a module-scope `let`: this file is evaluated top to bottom with the
+   * Manager handshake running part-way through it, and a declaration hoists
+   * where a binding would still be in its temporal dead zone.
+   */
+  function reportStorageWriteFailure() {
+    if (reportStorageWriteFailure.reported) {
+      return;
+    }
+
+    reportStorageWriteFailure.reported = true;
+
+    try {
+      window.dispatchEvent(new CustomEvent('lectio-module:report', {
+        detail: {
+          moduleId: 'chairs-up',
+          kind: 'error',
+          code: 'storage-write'
+        }
+      }));
+    }
+
+    catch (_) {
+      // Reporting a failure must never become a second failure.
+    }
+  }
+
+
+  function dropKeysWithPrefix(
+    prefix
+  ) {
+    try {
+      const doomed = [];
+
+      for (
+        let index = 0;
+        index < localStorage.length;
+        index += 1
+      ) {
+        const key =
+          localStorage.key(index);
+
+
+        if (
+          typeof key === 'string' &&
+          key.startsWith(prefix)
+        ) {
+          doomed.push(key);
+        }
+      }
+
+
+      // Collected first: removing while enumerating renumbers the keys behind
+      // the cursor and silently skips every other one.
+      for (const key of doomed) {
+        localStorage.removeItem(key);
+      }
+
+
+      return doomed.length;
+    }
+
+    catch (_) {
+      return 0;
+    }
+  }
+
+
+  /*
+   * Expiry that only runs when something happens to look at a cache is expiry
+   * that mostly does not run (issue #29). The room map already had a ~30-day
+   * life and was only ever checked on the read path; the room-week cache had
+   * no life at all - one key per room per week, kept for as long as the
+   * browser profile lasts.
+   *
+   * Both are dropped here, on load, before anything reads them.
+   */
+  function pruneStaleStorage() {
+    try {
+      const fetchedAt =
+        Number(
+          localStorage.getItem(
+            ROOM_MAP_TIME_KEY
+          ) || 0
+        );
+
+
+      if (
+        fetchedAt &&
+        Date.now() - fetchedAt >= ROOM_MAP_REFRESH_MS
+      ) {
+        localStorage.removeItem(ROOM_MAP_KEY);
+        localStorage.removeItem(ROOM_MAP_TIME_KEY);
+      }
+    }
+
+    catch (_) {
+      // Nothing to prune if storage cannot be read at all.
+    }
+
+
+    pruneStaleRoomWeeks();
+    pruneLegacyStorage();
+  }
+
+
+  /*
+   * A room-week entry is a snapshot of one room's bookings in one ISO week.
+   * Last week's is never read again, so anything older than the current week
+   * goes. This week's and next week's stay, because that is the lookahead the
+   * module actually uses.
+   */
+  function pruneStaleRoomWeeks() {
+    const current =
+      getISOWeek(
+        new Date()
+      );
+
+
+    const cutoff =
+      current.isoYear * 100 +
+      current.isoWeek;
+
+
+    try {
+      const doomed = [];
+
+
+      for (
+        let index = 0;
+        index < localStorage.length;
+        index += 1
+      ) {
+        const key =
+          localStorage.key(index);
+
+
+        if (
+          typeof key !== 'string' ||
+          !key.startsWith(`${ROOM_WEEK_PREFIX}.`)
+        ) {
+          continue;
+        }
+
+
+        const parts =
+          key.split('.');
+
+
+        const isoWeek =
+          Number(parts[parts.length - 1]);
+
+        const isoYear =
+          Number(parts[parts.length - 2]);
+
+
+        // A key that does not parse is not one this version wrote, and
+        // guessing at it is exactly what must not happen here.
+        if (
+          !Number.isInteger(isoWeek) ||
+          !Number.isInteger(isoYear)
+        ) {
+          continue;
+        }
+
+
+        if (isoYear * 100 + isoWeek < cutoff) {
+          doomed.push(key);
+        }
+      }
+
+
+      for (const key of doomed) {
+        localStorage.removeItem(key);
+      }
+    }
+
+    catch (_) {
+      // Storage unavailable; there is nothing to prune and nothing to say.
+    }
+  }
+
+
+  /*
+   * Every cache-key scheme this module used before ROOM_MAP_KEY_PREFIX and
+   * ROOM_WEEK_KEY_PREFIX (a bare `v1`, then `v3` through `v7`, each
+   * abandoned in place rather than migrated when the format next changed)
+   * is dead: no version since has ever read or written under one of those
+   * old prefixes again. They were never declared to the Manager either, so
+   * all they ever did was pile up as bytes nobody could see or clear (the
+   * Manager's storage readout shows them as "Not claimed by a running
+   * module" precisely because it holds no table of any module's key names -
+   * see docs/manager-storage-api.md). Dropping them is this module's job,
+   * not the Manager's guess.
+   */
+  function pruneLegacyStorage() {
+    const legacyKeyShape =
+      /^lectioChairsUp\.(v\d+\.|roomMap\.v\d+)/;
+
+    try {
+      const doomed = [];
+
+      for (
+        let index = 0;
+        index < localStorage.length;
+        index += 1
+      ) {
+        const key =
+          localStorage.key(index);
+
+        if (
+          typeof key !== 'string' ||
+          key === SETTINGS_KEY ||
+          key.startsWith(ROOM_MAP_KEY_PREFIX) ||
+          key.startsWith(ROOM_WEEK_KEY_PREFIX)
+        ) {
+          continue;
+        }
+
+        if (legacyKeyShape.test(key)) {
+          doomed.push(key);
+        }
+      }
+
+      // Collected first: removing while enumerating renumbers the keys
+      // behind the cursor and silently skips every other one.
+      for (const key of doomed) {
+        localStorage.removeItem(key);
+      }
+    }
+
+    catch (_) {
+      // Storage unavailable; there is nothing to prune and nothing to say.
+    }
+  }
+
 
   function loadSettings() {
     try {
@@ -115,7 +481,10 @@
     try {
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
     } catch (_) {
-      // The visual setting still applies for this page when storage is unavailable.
+      // The visual setting still applies for this page when storage is
+      // unavailable - but a setting that stops sticking is the symptom this
+      // is worth reporting for.
+      reportStorageWriteFailure();
     }
   }
 
@@ -141,7 +510,7 @@
     schoolMatch[1];
 
   console.info(
-    `[Lectio Chairs Up] v1.1.1 started - school ${SCHOOL}`
+    `[Lectio Chairs Up] v1.1.2 started - school ${SCHOOL}`
   );
 
 
@@ -165,6 +534,598 @@
     7;
 
 
+  /*
+   * Background-fetch safety net (issue #36).
+   *
+   * Eight seconds is longer than any healthy Lectio page takes
+   * and short enough that a hung request does not outlive the
+   * page view. Room-week jobs run one at a time, so once three
+   * in a row have failed the rest of the pass backs off instead
+   * of spending eight seconds each proving the same point; the
+   * wait doubles from two seconds up to a one-minute ceiling,
+   * and one success clears it. The start jitter only has to
+   * break the lockstep of many browsers loading a timetable on
+   * the same bell, so it is small enough nobody notices it.
+   */
+  const FETCH_TIMEOUT_MS =
+    8000;
+
+  const FETCH_FAILURES_BEFORE_BACKOFF =
+    3;
+
+  const FETCH_BACKOFF_BASE_MS =
+    2000;
+
+  const FETCH_BACKOFF_CEILING_MS =
+    60 * 1000;
+
+  const FETCH_START_JITTER_MS =
+    750;
+
+
+  /*
+   * The Manager's optional request-slot broker
+   * (docs/manager-request-slots.md). The start jitter above keeps
+   * this module out of step with other copies of itself; a slot
+   * keeps it out of step with the other modules, which is the
+   * part no module can arrange on its own because it may not know
+   * they exist.
+   *
+   * Both numbers below belong to this page, and that is what
+   * makes the whole thing safe: nothing here can be starved by a
+   * Manager. A live Manager answers inside the dispatch, so no
+   * answer at all within the first window means no Manager, an old
+   * Manager, or one that has stopped - the same case, and it means
+   * go now. A `wait` says a live Manager is holding the request
+   * behind somebody else, which is worth waiting longer for, but
+   * only up to a ceiling this module sets: past it the request
+   * goes ahead and hands the slot straight back. Nothing the
+   * Manager sends can ask for more patience than this.
+   *
+   * The id is repeated here because the one the handshake uses
+   * lives inside its own function; both are the same string the
+   * Manager knows this module by.
+   */
+  const SLOT_MODULE_ID =
+    'chairs-up';
+
+  const SLOT_REQUEST_EVENT =
+    'lectio-manager:slot:request';
+
+  const SLOT_WAIT_EVENT =
+    'lectio-manager:slot:wait';
+
+  const SLOT_GRANT_EVENT =
+    'lectio-manager:slot:grant';
+
+  const SLOT_RELEASE_EVENT =
+    'lectio-manager:slot:release';
+
+  const SLOT_ANSWER_MS =
+    1200;
+
+  const SLOT_MAX_WAIT_MS =
+    8000;
+
+
+  // =========================================================
+  // BACKGROUND FETCH SAFETY NET
+  // =========================================================
+
+  /*
+   * All of this module's background requests go through
+   * fetchHtml(), so the whole safety net fits around that one
+   * function: a hard timeout, an abort on pagehide, a backoff
+   * after consecutive failures, a jittered first request, and a
+   * gate so a request never starts while another is in flight.
+   *
+   * Every piece of state here lives for one page view and is
+   * released on pagehide: the controllers are aborted and the
+   * set emptied, and the jitter timer is cleared and its waiter
+   * resolved. A page frozen for the back/forward cache gets that
+   * same release and then has it lifted again on pageshow.
+   */
+
+  const liveFetchControllers =
+    new Set();
+
+  let fetchInFlight =
+    false;
+
+  let consecutiveFetchFailures =
+    0;
+
+  let fetchBackoffUntil =
+    0;
+
+  let pendingStartJitterMs =
+    -1;
+
+  let startJitterTimer =
+    0;
+
+  let releaseStartJitter =
+    null;
+
+  let pageIsGoingAway =
+    false;
+
+  let pageIsGone =
+    false;
+
+
+  /*
+   * Slot requests this page view is still waiting on, and the
+   * counter their names come from. Bounded exactly like
+   * liveFetchControllers above: an entry goes in when a request is
+   * made and comes out when it is released, on every exit path,
+   * and abortBackgroundFetches empties whatever is left.
+   */
+  const pendingSlots =
+    new Map();
+
+  let slotSeq =
+    0;
+
+
+  /*
+   * Whether the last request this page made went unanswered. A room
+   * discovery pass is dozens of requests one after another, and a
+   * page view with no Manager on it must not pay the answer window
+   * for every one of them: the first request establishes that
+   * nothing is listening and the rest go straight through. Any
+   * answer clears it again, so a Manager evaluated after this module
+   * - or one that comes back - is picked up on the next request
+   * rather than ignored for the life of the page.
+   */
+  let slotsUnanswered =
+    false;
+
+
+  window.addEventListener(
+    SLOT_WAIT_EVENT,
+    handleSlotAnswer
+  );
+
+  window.addEventListener(
+    SLOT_GRANT_EVENT,
+    handleSlotAnswer
+  );
+
+
+  /*
+   * Deliberately not { once: true }, and deliberately split in
+   * two. A page frozen for the back/forward cache fires pagehide
+   * with persisted set and may be restored without this script
+   * ever running again, so a spent listener plus a flag nothing
+   * could lift left a restored page permanently switched off -
+   * every fetch skipped for the rest of that page's life, with
+   * no error to show for it. That is issue #41.
+   *
+   * A frozen page therefore only has its background fetching
+   * suspended, and pageshow puts it back; a page that is
+   * genuinely going away is marked gone, and nothing - not even
+   * a stray persisted pageshow - lifts the gate again.
+   *
+   * One registration each, at module scope, so neither listener
+   * can accumulate: a bfcache restore does not re-execute the
+   * script, and a real navigation discards the page along with
+   * both listeners.
+   */
+  window.addEventListener(
+    'pagehide',
+    handlePageHide
+  );
+
+  window.addEventListener(
+    'pageshow',
+    resumeBackgroundFetches
+  );
+
+
+  function handlePageHide(
+    event
+  ) {
+    abortBackgroundFetches();
+
+
+    if (
+      event &&
+      event.persisted
+    ) {
+      return;
+    }
+
+
+    pageIsGone =
+      true;
+  }
+
+
+  /*
+   * Chairs Up does its background work in one pass per page
+   * view, driven by main(), so "resume" is exactly this: lift
+   * the gate, and the jobs the freeze cut short go through on
+   * the pass that is still running. There is no timer to
+   * restart.
+   */
+  function resumeBackgroundFetches(
+    event
+  ) {
+    if (
+      !event ||
+      !event.persisted ||
+      pageIsGone
+    ) {
+      return;
+    }
+
+
+    pageIsGoingAway =
+      false;
+  }
+
+
+  function abortBackgroundFetches() {
+    pageIsGoingAway =
+      true;
+
+
+    if (startJitterTimer) {
+      clearTimeout(
+        startJitterTimer
+      );
+
+      startJitterTimer =
+        0;
+    }
+
+
+    if (releaseStartJitter) {
+      const release =
+        releaseStartJitter;
+
+      releaseStartJitter =
+        null;
+
+      release();
+    }
+
+
+    for (
+      const controller of liveFetchControllers
+    ) {
+      try {
+        controller.abort();
+      }
+
+      catch (_) {
+        // A controller that is already settled cannot be aborted.
+      }
+    }
+
+
+    liveFetchControllers.clear();
+
+    releaseManagerSlots();
+  }
+
+
+  /*
+   * Nothing waiting on a turn may outlive the page view, frozen or
+   * gone: the waiters are resolved so no promise is left dangling,
+   * and every turn is handed back so the Manager is not holding
+   * slots for a page that has stopped. The pageIsGoingAway
+   * re-check in fetchHtml is what keeps a resolved waiter from
+   * starting a request on the way out.
+   */
+  function releaseManagerSlots() {
+    for (
+      const pending of [...pendingSlots.values()]
+    ) {
+      pending.go();
+    }
+
+
+    for (
+      const requestId of [...pendingSlots.keys()]
+    ) {
+      pendingSlots.delete(requestId);
+
+      emitSlot(
+        SLOT_RELEASE_EVENT,
+        requestId
+      );
+    }
+  }
+
+
+  function emitSlot(
+    name,
+    requestId
+  ) {
+    window.dispatchEvent(
+      new CustomEvent(
+        name,
+
+        {
+          detail: {
+            moduleId:
+              SLOT_MODULE_ID,
+
+            requestId
+          }
+        }
+      )
+    );
+  }
+
+
+  function handleSlotAnswer(
+    event
+  ) {
+    const detail =
+      event && event.detail;
+
+
+    if (
+      !detail ||
+      detail.moduleId !== SLOT_MODULE_ID
+    ) {
+      return;
+    }
+
+
+    /*
+     * Something is listening after all, so the next request pays the
+     * answer window again rather than assuming this page has no
+     * broker on it.
+     */
+    slotsUnanswered =
+      false;
+
+
+    const pending =
+      pendingSlots.get(
+        detail.requestId
+      );
+
+
+    if (!pending) {
+      /*
+       * A grant for work this page has already finished or
+       * already given up on. Hand it straight back, or the
+       * Manager holds a turn for nobody until its own lease
+       * runs out and everything else queues behind it.
+       */
+      if (
+        event.type === SLOT_GRANT_EVENT
+      ) {
+        emitSlot(
+          SLOT_RELEASE_EVENT,
+          detail.requestId
+        );
+      }
+
+      return;
+    }
+
+
+    if (
+      event.type === SLOT_GRANT_EVENT
+    ) {
+      pending.go();
+    }
+
+    else {
+      pending.hold();
+    }
+  }
+
+
+  /*
+   * Resolves with the function that gives the turn back, and
+   * resolves either way - on a grant, or on this page's own
+   * timer. There is no rejection path and no path that never
+   * settles, which is the whole safety property: the worst a
+   * missing, old or broken Manager can cost is SLOT_ANSWER_MS.
+   */
+  function takeManagerSlot() {
+    slotSeq += 1;
+
+    const requestId =
+      `r${slotSeq}`;
+
+
+    return new Promise(
+      resolve => {
+        let timer = 0;
+        let settled = false;
+        let held = false;
+
+
+        const release = () => {
+          pendingSlots.delete(
+            requestId
+          );
+
+          emitSlot(
+            SLOT_RELEASE_EVENT,
+            requestId
+          );
+        };
+
+
+        const go = () => {
+          if (settled) {
+            return;
+          }
+
+          settled = true;
+
+          clearTimeout(timer);
+
+          timer = 0;
+
+          resolve(release);
+        };
+
+
+        /*
+         * Going ahead because nothing answered, rather than because
+         * the page is being torn down or the Manager said so. That
+         * is the one thing worth remembering between requests.
+         */
+        const giveUp = () => {
+          slotsUnanswered =
+            true;
+
+          go();
+        };
+
+
+        pendingSlots.set(
+          requestId,
+
+          {
+            go,
+
+            /*
+             * Only the first wait extends anything, so a
+             * Manager repeating itself cannot keep pushing
+             * this page's own ceiling further out.
+             */
+            hold() {
+              if (
+                settled ||
+                held
+              ) {
+                return;
+              }
+
+              held = true;
+
+              clearTimeout(timer);
+
+              timer = setTimeout(
+                go,
+                SLOT_MAX_WAIT_MS
+              );
+            }
+          }
+        );
+
+
+        /*
+         * A live Manager answers inside the dispatch below, so even
+         * the zero here still gets a grant when there is one to get:
+         * the timer cannot fire until the current task ends, and the
+         * answer arrives inside it.
+         */
+        timer = setTimeout(
+          giveUp,
+
+          slotsUnanswered
+            ? 0
+            : SLOT_ANSWER_MS
+        );
+
+        emitSlot(
+          SLOT_REQUEST_EVENT,
+          requestId
+        );
+      }
+    );
+  }
+
+
+  /*
+   * The first background request of a page view waits a short
+   * random moment, so many browsers opening a timetable on the
+   * same bell do not all hit Lectio in the same instant. Later
+   * requests in the same page view are not delayed.
+   */
+  function waitForStartJitter() {
+    if (
+      pendingStartJitterMs < 0
+    ) {
+      pendingStartJitterMs =
+        Math.floor(
+          Math.random() *
+          FETCH_START_JITTER_MS
+        );
+    }
+
+
+    const delay =
+      pendingStartJitterMs;
+
+
+    pendingStartJitterMs =
+      0;
+
+
+    if (
+      delay <= 0 ||
+      pageIsGoingAway
+    ) {
+      return Promise.resolve();
+    }
+
+
+    return new Promise(
+      resolve => {
+        releaseStartJitter =
+          resolve;
+
+        startJitterTimer =
+          setTimeout(
+            () => {
+              startJitterTimer =
+                0;
+
+              releaseStartJitter =
+                null;
+
+              resolve();
+            },
+            delay
+          );
+      }
+    );
+  }
+
+
+  function noteFetchFailure() {
+    consecutiveFetchFailures +=
+      1;
+
+
+    if (
+      consecutiveFetchFailures <
+      FETCH_FAILURES_BEFORE_BACKOFF
+    ) {
+      return;
+    }
+
+
+    const wait =
+      Math.min(
+        FETCH_BACKOFF_BASE_MS *
+        Math.pow(
+          2,
+          consecutiveFetchFailures -
+          FETCH_FAILURES_BEFORE_BACKOFF
+        ),
+        FETCH_BACKOFF_CEILING_MS
+      );
+
+
+    fetchBackoffUntil =
+      Date.now() + wait;
+  }
+
+
   // =========================================================
   // CACHE
   // =========================================================
@@ -176,7 +1137,7 @@
    * That avoids rediscovering all 74 rooms.
    */
   const ROOM_MAP_PREFIX =
-    `lectioChairsUp.v102.${SCHOOL}`;
+    `${ROOM_MAP_KEY_PREFIX}${SCHOOL}`;
 
   const ROOM_MAP_KEY =
     `${ROOM_MAP_PREFIX}.roomMap`;
@@ -193,7 +1154,7 @@
    * before cancellation-awareness was added.
    */
   const ROOM_WEEK_PREFIX =
-    `lectioChairsUp.v104.${SCHOOL}.roomWeek`;
+    `${ROOM_WEEK_KEY_PREFIX}${SCHOOL}.roomWeek`;
 
 
   // =========================================================
@@ -245,12 +1206,38 @@
   ].join(', ');
 
 
+  /*
+   * The notice watchers' shared state, scoped to the lifetime of
+   * a notice: both watchers are torn down again as soon as no
+   * notice is left on the page. Declared up here with the rest of
+   * the page-view state rather than beside the watchers themselves
+   * (NOTICE WATCHERS, far below), because main() is called in the
+   * START block during this file's own evaluation, and a
+   * module-scope let declared after that call would still be in
+   * its temporal dead zone when reached. Nothing main() does
+   * synchronously reaches these today; the rule is the same one
+   * every module follows, checked by scripts/check-boot-order.mjs
+   * (issue #58).
+   */
+  let noticeObserver =
+    null;
+
+  let noticeFrame =
+    0;
+
+  let noticeNeedsPlacement =
+    false;
+
+
   // =========================================================
   // START
   // =========================================================
 
   injectStyles();
   applySettingsToPage();
+  // Before anything reads a cache, so a stale one is gone rather than merely
+  // ignored on the one read path that happened to check its age (issue #29).
+  pruneStaleStorage();
 
   main().catch(error => {
     console.error(
@@ -309,12 +1296,47 @@
   // TIMETABLE PAGE
   // =========================================================
 
+  /*
+   * Telling the Manager that a selector matched nothing
+   * (docs/manager-problem-log.md). One-way and additive: with no Manager
+   * installed this lands on a window nobody is listening to, which is a no-op.
+   *
+   * `code` is a token written here, never text read off the page - there is
+   * deliberately no field for a message, because this log is written to be
+   * pasted into a public issue.
+   */
+  function reportToManager(kind, code, found) {
+    window.dispatchEvent(new CustomEvent('lectio-module:report', {
+      detail: { moduleId: 'chairs-up', kind, code, found }
+    }));
+  }
+
+
   async function runTimetablePage() {
     const lessons =
       getTimetableLessons();
 
 
     if (!lessons.length) {
+      /*
+       * Nothing to mark is the normal case on a day off, and marking nothing
+       * is also what happens if Lectio renames the classes this reads. The
+       * two look identical on screen, so they are separated here: blocks are
+       * on the page and none of them matched.
+       */
+      if (
+        !document.querySelector(
+          'a.s2skemabrik.s2brik[data-tooltip]'
+        ) &&
+        document.querySelector('.s2skemabrik')
+      ) {
+        reportToManager(
+          'drift',
+          'lesson-bricks',
+          0
+        );
+      }
+
       console.info(
         '[Lectio Chairs Up] No live activities with room information found.'
       );
@@ -854,17 +1876,10 @@
   // =========================================================
 
   /*
-   * Scoped to the lifetime of a notice: both watchers are torn
-   * down again as soon as no notice is left on the page.
+   * The state these share - noticeObserver, noticeFrame and
+   * noticeNeedsPlacement - is declared above the START block with
+   * the rest of the page-view state, under ACTIVITY NOTICE LAYOUT.
    */
-  let noticeObserver =
-    null;
-
-  let noticeFrame =
-    0;
-
-  let noticeNeedsPlacement =
-    false;
 
 
   function watchNoticeSurroundings() {
@@ -2126,6 +3141,10 @@
         '[Lectio Chairs Up] Could not save room map:',
         error
       );
+    
+
+
+      reportStorageWriteFailure();
     }
   }
 
@@ -2659,36 +3678,42 @@
     );
 
 
-    await Promise.all(
-      jobs.map(
-        async job => {
-          try {
-            const data =
-              await fetchAndParseRoomWeek(
-                job.roomId,
-                job.isoWeek,
-                job.isoYear
-              );
+    /*
+     * One job at a time. This used to be a Promise.all(), which
+     * fired every room-week request at Lectio in the same
+     * instant; with a hard timeout on each of them that burst is
+     * also the worst case for a hung network, and the backoff
+     * below can only cut a pass short if it can see the previous
+     * request's outcome before starting the next.
+     */
+    for (
+      const job of jobs
+    ) {
+      try {
+        const data =
+          await fetchAndParseRoomWeek(
+            job.roomId,
+            job.isoWeek,
+            job.isoYear
+          );
 
 
-            saveRoomWeekCache(
-              job.roomId,
-              job.isoWeek,
-              job.isoYear,
-              data
-            );
-          }
+        saveRoomWeekCache(
+          job.roomId,
+          job.isoWeek,
+          job.isoYear,
+          data
+        );
+      }
 
-          catch (error) {
-            console.warn(
-              '[Lectio Chairs Up] Room refresh failed:',
-              job,
-              error
-            );
-          }
-        }
-      )
-    );
+      catch (error) {
+        console.warn(
+          '[Lectio Chairs Up] Room refresh failed:',
+          job,
+          error
+        );
+      }
+    }
   }
 
 
@@ -2934,6 +3959,10 @@
         '[Lectio Chairs Up] Room cache write failed:',
         error
       );
+    
+
+
+      reportStorageWriteFailure();
     }
   }
 
@@ -3048,46 +4077,154 @@
   async function fetchHtml(
     url
   ) {
-    const response =
-      await fetch(
-        url,
-
-        {
-          method:
-            'GET',
-
-          credentials:
-            'include',
-
-          cache:
-            'no-store',
-
-          headers: {
-            Accept:
-              'text/html,application/xhtml+xml'
-          }
-        }
-      );
-
-
-    if (
-      !response.ok
-    ) {
+    if (pageIsGoingAway) {
       throw new Error(
-        `HTTP ${response.status} loading ${url}`
+        `Skipped ${url}: the page is going away.`
       );
     }
 
 
-    const html =
-      await response.text();
-
-
-    return new DOMParser()
-      .parseFromString(
-        html,
-        'text/html'
+    /*
+     * Never stack: a request that arrives while another is in
+     * flight is skipped, not queued behind it.
+     */
+    if (fetchInFlight) {
+      throw new Error(
+        `Skipped ${url}: another background request is already in flight.`
       );
+    }
+
+
+    if (
+      Date.now() <
+      fetchBackoffUntil
+    ) {
+      throw new Error(
+        `Skipped ${url}: backing off after ${consecutiveFetchFailures} failed request(s).`
+      );
+    }
+
+
+    await waitForStartJitter();
+
+
+    if (pageIsGoingAway) {
+      throw new Error(
+        `Skipped ${url}: the page is going away.`
+      );
+    }
+
+
+    /*
+     * Ask the Manager for a turn before anything is armed, so a
+     * request that waits does not spend its own timeout waiting.
+     */
+    const releaseSlot =
+      await takeManagerSlot();
+
+
+    if (pageIsGoingAway) {
+      releaseSlot();
+
+      throw new Error(
+        `Skipped ${url}: the page is going away.`
+      );
+    }
+
+
+    const controller =
+      new AbortController();
+
+
+    const timeoutTimer =
+      setTimeout(
+        () =>
+          controller.abort(),
+        FETCH_TIMEOUT_MS
+      );
+
+
+    fetchInFlight =
+      true;
+
+    liveFetchControllers.add(
+      controller
+    );
+
+
+    try {
+      const response =
+        await fetch(
+          url,
+
+          {
+            method:
+              'GET',
+
+            credentials:
+              'include',
+
+            cache:
+              'no-store',
+
+            headers: {
+              Accept:
+                'text/html,application/xhtml+xml'
+            },
+
+            signal:
+              controller.signal
+          }
+        );
+
+
+      if (
+        !response.ok
+      ) {
+        throw new Error(
+          `HTTP ${response.status} loading ${url}`
+        );
+      }
+
+
+      const html =
+        await response.text();
+
+
+      consecutiveFetchFailures =
+        0;
+
+      fetchBackoffUntil =
+        0;
+
+
+      return new DOMParser()
+        .parseFromString(
+          html,
+          'text/html'
+        );
+    }
+
+    catch (error) {
+      noteFetchFailure();
+
+      throw error;
+    }
+
+    finally {
+      clearTimeout(
+        timeoutTimer
+      );
+
+      liveFetchControllers.delete(
+        controller
+      );
+
+      fetchInFlight =
+        false;
+
+      releaseSlot();
+    }
   }
 
 

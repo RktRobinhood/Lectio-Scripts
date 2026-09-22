@@ -130,22 +130,22 @@
  * DEFERRED FINDINGS
  * -----------------
  * Extending the check to the modules found three module-scope declarations
- * below their file's boot anchor, in files that cannot be edited here: Chairs
- * Up's three notice-watcher `let`s (in both the frozen Stable copy and the
- * Experimental one) and Change Radar's ASSIGNMENT_STATUS_PATTERN. None is a
- * live dead-zone read - each is reached only behind an `await` or from a
- * timer - but the rule is deliberately conservative and does not know that.
- * The fix is to move them, which is a version bump and an Experimental ship
- * per ADR-0014, and the Stable copy of Chairs Up is frozen until promotion, so
- * an opt-out marker cannot be written into it at all.
+ * below their file's boot anchor, in files that could not be edited at the
+ * time: Chairs Up's three notice-watcher `let`s (in both the frozen Stable
+ * copy and the Experimental one) and Change Radar's ASSIGNMENT_STATUS_PATTERN.
+ * None was a live dead-zone read - each is reached only behind an `await` or
+ * from a timer - but the rule is deliberately conservative and does not know
+ * that. The fix was to move them, which is a version bump and an Experimental
+ * ship per ADR-0014, and a frozen Stable copy cannot carry an opt-out marker
+ * at all until it is promoted.
  *
- * Those findings are therefore listed in DEFERRED_FINDINGS below, by file and
- * declared name, with the issue that tracks moving them. Issue #58 moved the
- * Experimental ones (Chairs Up 1.4.1, Change Radar 0.9.3); what remains is the
- * frozen Stable copy of Chairs Up, whose three entries the promotion commit
- * must delete. A deferred finding is still printed on every run, marked
- * DEFERRED with its issue number; it just does not fail the run. The list is
- * not an allow-list in the usual sense:
+ * Those findings were listed in DEFERRED_FINDINGS below, by file and declared
+ * name, with the issue that tracked moving them. Issue #58 moved the
+ * Experimental ones (Chairs Up 1.4.1, Change Radar 0.9.3), and promoting
+ * Chairs Up 1.4.3 to Stable carried that fix across, so the list is empty
+ * today. It stays here for the next one. A deferred finding is still printed
+ * on every run, marked DEFERRED with its issue number; it just does not fail
+ * the run. The list is not an allow-list in the usual sense:
  *   - it matches one declared name in one file, so a NEW declaration below the
  *     same boot block still fails;
  *   - an entry that matches nothing any more FAILS the run, so a fixed or
@@ -190,11 +190,7 @@ const DEFAULT_DIRECTORIES = ['manager', 'modules', 'modules-unstable', 'template
 // A finding the check makes today and cannot act on here, with the issue that
 // will act on it. Read DEFERRED FINDINGS above before adding to this; the test
 // pins the set, a stale entry fails the run, and the list is printed every time.
-const DEFERRED_FINDINGS = [
-    { file: 'modules/Lectio-Chairs-Up.user.js', name: 'noticeObserver', issue: 58 },
-    { file: 'modules/Lectio-Chairs-Up.user.js', name: 'noticeFrame', issue: 58 },
-    { file: 'modules/Lectio-Chairs-Up.user.js', name: 'noticeNeedsPlacement', issue: 58 }
-];
+const DEFERRED_FINDINGS = [];
 
 // `// boot-order: not-checked — <reason>`, on a line of its own.
 const OPT_OUT_MARKER = /^[ \t]*\/\/[ \t]*boot-order:[ \t]*not-checked[ \t]*(?:—|-+)?[ \t]*(.*)$/m;

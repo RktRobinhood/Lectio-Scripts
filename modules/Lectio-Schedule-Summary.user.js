@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Schedule Summary
 // @namespace    https://www.lectio.dk/
-// @version      0.2.3
+// @version      0.2.7
 // @description  Collapses the schedule's week information into a compact, previewable summary strip.
 // @match        https://www.lectio.dk/lectio/*/SkemaNy.aspx*
 // @grant        none
@@ -15,19 +15,14 @@
 
     const MODULE_ID = 'schedule-summary';
     const MODULE_NAME = 'Lectio - Schedule Summary';
-    const MODULE_VERSION = '0.2.3';
+    const MODULE_VERSION = '0.2.7';
     const STYLE_ID = 'lectio-schedule-summary-styles';
     const ENHANCED_ATTRIBUTE = 'data-lectio-schedule-summary';
     const SETTINGS_KEY = 'lectioScheduleSummary.settings.v1';
-    const STRIP_SIZE_OPTIONS = [
-        { value: 'slim', label: 'Slim' },
-        { value: 'compact', label: 'Compact' },
-        { value: 'comfortable', label: 'Comfortable' }
-    ];
-    const INITIAL_STATE_OPTIONS = [
-        { value: 'collapsed', label: 'Collapsed' },
-        { value: 'expanded', label: 'Expanded' }
-    ];
+    // The values a setting may hold. Their labels live in labels(), in both
+    // languages, and are put beside them when the schema is announced.
+    const STRIP_SIZES = ['slim', 'compact', 'comfortable'];
+    const INITIAL_STATES = ['collapsed', 'expanded'];
     const DEFAULT_SETTINGS = Object.freeze({
         stripSize: 'compact',
         hoverPreview: true,
@@ -39,6 +34,11 @@
     let collapseTimeoutId = null;
 
     function announce() {
+        // The Manager renders schema strings exactly as given, so the schema
+        // is worded in whichever language is current now, and re-announced
+        // on lectio-manager:language.
+        const text = labels();
+
         window.dispatchEvent(new CustomEvent('lectio-module:register', {
             detail: {
                 id: MODULE_ID,
@@ -48,43 +48,73 @@
                     {
                         key: 'stripSize',
                         type: 'select',
-                        label: 'Strip size',
-                        section: 'Display',
-                        description: 'Choose the height and spacing of the summary strip.',
-                        options: STRIP_SIZE_OPTIONS
+                        label: text.stripSizeLabel,
+                        section: text.sectionDisplay,
+                        description: text.stripSizeHelp,
+                        options: STRIP_SIZES.map(value => ({ value, label: text.stripSizes[value] }))
                     },
                     {
                         key: 'hoverPreview',
                         type: 'toggle',
-                        label: 'Hover preview',
-                        section: 'Interaction',
-                        description: 'Preview week information when pointing at the collapsed strip.'
+                        label: text.hoverPreviewLabel,
+                        section: text.sectionInteraction,
+                        description: text.hoverPreviewHelp
                     },
                     {
                         key: 'initialState',
                         type: 'select',
-                        label: 'Initial state',
-                        section: 'Interaction',
-                        description: 'Choose whether week information starts collapsed or expanded.',
-                        options: INITIAL_STATE_OPTIONS
+                        label: text.initialStateLabel,
+                        section: text.sectionInteraction,
+                        description: text.initialStateHelp,
+                        options: INITIAL_STATES.map(value => ({ value, label: text.initialStates[value] }))
                     }
                 ],
-                currentValues: { ...settings }
+                currentValues: { ...settings },
+                /*
+                 * What this module keeps in the browser, so the Manager can
+                 * show it without knowing what it is (issue #47,
+                 * docs/manager-storage-api.md). One key, and it is a setting:
+                 * the blob is replaced on every save rather than accumulating,
+                 * so there is nothing here to expire, and nothing is offered
+                 * up for deletion - a setting never is.
+                 */
+                storage: [
+                    {
+                        key: SETTINGS_KEY,
+                        kind: 'setting',
+                        label: { en: 'Settings', da: 'Indstillinger' }
+                    }
+                ]
             }
         }));
+    }
+
+    /*
+     * The Manager asks; the module deletes. Nothing this module declares is
+     * prunable, so a request aimed here removes nothing - and a request naming
+     * another module's key is not this module's to act on either way. The
+     * listener exists so the contract is answered rather than ignored, and so
+     * a prunable cache added later has its handler waiting.
+     */
+    function handlePruneStorage(event) {
+        const detail = event?.detail;
+
+        if (detail?.id !== MODULE_ID) return;
+
+        // Nothing declared prunable: deliberately nothing to do.
     }
 
     function loadSettings() {
         try {
             const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
             return {
-                stripSize: hasOption(STRIP_SIZE_OPTIONS, saved.stripSize)
+                stripSize: STRIP_SIZES.includes(saved.stripSize)
                     ? saved.stripSize
                     : DEFAULT_SETTINGS.stripSize,
                 hoverPreview: typeof saved.hoverPreview === 'boolean'
                     ? saved.hoverPreview
                     : DEFAULT_SETTINGS.hoverPreview,
-                initialState: hasOption(INITIAL_STATE_OPTIONS, saved.initialState)
+                initialState: INITIAL_STATES.includes(saved.initialState)
                     ? saved.initialState
                     : DEFAULT_SETTINGS.initialState
             };
@@ -97,12 +127,18 @@
         try {
             localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
         } catch (_) {
-            // Continue with in-memory settings when storage is unavailable.
+            // Continue with in-memory settings when storage is unavailable -
+            // and say so once, so a setting that stops sticking has a cause
+            // the person can see in the Manager's problem log
+            // (docs/manager-storage-api.md). Nothing listens without a
+            // Manager, which is the point.
+            if (!saveSettings.reported) {
+                saveSettings.reported = true;
+                window.dispatchEvent(new CustomEvent('lectio-module:report', {
+                    detail: { moduleId: MODULE_ID, kind: 'error', code: 'storage-write' }
+                }));
+            }
         }
-    }
-
-    function hasOption(options, value) {
-        return options.some(option => option.value === value);
     }
 
     function setExpanded(summaryRow, informationRow, expanded, { animate = true } = {}) {
@@ -164,13 +200,13 @@
         const detail = event.detail;
         if (!detail || detail.id !== MODULE_ID) return;
 
-        if (detail.key === 'stripSize' && hasOption(STRIP_SIZE_OPTIONS, detail.value)) {
+        if (detail.key === 'stripSize' && STRIP_SIZES.includes(detail.value)) {
             settings.stripSize = detail.value;
             applyDisplaySettings();
         } else if (detail.key === 'hoverPreview' && typeof detail.value === 'boolean') {
             settings.hoverPreview = detail.value;
             applyDisplaySettings();
-        } else if (detail.key === 'initialState' && hasOption(INITIAL_STATE_OPTIONS, detail.value)) {
+        } else if (detail.key === 'initialState' && INITIAL_STATES.includes(detail.value)) {
             settings.initialState = detail.value;
             applyInitialState();
         } else {
@@ -187,18 +223,61 @@
     window.addEventListener('lectio-manager:set-setting', handleSetting, {
         signal: lifecycle.signal
     });
-    window.addEventListener('pagehide', () => lifecycle.abort(), { once: true });
+    window.addEventListener('lectio-manager:prune-storage', handlePruneStorage, {
+        signal: lifecycle.signal
+    });
+    // The schema was worded in whichever language was current when it was
+    // announced, so a language chosen later is answered with a fresh one.
+    window.addEventListener('lectio-manager:language', announce, {
+        signal: lifecycle.signal
+    });
+    // Deliberately not { once: true }, and deliberately split on
+    // event.persisted. A page frozen for the back/forward cache fires pagehide
+    // with persisted set and may be restored without this script ever running
+    // again, so aborting the lifecycle there left a restored page with its
+    // summary strip fully painted and completely inert - the toggle dead, the
+    // hover preview unable to re-arm, Manager settings ignored and Discovery
+    // unanswered, for the rest of that page's life, with no error to show for
+    // it. That is issue #45. A frozen page is now left exactly as it is; only
+    // a page genuinely going away is torn down.
+    //
+    // There is no pageshow half here, and that is the point rather than an
+    // omission: unlike its siblings this module has nothing running to
+    // suspend - no fetch, no poll, no interval, no observer - so a frozen page
+    // has nothing to give up and a restored one has nothing to restart. Its
+    // whole runtime is the six lifecycle-scoped listeners above and below
+    // (Discovery, set-setting, prune-storage, language, the toggle's click,
+    // the strip's mouseleave), and not aborting them is the entire resume. A pageshow handler would
+    // only exist to need a guard against reviving a page that had already
+    // gone. If background work is ever added here, it wants suspend/resume and
+    // the pageshow half that goes with it - see the skeleton in templates/.
+    //
+    // One registration, at module scope, so it cannot accumulate: a bfcache
+    // restore does not re-execute the script, and a real navigation discards
+    // the page along with the listener. lifecycle.abort() is idempotent, so a
+    // persisted pagehide followed later by a terminal one still tears down
+    // exactly once.
+    window.addEventListener('pagehide', (event) => {
+        if (event && event.persisted) return;
+
+        lifecycle.abort();
+    });
     announce();
 
     function labels() {
         // Language, in order of authority: the Manager's published choice, then
         // whatever Lectio (or English Mode) has put on <html lang>, then Danish -
         // Lectio is a Danish system, so a module running on its own stays Danish.
+        //
+        // Both the on-page strip and the settings schema read from here. The
+        // two literals sit between i18n markers so scripts/check-i18n.mjs can
+        // hold their keys in step; only display strings live here.
         const preferred = document.documentElement?.dataset?.lectioLanguage;
         const language = (preferred || document.documentElement.lang || 'da').toLowerCase();
         const english = language.startsWith('en');
 
         return english
+            // i18n:en
             ? {
                 summary: 'Week information',
                 compactSummary: 'Info',
@@ -206,8 +285,19 @@
                 hide: 'Hide',
                 oneDay: '1 day',
                 manyDays: count => `${count} days`,
-                fallbackDay: index => `Day ${index}`
+                fallbackDay: index => `Day ${index}`,
+                sectionDisplay: 'Display',
+                sectionInteraction: 'Interaction',
+                stripSizeLabel: 'Strip size',
+                stripSizeHelp: 'Choose the height and spacing of the summary strip.',
+                stripSizes: { slim: 'Slim', compact: 'Compact', comfortable: 'Comfortable' },
+                hoverPreviewLabel: 'Hover preview',
+                hoverPreviewHelp: 'Preview week information when pointing at the collapsed strip.',
+                initialStateLabel: 'Initial state',
+                initialStateHelp: 'Choose whether week information starts collapsed or expanded.',
+                initialStates: { collapsed: 'Collapsed', expanded: 'Expanded' }
             }
+            // i18n:da
             : {
                 summary: 'Ugeinformation',
                 compactSummary: 'Info',
@@ -215,8 +305,19 @@
                 hide: 'Skjul',
                 oneDay: '1 dag',
                 manyDays: count => `${count} dage`,
-                fallbackDay: index => `Dag ${index}`
+                fallbackDay: index => `Dag ${index}`,
+                sectionDisplay: 'Visning',
+                sectionInteraction: 'Betjening',
+                stripSizeLabel: 'Stribens størrelse',
+                stripSizeHelp: 'Vælg højde og luft i oversigtsstriben.',
+                stripSizes: { slim: 'Smal', compact: 'Kompakt', comfortable: 'Rummelig' },
+                hoverPreviewLabel: 'Forhåndsvisning med musen',
+                hoverPreviewHelp: 'Vis ugeinformationen, når musen peger på den sammenfoldede stribe.',
+                initialStateLabel: 'Starttilstand',
+                initialStateHelp: 'Vælg, om ugeinformationen starter sammenfoldet eller udfoldet.',
+                initialStates: { collapsed: 'Sammenfoldet', expanded: 'Udfoldet' }
             };
+            // i18n:end
     }
 
     function normalizedText(element) {

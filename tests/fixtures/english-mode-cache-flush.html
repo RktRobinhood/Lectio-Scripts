@@ -12,13 +12,13 @@
          * a future refactor could quietly drop: cachePut must not write, and
          * pagehide must flush what it learned.
          *
-         *   ?module=modules            the frozen stable copy (old behaviour)
-         *   ?module=modules-unstable   the copy under test (default)
+         *   ?module=modules            the folder to load English Mode from
+         *                              (default; it is Stable's copy now)
          *   ?strings=200               how many new strings the page learns
          *   ?seed=2000                 cache entries already in storage
          */
         const params = new URLSearchParams(location.search);
-        const moduleFolder = params.get('module') || 'modules-unstable';
+        const moduleFolder = params.get('module') || 'modules';
         const TOTAL = Number(params.get('strings') || 200);
         const SEED = Number(params.get('seed') || 2000);
         const CACHE_KEY = 'lectioEnglish.learned.v5';
@@ -152,7 +152,7 @@
             const settledWrites = stats.cacheWrites;
             await delay(3000);
 
-            if (moduleFolder === 'modules-unstable') {
+            if (moduleFolder === 'modules') {
                 assert(afterSettling > 0, 'nothing was ever persisted');
                 assert(afterSettling < TOTAL / 10,
                     `learning ${TOTAL} strings still cost ${afterSettling} cache writes`);

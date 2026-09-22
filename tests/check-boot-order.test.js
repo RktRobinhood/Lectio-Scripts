@@ -36,13 +36,9 @@ const repoRoot = resolve(__dirname, '..');
 const script = resolve(repoRoot, 'scripts', 'check-boot-order.mjs');
 
 // The findings the check reports today and cannot act on: see DEFERRED
-// FINDINGS in the script header and the issue each one names. Shrinking this
-// set is the follow-up landing; growing it needs a reason written there.
-const EXPECTED_DEFERRED = [
-    'modules/Lectio-Chairs-Up.user.js: let noticeObserver',
-    'modules/Lectio-Chairs-Up.user.js: let noticeFrame',
-    'modules/Lectio-Chairs-Up.user.js: let noticeNeedsPlacement'
-].sort();
+// FINDINGS in the script header and the issue each one names. Empty since
+// Chairs Up 1.4.3 was promoted; growing it needs a reason written there.
+const EXPECTED_DEFERRED = [];
 
 // Files carrying `// boot-order: not-checked — <reason>`. None today.
 const EXPECTED_NOT_CHECKED = [];
@@ -86,7 +82,11 @@ test('the default run passes, checks every userscript, and reports exactly the e
 
     const onDisk = CHECKED_DIRECTORIES.flatMap((directory) =>
         readdirSync(resolve(repoRoot, directory)).filter((name) => name.endsWith('.user.js')).map((name) => `${directory}/${name}`));
-    assert.ok(onDisk.length >= 10, `only ${onDisk.length} userscripts found on disk`);
+    // A floor, not a count: it catches a directory walk that has stopped
+    // finding anything. Nine is the whole set today - six modules, Change
+    // Radar on Unstable, the Manager and the template - where it was fifteen
+    // while six modules existed in both channels at once.
+    assert.ok(onDisk.length >= 9, `only ${onDisk.length} userscripts found on disk`);
 
     const summary = result.stdout.match(/^Checked (\d+) file\(s\): (\d+) passed, (\d+) with deferred findings, (\d+) not checked, (\d+) failed\.$/m);
     assert.ok(summary, `no summary line in:\n${result.stdout}`);
@@ -119,7 +119,7 @@ async function withScratch(directory, sourceFile, edit) {
 test('bites on Chairs Up (#36): the fetch safety-net state moved below the START block', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'lectio-boot-order-'));
     try {
-        const { control, edited } = await withScratch(directory, 'modules-unstable/Lectio-Chairs-Up.user.js', (source) => {
+        const { control, edited } = await withScratch(directory, 'modules/Lectio-Chairs-Up.user.js', (source) => {
             // c604041 declared this above START "on purpose: fetchHtml() can be
             // reached synchronously from main()". Put it beside fetchHtml instead.
             const declaration = '  let fetchInFlight =\n    false;\n';
@@ -146,7 +146,7 @@ test('bites on Chairs Up (#36): the fetch safety-net state moved below the START
 test('bites on Unread (#24): the nav-drift flag moved down beside findMessageNavLink()', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'lectio-boot-order-'));
     try {
-        const { control, edited } = await withScratch(directory, 'modules-unstable/Lectio-Unread-Message-Notifications.user.js', (source) => {
+        const { control, edited } = await withScratch(directory, 'modules/Lectio-Unread-Message-Notifications.user.js', (source) => {
             // d891e65 declared this "up here with the rest of the page-view
             // state" because init() reaches findMessageNavLink() synchronously.
             const declaration = '    let reportedNavDrift = false;\n';

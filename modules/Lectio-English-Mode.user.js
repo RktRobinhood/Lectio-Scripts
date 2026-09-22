@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio English Mode
 // @namespace    lectio-english-mode
-// @version      1.9.3
+// @version      1.11.6
 // @description  Context-aware English layer for Lectio with instant core UI translation, persistent cache and Google fallback.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-start
@@ -27,6 +27,12 @@
         SWITCH_POSITION_FLOATING
     ];
     const STORAGE_SWITCH_POSITION = 'lectioEnglish.switchPosition';
+    /*
+     * Moved up here from beside the learned library below, because the
+     * Manager handshake runs during this file's own evaluation and would
+     * otherwise read it while it was still in its temporal dead zone.
+     */
+    const STORAGE_CACHE = 'lectioEnglish.learned.v5';
     const LOG = '[Lectio English Mode]';
 
     function readSwitchPosition() {
@@ -60,10 +66,53 @@
     (function registerWithLectioManager() {
         const MODULE_ID = 'english-mode';
         const MODULE_NAME = 'Lectio English Mode';
-        const MODULE_VERSION = '1.9.3';
+        const MODULE_VERSION = '1.11.6';
+
+        /*
+         * The settings panel's own words, in both languages (ADR-0013). The
+         * Manager renders these strings exactly as given, so the schema is
+         * built from whichever language is current each time announce()
+         * runs, and lectio-manager:language re-announces it. Order of
+         * authority: the Manager's published choice, then <html lang> -
+         * which this very module sets to its own mode - then Danish.
+         *
+         * The two language names in the picker are deliberately not here:
+         * a language is named in itself, in both panels.
+         *
+         * The two literals sit between i18n markers so
+         * scripts/check-i18n.mjs can hold their keys in step. Only display
+         * strings live here - never a key, a type, a default or an option
+         * value.
+         */
+        function labels() {
+            const preferred = document.documentElement?.dataset?.lectioLanguage;
+            const language = (preferred || document.documentElement?.lang || 'da').toLowerCase();
+
+            return language.startsWith('en')
+                // i18n:en
+                ? {
+                    languageLabel: 'Interface language',
+                    languageHelp: 'Reloads Lectio in the selected language.',
+                    positionLabel: 'Language switch position',
+                    positionHelp: 'Choose whether the DA/EN switch scrolls with the page or stays visible.',
+                    positionLocked: 'Locked',
+                    positionFloating: 'Floating'
+                }
+                // i18n:da
+                : {
+                    languageLabel: 'Sprog i brugerfladen',
+                    languageHelp: 'Genindlæser Lectio på det valgte sprog.',
+                    positionLabel: 'Sprogknappens placering',
+                    positionHelp: 'Vælg, om DA/EN-knappen ruller med siden eller bliver stående synlig.',
+                    positionLocked: 'Låst',
+                    positionFloating: 'Flydende'
+                };
+                // i18n:end
+        }
 
         function announce() {
             const storedMode = GM_getValue(STORAGE_MODE, MODE_DA);
+            const text = labels();
 
             window.dispatchEvent(new CustomEvent('lectio-module:register', {
                 detail: {
@@ -74,8 +123,8 @@
                         {
                             key: 'language',
                             type: 'select',
-                            label: 'Interface language',
-                            description: 'Reloads Lectio in the selected language.',
+                            label: text.languageLabel,
+                            description: text.languageHelp,
                             options: [
                                 { value: MODE_DA, label: 'Dansk' },
                                 { value: MODE_EN, label: 'English' }
@@ -84,20 +133,70 @@
                         {
                             key: 'switchPosition',
                             type: 'select',
-                            label: 'Language switch position',
-                            description: 'Choose whether the DA/EN switch scrolls with the page or stays visible.',
+                            label: text.positionLabel,
+                            description: text.positionHelp,
                             options: [
-                                { value: SWITCH_POSITION_LOCKED, label: 'Locked' },
-                                { value: SWITCH_POSITION_FLOATING, label: 'Floating' }
+                                { value: SWITCH_POSITION_LOCKED, label: text.positionLocked },
+                                { value: SWITCH_POSITION_FLOATING, label: text.positionFloating }
                             ]
                         }
                     ],
                     currentValues: {
                         language: [MODE_DA, MODE_EN].includes(storedMode) ? storedMode : MODE_DA,
                         switchPosition
-                    }
+                    },
+                    /*
+                     * What this module keeps, and where (issue #29,
+                     * docs/manager-storage-api.md).
+                     *
+                     * All of it is `area: 'script'`. This is the one module
+                     * that holds GM_getValue storage rather than the page's
+                     * localStorage, so none of it counts against the site's
+                     * ~5 MB and none of it is visible to the Manager - GM
+                     * storage is per-script and cannot be enumerated from
+                     * another userscript. Declaring it anyway is the point:
+                     * the readout says so in as many words, instead of
+                     * leaving this module's absence to read as a bug.
+                     *
+                     * The learned library is prunable: every entry in it can
+                     * be translated again. The two settings are not.
+                     */
+                    storage: [
+                        {
+                            key: STORAGE_MODE,
+                            area: 'script',
+                            kind: 'setting',
+                            label: { en: 'Chosen language', da: 'Valgt sprog' }
+                        },
+                        {
+                            key: STORAGE_SWITCH_POSITION,
+                            area: 'script',
+                            kind: 'setting',
+                            label: { en: 'Switch position', da: 'Knappens placering' }
+                        },
+                        {
+                            key: STORAGE_CACHE,
+                            area: 'script',
+                            kind: 'cache',
+                            prunable: true,
+                            label: { en: 'Learned translations', da: 'Lærte oversættelser' }
+                        }
+                    ]
                 }
             }));
+        }
+
+        /*
+         * The Manager asks; this does the deleting, and only for the one key
+         * it declared prunable. The Manager could not do this itself even if
+         * it wanted to: GM storage belongs to this script alone.
+         */
+        function handlePrune(event) {
+            const detail = event?.detail;
+
+            if (detail?.id !== MODULE_ID || detail.key !== STORAGE_CACHE) return;
+
+            forgetLearnedTranslations();
         }
 
         function handleSetting(event) {
@@ -124,9 +223,48 @@
 
         window.addEventListener('lectio-manager:discover', announce);
         window.addEventListener('lectio-manager:set-setting', handleSetting);
+        window.addEventListener('lectio-manager:prune-storage', handlePrune);
+        // The schema was worded in whichever language was current when it
+        // was announced, so a language chosen later is answered with a fresh
+        // one.
+        window.addEventListener('lectio-manager:language', announce);
         announce();
     })();
-    const STORAGE_CACHE = 'lectioEnglish.learned.v5';
+
+    /*
+     * OWN STORAGE: PRUNE AND REPORT (issue #29)
+     *
+     * There is no GM_deleteValue in this script's grants, so emptying the
+     * object is the delete: the next flush writes {} over what was there.
+     */
+    function forgetLearnedTranslations() {
+        cache = {};
+
+        try {
+            GM_setValue(STORAGE_CACHE, cache);
+        } catch (_) {
+            reportStorageWriteFailure();
+        }
+    }
+
+    /*
+     * A failed write is still caught and this module still translates from
+     * memory - unchanged. What is new is saying so once per page load, as a
+     * token with nothing from the page in it. The flag hangs off the function
+     * rather than sitting beside it as a module-scope binding, because a
+     * declaration hoists and this file runs its handshake part-way through
+     * its own evaluation.
+     */
+    function reportStorageWriteFailure() {
+        if (reportStorageWriteFailure.reported) return;
+        reportStorageWriteFailure.reported = true;
+
+        try {
+            reportToManager('error', 'storage-write', 0);
+        } catch (_) {
+            // Reporting a failure must never become a second failure.
+        }
+    }
 
     const CFG = {
         translateReadOnlyContent: true,
@@ -745,7 +883,210 @@
                 'The classes you are a class teacher for are automatically added as class favorites and cannot be removed.',
 
             'Ved at vælge en stamklasse som stamklassefavorit vil der være adgang til den indbyggede gruppe med stamklassens lærere:"Alle stamklassenavn lærere" fra Dokumenter, Beskeder samt på Forsiden.':
-                'Selecting a home class as a home class favorite gives access to the built-in group of that home class\'s teachers: "All [home class name] teachers" from Documents, Messages, and the Overview page.'
+                'Selecting a home class as a home class favorite gives access to the built-in group of that home class\'s teachers: "All [home class name] teachers" from Documents, Messages, and the Overview page.',
+
+            /*
+             * Study Plan, Annual Summary, Time Tracking, Surveys and the
+             * three create forms (issue #21 audit, teacher role, school
+             * 223). Every key below was read off the rendered Danish page;
+             * none is guessed. Most were not merely missing here - they
+             * contain no word the hasDanish() gate recognises, so they were
+             * never even sent to the Google fallback and stayed Danish
+             * outright. "Privat Aftale" is the form's own heading, which
+             * Lectio title-cases differently from the link that opens it.
+             */
+            'Deling': 'Sharing',
+            'Fagvalg': 'Subject Choice',
+            'Vis': 'Show',
+            'Søg': 'Search',
+            'Kun opgaver': 'Assignments only',
+            'Horisontal': 'Horizontal',
+            'Måned': 'Month',
+            'Uge': 'Week',
+            'Medlemsskema': 'Member Schedule',
+            'Materialer': 'Materials',
+            'Modulregnskab': 'Period Count',
+            'Lærere-Elever': 'Teachers-Students',
+            'Adgangskoder': 'Access Codes',
+            'Forløbsliste': 'Unit List',
+            'Der er ingen forløb': 'There are no units',
+            'Anvend': 'Apply',
+            'Tryk for at se flere muligheder': 'Click to see more options',
+            'Åbn hjælp til dette skærmbillede': 'Open help for this screen',
+            'Vis større foto': 'Show larger photo',
+            'Søg efter beskeder og dokumenter': 'Search messages and documents',
+            'Gem data og luk posten. Genvej: Alt+S': 'Save and close. Shortcut: Alt+S',
+            'Luk posten uden at gemme. Genvej: Alt+Z': 'Close without saving. Shortcut: Alt+Z',
+            'Gem data uden at lukke posten. Genvej: Alt+W': 'Save without closing. Shortcut: Alt+W',
+
+            'Timeberegning': 'Hour Calculation',
+            'Ekstra timer': 'Extra Hours',
+            'Eks.Belastning': 'Exam Load',
+            'Tidsregistrering': 'Time Tracking',
+            /*
+             * The start-registration control in the global nav,
+             * on every teacher page. Read off the live DOM at
+             * school 223 (issue #61); the source carries a line
+             * break after the first sentence, which normalize()
+             * collapses to the space used here.
+             */
+            'Starter ny tidsregistrering og sætter starttid til nu. Posten kan efterfølgende redigeres på Tidsregistreringssiden.':
+                'Starts a new time registration with the start time set to now. The entry can be edited afterwards on the Time Tracking page.',
+            'Min periode': 'My Period',
+            'Budgetteret': 'Budgeted',
+            'Realiseret': 'Actual',
+            'LærerKred': 'Teacher Credit',
+            'Holdnorm': 'Class Norm',
+            'Lærernorm': 'Teacher Norm',
+            'Timer': 'Hours',
+            'Ekstra': 'Extra',
+            'Ej hold': 'No Class',
+            'Undervisning i alt': 'Teaching Total',
+            'Tillæg/opgaver': 'Supplements/Tasks',
+            'Bemærkninger': 'Remarks',
+            'Ingen tillæg': 'No supplements',
+            'Sum': 'Total',
+            'Aftalt timetal': 'Agreed Hours',
+            'Overtimer/Undertimer': 'Overtime/Undertime',
+
+            'Vis hele året': 'Show whole year',
+            'Registrer ferie': 'Register Holiday',
+            'Dag': 'Day',
+            'Fra kl.': 'From',
+            'Til kl.': 'To',
+            'Timetal': 'Hour Count',
+            'Arbejde': 'Work',
+            'Helligdag': 'Public Holiday',
+            'Ferie': 'Holiday',
+            'Særlige feriedage': 'Special Holiday Days',
+            'Sygdom': 'Sick Leave',
+            'Barns sygdom': 'Child Sick Leave',
+            'Omsorgsdag': 'Care Day',
+            'Omsorgsdage': 'Care Days',
+            'Afspadsering': 'Time Off in Lieu',
+            'Barsel': 'Parental Leave',
+            'Andet': 'Other',
+            'Kopiér rækken': 'Copy row',
+            'Opgørelse': 'Statement',
+            'Periode': 'Period',
+            'Saldo': 'Balance',
+            'Udspecificeret': 'Breakdown',
+
+            'Opret spørgeskema': 'Create Survey',
+            'Åbne for besvarelse': 'Open for Responses',
+            'Åbne for rapportering': 'Open for Reporting',
+            'Egne spørgeskemaer': 'My Surveys',
+            'Titel': 'Title',
+            'Ejer': 'Owner',
+            'Anonym': 'Anonymous',
+            'Svarfrist': 'Response Deadline',
+            'Frigives': 'Released',
+            'Udløber': 'Expires',
+            'Ingen spørgeskemaer åbne for besvarelse...': 'No surveys open for responses...',
+            'Ingen spørgeskemaer...': 'No surveys...',
+            'Vis kun aktuelle': 'Current only',
+            'Besvarelse foregår anonymt: Ja/Nej': 'Responses are anonymous: Yes/No',
+            'Besvar spørgeskema inden dette tidspunkt': 'Answer the survey before this time',
+            'Frigivelse af spørgeskemaundersøgelsens resultater': 'Release of the survey results',
+            'Herefter er resultaterne ikke længere tilgængelige': 'After this the results are no longer available',
+            'Vis resultat af spørgeskemaundersøgelsen': 'Show survey results',
+
+            'Opret aktivitet': 'Create Activity',
+            'Anden aktivitetsliste': 'Other Activity List',
+            'Vælg modul': 'Select Period',
+            'Aflyst': 'Cancelled',
+            'Deltagere': 'Participants',
+            'Valgte': 'Selected',
+            'Ressourcer': 'Resources',
+            'Krediteret lærer': 'Credited Teacher',
+            'Krediteringsnote': 'Credit Note',
+            'Krediteringsrolle': 'Credit Role',
+            'Krediteret hold': 'Credited Class',
+            'Dobbeltbookninger': 'Double Bookings',
+            'Opdater': 'Update',
+            'Aflys dobbeltbookede aktiviteter': 'Cancel double-booked activities',
+            'Der er ikke fundet nogen dobbeltbookninger': 'No double bookings found',
+            'Vælg Hold': 'Select Class',
+            'Vælg Lærer': 'Select Teacher',
+            'Vælg Lokale': 'Select Room',
+            'Vælg Ressource': 'Select Resource',
+            'Søg: hold, lærer, lokale, ressource': 'Search: class, teacher, room, resource',
+            'Tilføj hold, lærer, lokale eller ressource som deltager': 'Add a class, teacher, room or resource as a participant',
+            'Sætter hak i alle bokse': 'Ticks every box',
+            'Fjerner hak i alle bokse': 'Unticks every box',
+            'Start': 'Start',
+            'Slut': 'End',
+            'Vises i': 'Shown in',
+            'Skema-top': 'Schedule Top',
+            'Dags/Ugeændringer': 'Day/Week Changes',
+            'Skjul elevdeltagelse for andre elever': 'Hide student participation from other students',
+            'Frivillig aktivitet (Reserverer ikke deltagere)': 'Optional activity (does not reserve participants)',
+            'Tilmelding': 'Sign-up',
+            'Brug tilmelding': 'Use sign-up',
+            'Dobbeltbookede entiteter': 'Double-booked entities',
+            'Note på aflyste aktiviteter': 'Note on cancelled activities',
+            'Aflysningsårsag': 'Cancellation Reason',
+            'Censor': 'Examiner',
+            'Ekskursion': 'Field Trip',
+            'Ferietimer': 'Holiday Hours',
+            'Fællesaktiviteter': 'Joint Activities',
+            'Kurser': 'Courses',
+            'Studievejledning': 'Student Counselling',
+            'Tjenestefri': 'Leave of Absence',
+            'Privat Aftale': 'Private Appointment',
+            'Private aftaler kan ikke ses af andre': 'Private appointments cannot be seen by others',
+
+            /*
+             * What the rendered-English pass over the same screens found
+             * (issue #63, English Mode running as a teacher at school 223).
+             * Each key is the source of a string that rendered wrong: still
+             * Danish, mistranslated by the fallback ("Afmarkér alle" ->
+             * "Demarcate all", "Lærerkred." -> "Teaching staff."), or
+             * inconsistent with the module's own words ("Studieplan
+             * Kalender" -> "Study plan Calendar" beside "Course Plan").
+             *
+             * The single capitalised words are here for a reason beyond
+             * vocabulary: looksLikeName() treats a lone capitalised word
+             * with no recognisable Danish in it as a person's name and
+             * never translates it, which is why "Mandag".."Fredag" stayed
+             * Danish on Time Tracking while "Lørdag" and "Søndag" (with
+             * their ø) did not, and why "Mere", "Tidsreg." and
+             * "Hurtignavigering" never moved. An exact entry is checked
+             * before that guard.
+             */
+            'Studieplan Kalender': 'Course Plan Calendar',
+            'Mandag': 'Monday',
+            'Tirsdag': 'Tuesday',
+            'Onsdag': 'Wednesday',
+            'Torsdag': 'Thursday',
+            'Fredag': 'Friday',
+            'Lørdag': 'Saturday',
+            'Søndag': 'Sunday',
+            'Mere': 'More',
+            'Tidsreg.': 'Time reg.',
+            'Hurtignavigering': 'Quick navigation',
+            'Se versioninformation': 'Show version information',
+            'Visning: - Forløb og opgaver. Viser hold med mindst én opgave eller forløb. - Kun opgaver: Viser hold, som har mindst én opgave.':
+                'Show: - Units and Assignments. Shows classes with at least one assignment or unit. - Assignments only: Shows classes with at least one assignment.',
+            'Aktuelle hold er: Aktive holdelementer, med mindst én aktiv elev på dags dato.':
+                'Current classes are: active classes with at least one active student as of today.',
+            'Lærerkred. - Summen af afholdte og planlagte moduler med læreren.':
+                'Teacher credit - the sum of held and planned periods with the teacher.',
+            'Opgjort i moduler af 70 min.': 'Calculated in periods of 70 min.',
+            'Dagsnorm': 'Daily norm',
+            'Registreret': 'Registered',
+            'Forventet': 'Expected',
+            'Timer uden ferie/helligdage': 'Hours excluding holidays/public holidays',
+            'Der er ingen lærere at kreditere': 'There are no teachers to credit',
+            'Markér alle': 'Select all',
+            'Afmarkér alle': 'Deselect all',
+            'Afkrydsning i Dags/Ugeændringer er ikke gyldigt uden afkrydsning i Skema eller Skema-top.':
+                'A tick in Day/Week Changes is not valid without a tick in Schedule or Schedule Top.',
+            'Sæt kryds hvis tilmelding skal slås til på begivenheden': 'Tick to enable sign-up for the event',
+            'Bruges fx til skjule en fraværssamtale for andre elever':
+                'Used, for example, to hide an absence interview from other students',
+            'Ved flueben i Frivillig aktivitet reserveres deltagere ikke. Bemærk dog at lokaler og ressourcer altid reserveres. Deltagere er dermed i denne kontekst; lærere og elever.':
+                'Ticking Optional activity does not reserve participants. Note that rooms and resources are always reserved. Participants in this context means teachers and students.'
         });
 
     const WEEKDAYS =
@@ -775,6 +1116,69 @@
             lør: 'Sat',
             sø: 'Sun',
             søn: 'Sun'
+        });
+
+    /*
+     * Danish month abbreviations as the Study Plan calendar
+     * writes them ("okt. 2026", "maj. 2027"). They carry no
+     * word hasDanish() recognises, so they never reached the
+     * fallback and stayed Danish outright (issue #61).
+     */
+    const SHORT_MONTHS =
+        Object.freeze({
+            jan: 'Jan',
+            feb: 'Feb',
+            mar: 'Mar',
+            apr: 'Apr',
+            maj: 'May',
+            jun: 'Jun',
+            jul: 'Jul',
+            aug: 'Aug',
+            sep: 'Sep',
+            sept: 'Sep',
+            okt: 'Oct',
+            nov: 'Nov',
+            dec: 'Dec'
+        });
+
+    /*
+     * Full month names, as the Time Tracking statement writes them
+     * ("Juli 2026"). Like the abbreviations, only with a year after
+     * them (issue #63).
+     */
+    const MONTHS =
+        Object.freeze({
+            januar: 'January',
+            februar: 'February',
+            marts: 'March',
+            april: 'April',
+            maj: 'May',
+            juni: 'June',
+            juli: 'July',
+            august: 'August',
+            september: 'September',
+            oktober: 'October',
+            november: 'November',
+            december: 'December'
+        });
+
+    /*
+     * Phrases that only ever occur next to a figure that varies - the
+     * Annual Summary tooltips "Budgetterede timer: 0 + 0 Realiserede
+     * timer: 4,4 + 0 + 0" and "Aftalt timetal i alt 26/27: 1694,6
+     * Periode: ... (365 dage) ...". Sent to the fallback, they came back
+     * readable but with every decimal comma turned into a point
+     * ("4,4" -> "4.4", "1694,6" -> "1694.6"), so they are resolved
+     * locally, phrase by phrase, and the figures are never touched
+     * (issue #63).
+     */
+    const PHRASES =
+        Object.freeze({
+            'Aftalt timetal i alt': 'Agreed hours in total',
+            'Aftalt timetal i perioden': 'Agreed hours in the period',
+            'Antal kalenderdage': 'Number of calendar days',
+            'Budgetterede timer': 'Budgeted hours',
+            'Realiserede timer': 'Actual hours'
         });
 
     /*
@@ -818,16 +1222,59 @@
         );
     }
 
-    function cachePut(
-        source,
-        raw,
-        lang
-    ) {
-        cache[source] = {
-            raw,
-            lang: lang || null,
-            ts: Date.now()
-        };
+    /*
+     * Persistence is a flush, not a write per learned string.
+     *
+     * cachePut used to serialise the whole cache - up to
+     * maxCacheEntries entries, a couple of hundred KB - every
+     * single time it learned something, and rebuilt
+     * Object.entries(cache) just to test the size. A text-heavy
+     * page learning 200 strings therefore did 200 full writes of
+     * a structure that only grew. The in-memory cache is the
+     * authority; storage catches up on idle, and always before
+     * the page goes away. Contents and eviction policy are
+     * unchanged - only when they are written moved.
+     */
+    const CACHE_FLUSH_MS = 1000;
+
+    let cacheDirty = false;
+    let cacheFlushTimer = null;
+    let cacheFlushIdle = null;
+
+    function cancelCacheFlush() {
+        if (cacheFlushTimer !== null) {
+            clearTimeout(cacheFlushTimer);
+
+            cacheFlushTimer = null;
+        }
+
+        if (cacheFlushIdle !== null) {
+            if (
+                typeof cancelIdleCallback ===
+                'function'
+            ) {
+                cancelIdleCallback(
+                    cacheFlushIdle
+                );
+            }
+
+            cacheFlushIdle = null;
+        }
+    }
+
+    function flushCache() {
+        /*
+         * Always clear the pending work first, so a pending timer
+         * can never outlive the page it belongs to and keep its
+         * cache alive.
+         */
+        cancelCacheFlush();
+
+        if (!cacheDirty) {
+            return;
+        }
+
+        cacheDirty = false;
 
         const entries =
             Object.entries(cache);
@@ -851,10 +1298,117 @@
                 );
         }
 
-        GM_setValue(
-            STORAGE_CACHE,
-            cache
+        try {
+            GM_setValue(
+                STORAGE_CACHE,
+                cache
+            );
+        }
+
+        catch (_) {
+            // Carry on translating from memory, and say so once (issue #29).
+            reportStorageWriteFailure();
+        }
+    }
+
+    /*
+     * One flush per burst: scheduling is a no-op while a flush is
+     * already pending, so a page that learns 200 strings collapses
+     * into a single write rather than resetting a debounce
+     * forever and never persisting at all.
+     */
+    function scheduleCacheFlush() {
+        if (
+            cacheFlushTimer !== null ||
+            cacheFlushIdle !== null
+        ) {
+            return;
+        }
+
+        if (
+            typeof requestIdleCallback ===
+            'function'
+        ) {
+            cacheFlushIdle =
+                requestIdleCallback(
+                    () => {
+                        cacheFlushIdle = null;
+                        flushCache();
+                    },
+                    {
+                        timeout: CACHE_FLUSH_MS
+                    }
+                );
+
+            return;
+        }
+
+        cacheFlushTimer =
+            setTimeout(
+                () => {
+                    cacheFlushTimer = null;
+                    flushCache();
+                },
+                CACHE_FLUSH_MS
+            );
+    }
+
+    function handleCacheFlushVisibility() {
+        if (document.hidden) {
+            flushCache();
+        }
+    }
+
+    /*
+     * Lectio is a multi-page app, so navigation - not tab close -
+     * is the normal exit. pagehide is the last point at which the
+     * page can still write. A page kept for the back/forward
+     * cache (persisted) keeps its listeners, because it can be
+     * restored and go on learning; one that is really going away
+     * drops them along with any pending flush.
+     */
+    function handleCacheFlushPagehide(event) {
+        flushCache();
+
+        if (event?.persisted) {
+            return;
+        }
+
+        window.removeEventListener(
+            'pagehide',
+            handleCacheFlushPagehide
         );
+
+        document.removeEventListener(
+            'visibilitychange',
+            handleCacheFlushVisibility
+        );
+    }
+
+    window.addEventListener(
+        'pagehide',
+        handleCacheFlushPagehide
+    );
+
+    document.addEventListener(
+        'visibilitychange',
+        handleCacheFlushVisibility
+    );
+
+    function cachePut(
+        source,
+        raw,
+        lang
+    ) {
+        cache[source] = {
+            raw,
+            lang: lang || null,
+            ts: Date.now()
+        };
+
+        cacheDirty = true;
+
+        scheduleCacheFlush();
     }
 
     /*
@@ -1611,6 +2165,19 @@
             return true;
         }
 
+        /*
+         * The footer's "Lectio version 24.035" is a product name and a
+         * number. The fallback rendered it "Reading version 24.035" -
+         * lectio is Latin - so it is an identifier here and never sent
+         * (issue #63).
+         */
+        if (
+            /^Lectio version [\d.]+$/i
+                .test(source)
+        ) {
+            return true;
+        }
+
         if (
             /^[^\s@]+@[^\s@]+\.[^\s@]+$/
                 .test(source)
@@ -1793,6 +2360,23 @@
                                 );
                         }
 
+                        /*
+                         * A class's own pages: "Holdet 1i TOK/4 -
+                         * Studieplan Kalender", "Holdet 1i TOK/4 -
+                         * Forløbsliste". The fallback wrote "class 1i
+                         * TOK/4 - Progress list" (issue #63).
+                         */
+                        if (
+                            /^Holdet\b/i
+                                .test(value)
+                        ) {
+                            return value
+                                .replace(
+                                    /^Holdet\b/i,
+                                    'Class'
+                                );
+                        }
+
                         if (
                             index ===
                                 pieces.length - 1 &&
@@ -1822,6 +2406,19 @@
                     } period`
             );
 
+        /*
+         * "1. modul kl. 08:15-09:25" (the Modul row of Create
+         * Lesson) used to leave the pattern pass as "1st period
+         * kl. 08:15-09:25". Drop the "kl." only when it sits
+         * between the period just written above and a clock
+         * time (issue #61).
+         */
+        result =
+            result.replace(
+                /\bperiod kl\.\s*(?=\d{1,2}[:.]\d{2})/g,
+                'period '
+            );
+
         result =
             result.replace(
                 /\bUge\s+(\d{1,2})\b/gi,
@@ -1845,14 +2442,27 @@
                 );
         }
 
+        /*
+         * A weekday abbreviation before a date, at the start of the
+         * string and after " - ", so the Study Plan calendar's week
+         * range "ma 6/7-26 - sø 12/7-26" comes out "Mon 6/7-26 - Sun
+         * 12/7-26" rather than stopping at the first day (issue #68).
+         */
         result =
             result.replace(
-                /^([A-Za-zÆØÅæøå]{2,3})(?=\s+\d{1,2}\/\d{1,2})/i,
-                match =>
-                    SHORT_DAYS[
-                        match.toLowerCase()
-                    ] ||
-                    match
+                /(^| - )([A-Za-zÆØÅæøå]{2,3})(?=\s+\d{1,2}\/\d{1,2})/gi,
+                (
+                    _,
+                    lead,
+                    day
+                ) =>
+                    lead +
+                    (
+                        SHORT_DAYS[
+                            day.toLowerCase()
+                        ] ||
+                        day
+                    )
             );
 
         result =
@@ -1934,6 +2544,158 @@
                     'oral'
                 );
 
+        /*
+         * Study Plan calendar month labels: "okt. 2026" ->
+         * "Oct 2026". Only an abbreviation with its trailing
+         * dot and a four-digit year after it (issue #61).
+         */
+        result =
+            result.replace(
+                /(^|\s)(jan|feb|mar|apr|maj|jun|jul|aug|sept?|okt|nov|dec)\.\s+(?=\d{4}\b)/gi,
+                (
+                    _,
+                    lead,
+                    month
+                ) =>
+                    `${lead}${
+                        SHORT_MONTHS[
+                            month.toLowerCase()
+                        ]
+                    } `
+            );
+
+        /*
+         * The hour abbreviation "t." (timer) after a number,
+         * as in the Study Plan footer "Total: 10,5 t." and
+         * "Norm: 32 t.". Only the number-space-"t." shape, at
+         * the end or before punctuation, so a "t." anywhere in
+         * ordinary text is untouched (issue #61).
+         */
+        result =
+            result.replace(
+                /(\d)\s+t\.(?=$|[\s,;:)])/g,
+                '$1 h'
+            );
+
+        /*
+         * Annual Summary period names. The year varies, so
+         * these cannot be exact entries; each rule needs the
+         * period word and the year shape together (issue #61).
+         */
+        result =
+            result
+                .replace(
+                    /\bSkoleåret\s+(?=\d{2,4}\/\d{2,4}\b)/gi,
+                    'School year '
+                )
+                .replace(
+                    /\bAndet halvår\s+(?=\d{4}\b)/gi,
+                    'Second half '
+                )
+                .replace(
+                    /\bFørste halvår\s+(?=\d{4}\b)/gi,
+                    'First half '
+                )
+                .replace(
+                    /\bFinansåret\s+(?=\d{4}\b)/gi,
+                    'Financial year '
+                );
+
+        /*
+         * A class code followed by "aktivitet" ("1i - aktivitet",
+         * "1i aktivitet/4", "2i Aktivitet") is the name Lectio
+         * gives a class's non-lesson activities. It used to go
+         * to the fallback on the strength of "aktivitet" and
+         * rely on postCorrect() to repair the class code
+         * afterwards. The whole string must be exactly that
+         * shape - digits, one to three letters, a separator,
+         * the word, an optional "/N" - so nothing else matches
+         * (issue #61). Capitalised as postCorrect() already
+         * renders it.
+         */
+        result =
+            result.replace(
+                /^(\d{1,2}\p{L}{1,3})( - | )aktivitet(\/\d+)?$/iu,
+                '$1$2Activity$3'
+            );
+
+        /*
+         * Full month names with a year: "Juli 2026" -> "July 2026"
+         * (issue #63). "August 2026" comes out as it went in.
+         */
+        result =
+            result.replace(
+                /(^|\s)(januar|februar|marts|april|maj|juni|juli|august|september|oktober|november|december)(?=\s+\d{4}\b)/gi,
+                (
+                    _,
+                    lead,
+                    month
+                ) =>
+                    `${lead}${
+                        MONTHS[
+                            month.toLowerCase()
+                        ]
+                    }`
+            );
+
+        /*
+         * The footer's page time: "21/9-2026 kl. 21:00" -> "21/9-2026
+         * at 21:00". Only a full date, "kl." and a clock time, so the
+         * "kl." of any other shape is left to the rules above
+         * (issue #63).
+         */
+        result =
+            result.replace(
+                /^(\d{1,2}\/\d{1,2}-\d{4}) kl\. (\d{1,2}:\d{2})$/,
+                '$1 at $2'
+            );
+
+        for (
+            const [
+                danish,
+                english
+            ]
+            of Object.entries(PHRASES)
+        ) {
+            result =
+                result.replace(
+                    new RegExp(
+                        `\\b${danish}\\b`,
+                        'g'
+                    ),
+                    english
+                );
+        }
+
+        result =
+            result.replace(
+                /\((\d+) dage\)/g,
+                '($1 days)'
+            );
+
+        /*
+         * A label in front of a figure - "Arbejde: 232,7, Barns sygdom:
+         * 7,4", "Saldo: 10,7", "Dagsnorm: 7,4" on Time Tracking - is
+         * looked up as an entry of its own. Only labels the dictionary
+         * knows change, so "Total: 10,5 h" and "Norm: 32 h" are as they
+         * were; a label the fallback would have to guess at is not the
+         * kind of thing this rule is for (issue #63).
+         */
+        result =
+            result.replace(
+                /(^|, |\s)([\p{L}][\p{L} \/]*?)(?=: -?\d)/gu,
+                (
+                    _,
+                    lead,
+                    label
+                ) =>
+                    lead +
+                    (
+                        exactCore(label) ??
+                        label
+                    )
+            );
+
         return {
             text: result,
 
@@ -1953,6 +2715,40 @@
         'https://translate.googleapis.com/translate_a/single',
         'https://translate.google.com/translate_a/single'
     ];
+
+    /*
+     * Telling the Manager something failed (docs/manager-problem-log.md).
+     * One-way and additive: with no Manager installed this lands on a window
+     * nobody is listening to, which is a no-op.
+     *
+     * This module has no fragile Lectio selector to report drift against - it
+     * reads headings, links and buttons, which are HTML rather than Lectio -
+     * so what it has to say is this: the fallback it leans on for anything it
+     * does not know itself stopped answering. The symptom today is a page
+     * that is half translated and no explanation anywhere.
+     *
+     * `code` is a token written here, never text read off a page or out of a
+     * response - there is deliberately no field for a message, because this
+     * log is written to be pasted into a public issue, and the text this
+     * module handles is the text of someone's Lectio.
+     */
+    let reportedTranslateFailure = false;
+
+    function reportToManager(kind, code, found) {
+        window.dispatchEvent(
+            new CustomEvent(
+                'lectio-module:report',
+                {
+                    detail: {
+                        moduleId: 'english-mode',
+                        kind,
+                        code,
+                        found
+                    }
+                }
+            )
+        );
+    }
 
     function gmRequest(details) {
         return new Promise(
@@ -2077,6 +2873,18 @@
             } catch (error) {
                 lastError = error;
             }
+        }
+
+        // Once per page load: every untranslated string on the page is about
+        // to fail the same way, and one row says as much as a thousand.
+        if (!reportedTranslateFailure) {
+            reportedTranslateFailure = true;
+
+            reportToManager(
+                'error',
+                'translation-endpoints',
+                0
+            );
         }
 
         throw (
@@ -3145,6 +3953,41 @@
         }
     }
 
+    /*
+     * Writes a fragment of an already-translated word into a
+     * text node and records it as final, so processText() does
+     * not take "acking" or "T" for a Danish string of its own
+     * and send it to the fallback.
+     */
+    function pinTextNode(node, value) {
+        node.nodeValue = value;
+
+        const state =
+            textStateFor(node);
+
+        state.source = value;
+        state.rendered = value;
+        state.final = value;
+        state.pending = null;
+    }
+
+    /*
+     * Lectio wraps a keyboard accesskey letter in
+     * <span class="shortcutletter">, so a label is two or three
+     * nodes and no single one of them matches its dictionary
+     * entry. Issue #20 handled the leading letter
+     * ("<span>R</span>ediger"); the Annual Summary tabs put it
+     * mid-word ("Tids<span>r</span>egistrering",
+     * "Eks.<span>B</span>elastning") and the personal nav does
+     * the same ("Bes<span>k</span>eder"), so the text node
+     * before the span is part of the word too (issue #61).
+     *
+     * The English is redistributed so the span keeps the
+     * accesskey letter where it occurs in the English word
+     * ("Time T", "r", "acking" for Alt+R), and keeps the first
+     * character when the letter does not occur at all, as the
+     * #20 shape did.
+     */
     function fixShortcutLetterSplit(element) {
         const letterSpan =
             element.querySelector(
@@ -3162,28 +4005,103 @@
             return;
         }
 
+        const lead =
+            letterSpan.previousSibling;
+
+        const head =
+            lead &&
+            lead.nodeType === Node.TEXT_NODE
+                ? lead
+                : null;
+
         const letter =
             normalize(letterSpan.textContent);
 
         const remainder =
             normalize(rest.nodeValue);
 
+        const start =
+            head
+                ? normalize(head.nodeValue)
+                : '';
+
         if (!letter || !remainder) {
             return;
         }
 
-        const translated =
-            exactCore(letter + remainder);
+        let translated =
+            start
+                ? exactCore(
+                    start + letter + remainder
+                )
+                : null;
+
+        const usesHead =
+            translated !== null;
+
+        if (translated === null) {
+            translated =
+                exactCore(letter + remainder);
+        }
 
         if (!translated) {
             return;
         }
 
-        letterSpan.textContent =
-            translated.slice(0, 1);
+        let at =
+            translated
+                .toLowerCase()
+                .indexOf(
+                    letter.toLowerCase()
+                );
 
-        rest.nodeValue =
-            translated.slice(1);
+        /*
+         * The letter can only move into the text before the
+         * span when that text is part of the same word.
+         */
+        if (
+            at < 0 ||
+            (
+                at > 0 &&
+                !usesHead
+            )
+        ) {
+            at = 0;
+        }
+
+        if (usesHead) {
+            pinTextNode(
+                head,
+
+                (
+                    head.nodeValue
+                        .match(/^\s*/)?.[0] ||
+                    ''
+                ) +
+                translated.slice(0, at)
+            );
+        }
+
+        letterSpan.textContent =
+            translated.slice(at, at + 1);
+
+        if (letterSpan.firstChild) {
+            pinTextNode(
+                letterSpan.firstChild,
+                letterSpan.firstChild.nodeValue
+            );
+        }
+
+        pinTextNode(
+            rest,
+
+            translated.slice(at + 1) +
+            (
+                rest.nodeValue
+                    .match(/\s*$/)?.[0] ||
+                ''
+            )
+        );
     }
 
     function processElement(element) {
@@ -3217,7 +4135,77 @@
             );
         }
 
+        processTooltip(element);
         processInput(element);
+    }
+
+    /*
+     * Lectio's own hover text is a data-tooltip attribute, and on
+     * the Study Plan calendar it is the only text of the cell
+     * ("ma 6/7-26 - sø 12/7-26" on div.columnContainer, "2i
+     * Aktivitet" on the column headers). It is translated in place
+     * like a title, with one exception: a timetable lesson block.
+     * Chairs Up, Subject Colours and Change Radar parse that
+     * attribute as Danish - the "Hold:" and "Lokale(r):" lines, an
+     * "Aflyst!" prefix - and a lesson block is what carries it on
+     * SkemaNy, Forside and the absence page (AGENTS.md, "Timetable
+     * lesson elements"; ADR-0011 on who owns a block). So a block,
+     * anything inside one, and any tooltip shaped like a block's
+     * are left byte-identical, whatever page they are on. The
+     * class check runs only on an element that carries the
+     * attribute, never per text node (issue #68).
+     *
+     * The MutationObserver watches childList only, so a tooltip
+     * Lectio rewrites on an existing element is picked up by the
+     * next uiRepair() pass, the same as a rewritten title.
+     */
+    const LESSON_BLOCK_SELECTOR =
+        '.s2skemabrik, ' +
+        '.s2brik, ' +
+        '[data-lectiocontextcard]';
+
+    const LESSON_TOOLTIP_START =
+        /^\s*Aflyst!/;
+
+    const LESSON_TOOLTIP_LINE =
+        /^\s*(?:Hold|Lokale(?:r|\(r\))?|Lærer(?:e|\(e\))?)\s*:/m;
+
+    function isLessonTooltip(element) {
+        if (
+            element.closest(
+                LESSON_BLOCK_SELECTOR
+            )
+        ) {
+            return true;
+        }
+
+        const text =
+            element.getAttribute(
+                'data-tooltip'
+            ) || '';
+
+        return (
+            LESSON_TOOLTIP_START
+                .test(text) ||
+            LESSON_TOOLTIP_LINE
+                .test(text)
+        );
+    }
+
+    function processTooltip(element) {
+        if (
+            !element.hasAttribute(
+                'data-tooltip'
+            ) ||
+            isLessonTooltip(element)
+        ) {
+            return;
+        }
+
+        processAttr(
+            element,
+            'data-tooltip'
+        );
     }
 
     /*

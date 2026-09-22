@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-09-20T18:00:00Z",
+  "generatedAt": "2026-09-22T12:00:00Z",
   "manager": {
     "version": "1.32.0",
     "changelog": "A module's settings now follow the Manager's language: switching between English and Dansk re-words an open settings view in place, for modules that carry both languages. The Installed v… line on a module card is translated too.",
@@ -23,13 +23,15 @@
         "teacher"
       ],
       "status": "stable",
-      "version": "1.9.3",
+      "version": "1.11.6",
+      "changelog": "Translates the hover text on the Study Plan calendar (week ranges and column headers). Timetable lesson blocks keep their Danish tooltip untouched, so Chairs Up, Subject Colours and Change Radar keep reading them.",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-English-Mode.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
       "i18n": {
         "da": {
           "name": "English Mode",
-          "description": "Tilføjer en DA / EN-knap og oversætter Lectios brugerflade til kontekstbevidst engelsk."
+          "description": "Tilføjer en DA / EN-knap og oversætter Lectios brugerflade til kontekstbevidst engelsk.",
+          "changelog": "Oversætter svæveteksten i studieplanens kalender (ugeintervaller og kolonneoverskrifter). Skemabrikkernes danske svævetekst røres ikke, så Chairs Up, Subject Colours og Change Radar læser dem stadig."
         }
       }
     },
@@ -42,13 +44,15 @@
         "teacher"
       ],
       "status": "stable",
-      "version": "1.1.1",
+      "version": "1.4.4",
+      "changelog": "Removes cache keys left behind by older cache-format versions, which the Manager's storage readout could only ever show as unclaimed. Nothing reads those keys any more, so they're now cleared on load.",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Chairs-Up.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
       "i18n": {
         "da": {
           "name": "Stole Op",
-          "description": "Markerer en lektion, når den er dagens sidste aktive booking i det lokale."
+          "description": "Markerer en lektion, når den er dagens sidste aktive booking i det lokale.",
+          "changelog": "Fjerner cache-nøgler efterladt af ældre cache-formater, som Managerens lagerplads-oversigt kun kunne vise som ikke-tilknyttede. Ingen version læser dem længere, så de ryddes nu ved indlæsning."
         }
       }
     },
@@ -61,14 +65,16 @@
         "student",
         "teacher"
       ],
-      "status": "experimental",
-      "version": "0.2.3",
+      "status": "stable",
+      "version": "0.2.7",
+      "changelog": "Its settings and their Display and Interaction sections now read in Danish as well as English. They follow the Manager’s language and switch with it while Settings is open.",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Schedule-Summary.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
       "i18n": {
         "da": {
           "name": "Skemaoversigt",
-          "description": "Folder skemaets ugeinformation sammen til en kompakt stribe med forhåndsvisning ved musen og klik for at udfolde."
+          "description": "Folder skemaets ugeinformation sammen til en kompakt stribe med forhåndsvisning ved musen og klik for at udfolde.",
+          "changelog": "Indstillingerne og afsnittene Visning og Betjening kan nu læses på dansk såvel som engelsk. De følger Managerens sprog og skifter med det, mens Indstillinger er åben."
         }
       }
     },
@@ -82,15 +88,15 @@
         "teacher"
       ],
       "status": "stable",
-      "version": "0.6.1",
-      "changelog": "The badge now works at any Lectio school instead of only the one it was first written for — it reads your school from the page address.",
+      "version": "0.9.3",
+      "changelog": "Removes a cache key left over from before the cache was renamed (v3 and earlier), which the Manager's storage readout could only ever show as unclaimed. Nothing has read that shape since, so it's now cleared on load.",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Unread-Message-Notifications.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
       "i18n": {
         "da": {
           "name": "Ulæste beskeder",
           "description": "Viser et mærke med ulæste beskeder ved siden af Beskeder. Virker på alle Lectio-skoler og læser skolens id fra sidens adresse.",
-          "changelog": "Mærket virker nu på alle Lectio-skoler og ikke kun den, det oprindeligt blev skrevet til — det læser din skole i sidens adresse."
+          "changelog": "Fjerner en cache-nøgle fra før cachen blev omdøbt (v3 og ældre), som Managerens lagerplads-oversigt kun kunne vise som ikke-tilknyttet. Ingen version har læst det format siden, så det ryddes nu ved indlæsning."
         }
       }
     },
@@ -103,14 +109,16 @@
         "student",
         "teacher"
       ],
-      "status": "experimental",
-      "version": "0.18.0",
+      "status": "stable",
+      "version": "0.18.4",
+      "changelog": "Removes a settings blob left behind by an old v1 storage key, which the Manager's storage readout could only ever show as unclaimed. Nothing has read it since v2, so it's now cleared on load.",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Theming.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
       "i18n": {
         "da": {
           "name": "Lectio-temaer",
-          "description": "Giver Lectio en blød, gennemsigtig glasflade med 46 indbyggede farvetemaer, hvert med sit eget baggrundsbillede, eller udleder et tema fra en hjemmeside eller et billede. Understøtter dit eget baggrundsbillede og håndplukkede farver."
+          "description": "Giver Lectio en blød, gennemsigtig glasflade med 46 indbyggede farvetemaer, hvert med sit eget baggrundsbillede, eller udleder et tema fra en hjemmeside eller et billede. Understøtter dit eget baggrundsbillede og håndplukkede farver.",
+          "changelog": "Fjerner en indstillingsblok efterladt af en gammel v1-lagernøgle, som Managerens lagerplads-oversigt kun kunne vise som ikke-tilknyttet. Ingen version har læst den siden v2, så den ryddes nu ved indlæsning."
         }
       }
     },
@@ -123,14 +131,16 @@
         "student",
         "teacher"
       ],
-      "status": "experimental",
-      "version": "0.8.3",
+      "status": "stable",
+      "version": "0.11.3",
+      "changelog": "Every setting, section and per-class line (Seen N times across N weeks) now reads in Danish as well as English, following the Manager’s language and switching with it in place. Class names stay as Lectio shows them.",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Subject-Colours.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
       "i18n": {
         "da": {
           "name": "Fagfarver",
-          "description": "Lærer ud fra dit eget skema, hvilke hold der rent faktisk er dine, og giver hvert af dem sin egen farve, med et separat dæmpet farvespektrum til enkeltstående aktiviteter som morgensamlinger og møder. En valgfri figurmarkør pr. hold hjælper, når farve alene ikke er nok."
+          "description": "Lærer ud fra dit eget skema, hvilke hold der rent faktisk er dine, og giver hvert af dem sin egen farve, med et separat dæmpet farvespektrum til enkeltstående aktiviteter som morgensamlinger og møder. En valgfri figurmarkør pr. hold hjælper, når farve alene ikke er nok.",
+          "changelog": "Alle indstillinger, afsnit og linjen pr. hold (Set N gange over N uger) kan nu læses på dansk såvel som engelsk; de følger Managerens sprog og skifter med det på stedet. Holdnavne står som Lectio viser dem."
         }
       }
     }

@@ -20,11 +20,13 @@ const { chromeEnvironment, createProfile, releaseProfile, runChrome } = require(
    the fixture is served from a Lectio-shaped URL rather than opened off disk. */
 const PAGE_PATH = '/lectio/223/SkemaNy.aspx';
 
+// Folder-qualified: each module is served from the channel it actually lives
+// in, so promoting one moves its path here and nothing else changes.
 const MODULES = [
-    'Lectio-Subject-Colours.user.js',
-    'Lectio-Chairs-Up.user.js',
-    'Lectio-Unread-Message-Notifications.user.js',
-    'Lectio-Change-Radar.user.js'
+    'modules/Lectio-Subject-Colours.user.js',
+    'modules/Lectio-Chairs-Up.user.js',
+    'modules/Lectio-Unread-Message-Notifications.user.js',
+    'modules-unstable/Lectio-Change-Radar.user.js'
 ];
 
 const ROUTES = new Map([
@@ -32,8 +34,8 @@ const ROUTES = new Map([
         file: resolve(__dirname, 'fixtures', 'module-problem-reports.html'),
         type: 'text/html; charset=utf-8'
     }],
-    ...MODULES.map((name) => [`/modules-unstable/${name}`, {
-        file: resolve(__dirname, '..', 'modules-unstable', name),
+    ...MODULES.map((path) => [`/${path}`, {
+        file: resolve(__dirname, '..', path),
         type: 'text/javascript; charset=utf-8'
     }])
 ]);

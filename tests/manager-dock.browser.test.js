@@ -105,8 +105,7 @@ test('manager measures storage generically and prunes only what a module declare
 });
 
 // The same readout against the two real modules that joined it last (issue
-// #47), loaded from modules-unstable/ because those are the copies that
-// declare anything. Lectio Theming and Schedule Summary are listed as claimed
+// #47), loaded from modules/ now that both have been promoted. Lectio Theming and Schedule Summary are listed as claimed
 // under their catalogue names with exactly the rows they declared, the one
 // Clear is the background picture's, pressing it goes through the module and
 // leaves the hand-built palette beside it untouched, and a key nobody claims

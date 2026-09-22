@@ -9,7 +9,7 @@ const { chromeEnvironment, createProfile, releaseProfile, runChrome } = require(
    timetable, so the fixture has to be served from a Lectio-shaped URL rather
    than opened off disk. */
 const TIMETABLE_PATH = '/lectio/223/SkemaNy.aspx';
-const MODULE_PATH = '/modules-unstable/Lectio-Chairs-Up.user.js';
+const MODULE_PATH = '/modules/Lectio-Chairs-Up.user.js';
 
 const ROUTES = new Map([
     [TIMETABLE_PATH, {
@@ -17,7 +17,7 @@ const ROUTES = new Map([
         type: 'text/html; charset=utf-8'
     }],
     [MODULE_PATH, {
-        file: resolve(__dirname, '..', 'modules-unstable', 'Lectio-Chairs-Up.user.js'),
+        file: resolve(__dirname, '..', 'modules', 'Lectio-Chairs-Up.user.js'),
         type: 'text/javascript; charset=utf-8'
     }]
 ]);

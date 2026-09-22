@@ -291,9 +291,13 @@
                 if (!registration) throw new Error('module did not register with the Manager');
 
                 // The shape-marker toggle lives in its own Accessibility
-                // section, in every phase.
+                // section, in every phase. The section is named in the
+                // page's own language since issue #60 and this page is
+                // Danish, so both words are accepted here; that the two
+                // sides name the same keys is module-schema-i18n's job.
+                const ACCESSIBILITY = ['Accessibility', 'Tilgængelighed'];
                 const patternToggle = registration.settingsSchema.find(control => control.key === 'patternMarkers');
-                if (!patternToggle || patternToggle.section !== 'Accessibility') {
+                if (!patternToggle || !ACCESSIBILITY.includes(patternToggle.section)) {
                     throw new Error('the shape marker toggle was not offered under Accessibility');
                 }
 
@@ -301,7 +305,7 @@
                 // — nothing to size when there is nothing drawn.
                 const scaleControl = registration.settingsSchema.find(control => control.key === 'patternScale');
                 if (phase === 'pattern' || phase === 'pattern-scale') {
-                    if (!scaleControl || scaleControl.section !== 'Accessibility') {
+                    if (!scaleControl || !ACCESSIBILITY.includes(scaleControl.section)) {
                         throw new Error('the shape marker scale control was not offered under Accessibility once enabled');
                     }
                 } else if (scaleControl) {
@@ -345,7 +349,8 @@
 
                 const classColours = registration.settingsSchema.filter(control => control.key.startsWith('class:'));
                 if (classColours.length !== 2) throw new Error('the Manager was not offered one colour control per class');
-                if (classColours.some(control => control.type !== 'color' || control.section !== 'Your classes')) {
+                const YOUR_CLASSES = ['Your classes', 'Dine hold'];
+                if (classColours.some(control => control.type !== 'color' || !YOUR_CLASSES.includes(control.section))) {
                     throw new Error('class colour controls are not grouped colour pickers');
                 }
                 if (classColours.some(control => !/^#[0-9a-f]{6}$/i.test(registration.currentValues[control.key] || ''))) {

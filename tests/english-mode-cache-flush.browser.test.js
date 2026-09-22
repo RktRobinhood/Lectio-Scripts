@@ -18,7 +18,7 @@ test('English Mode batches cache writes and flushes them on pagehide', async () 
             `--user-data-dir=${profileDirectory}`,
             '--virtual-time-budget=120000',
             '--dump-dom',
-            `${fixtureUrl}?module=modules-unstable`
+            `${fixtureUrl}?module=modules`
         ], { maxBuffer: 64 * 1024 * 1024, env: chromeEnvironment(profileDirectory) });
 
         const result = stdout.match(/data-test-result="([^"]*)"/)?.[1];

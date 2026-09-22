@@ -79,10 +79,30 @@
             return { isoWeek: Math.ceil(((d - yearStart) / 86400000 + 1) / 7), isoYear };
         }
 
-        /* A lesson safely in the past: the module never schedules a room
-           refresh for one, so the fixture needs no network at all. */
-        const LESSON_DATE = new Date(2020, 8, 15, 9, 40, 0, 0);
-        const ISO_DATE = '2020-09-15';
+        /* A lesson earlier in the ISO week this test runs in, rather than a
+           date written down once.
+
+           Two rules have to hold at the same time. Chairs Up prunes every
+           room-week cache older than the current ISO week as it loads, so a
+           fixed date in 2020 has its seeded cache deleted before the module
+           reads it, and the notice this fixture exists to place is never
+           built. And the lesson has to be behind today, because the module
+           never schedules a room refresh for a day that has been and gone, so
+           the fixture needs no network at all. Monday of the current week
+           satisfies both. */
+        const LESSON_DATE = (() => {
+            const monday = new Date();
+
+            monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+            monday.setHours(9, 40, 0, 0);
+
+            return monday;
+        })();
+
+        const pad = (value) => String(value).padStart(2, '0');
+
+        const ISO_DATE =
+            `${LESSON_DATE.getFullYear()}-${pad(LESSON_DATE.getMonth() + 1)}-${pad(LESSON_DATE.getDate())}`;
         const ROOM = '1.05';
         const ROOM_ID = 'RO123';
         const ABS_ID = '81266224407';
@@ -126,7 +146,7 @@
                             <div id="activity-title" class="ls-section-title-heading" role="heading" aria-level="2">
                                 <a class="s2skemabrik s2normal" data-brikid="ABS81266224407"
                                    href="/lectio/223/aktivitet/aktivitetforside2.aspx?absid=81266224407"
-                                   data-tooltip="15/9-2020 09:40 til 10:50&#10;Hold: 1i Psyc HL&#10;Laerer: MP&#10;Lokale: 1.05">1i Psyc HL</a>
+                                   data-tooltip="">1i Psyc HL</a>
                             </div>
                             <div id="activity-links">
                                 <a href="#grupper">Grupper</a>
@@ -152,6 +172,19 @@
             <button id="groups-create">Opret grupper</button>
         </div>
     </div>
+
+    <script>
+        /* The tooltip is what the module parses the lesson out of, so it
+           names the same date the room-week cache was seeded for. It is
+           written here rather than in the markup above because that date
+           moves with the week the test runs in. */
+        document.querySelector('#activity-title a.s2skemabrik').dataset.tooltip = [
+            `${LESSON_DATE.getDate()}/${LESSON_DATE.getMonth() + 1}-${LESSON_DATE.getFullYear()} 09:40 til 10:50`,
+            'Hold: 1i Psyc HL',
+            'Laerer: MP',
+            'Lokale: 1.05'
+        ].join('\n');
+    </script>
 
     <script src="/modules/Lectio-Chairs-Up.user.js"></script>
     <script>

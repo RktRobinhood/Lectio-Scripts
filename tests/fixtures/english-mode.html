@@ -36,8 +36,19 @@
                 const languageSwitch = document.getElementById('lectio-english-switch');
 
                 assert(positionSetting?.type === 'select', 'Position select was not registered');
-                assert(positionSetting.options.some(option => option.value === 'locked' && option.label === 'Locked'), 'Locked option was not registered');
-                assert(positionSetting.options.some(option => option.value === 'floating' && option.label === 'Floating'), 'Floating option was not registered');
+                /* The words follow the page's language (issue #60) and this
+                   page is Danish, so the labels are asserted as the pair the
+                   module may use rather than the English one alone. That the
+                   two sides name the same keys and differ only in wording is
+                   module-schema-i18n's job; what matters here is that each
+                   option is registered, under a real label, with the value
+                   the positioning below acts on. */
+                const labelled = (value, words) => positionSetting.options.some(
+                    (option) => option.value === value && words.includes(option.label)
+                );
+
+                assert(labelled('locked', ['Locked', 'Låst']), 'Locked option was not registered');
+                assert(labelled('floating', ['Floating', 'Flydende']), 'Floating option was not registered');
                 if (stage === 'fresh') {
                     assert(registration.currentValues.switchPosition === 'locked', 'Fresh install did not default to Locked');
                     assert(getComputedStyle(languageSwitch).position === 'absolute', 'Locked switch did not use document positioning');

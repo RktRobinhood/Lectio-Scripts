@@ -34,13 +34,15 @@ const { chromeEnvironment, createProfile, releaseProfile, runChrome } = require(
    opened off disk. */
 const PAGE_PATH = '/lectio/223/SkemaNy.aspx';
 
+// Folder-qualified: each module is served from the channel it actually lives
+// in, so promoting one moves its path here and nothing else changes.
 const MODULES = [
-    'Lectio-Subject-Colours.user.js',
-    'Lectio-Chairs-Up.user.js',
-    'Lectio-Unread-Message-Notifications.user.js',
-    'Lectio-Change-Radar.user.js',
-    'Lectio-Theming.user.js',
-    'Lectio-Schedule-Summary.user.js'
+    'modules/Lectio-Subject-Colours.user.js',
+    'modules/Lectio-Chairs-Up.user.js',
+    'modules/Lectio-Unread-Message-Notifications.user.js',
+    'modules-unstable/Lectio-Change-Radar.user.js',
+    'modules/Lectio-Theming.user.js',
+    'modules/Lectio-Schedule-Summary.user.js'
 ];
 
 const ROUTES = new Map([
@@ -48,8 +50,8 @@ const ROUTES = new Map([
         file: resolve(__dirname, 'fixtures', 'module-storage.html'),
         type: 'text/html; charset=utf-8'
     }],
-    ...MODULES.map((name) => [`/modules-unstable/${name}`, {
-        file: resolve(__dirname, '..', 'modules-unstable', name),
+    ...MODULES.map((path) => [`/${path}`, {
+        file: resolve(__dirname, '..', path),
         type: 'text/javascript; charset=utf-8'
     }])
 ]);
@@ -73,8 +75,8 @@ async function runStorageFixture(mutate = (name, source) => source) {
 
         let body = await readFile(route.file);
 
-        if (pathname.startsWith('/modules-unstable/')) {
-            body = mutate(pathname.slice('/modules-unstable/'.length), body.toString('utf8'));
+        if (pathname.startsWith('/modules/') || pathname.startsWith('/modules-unstable/')) {
+            body = mutate(pathname.slice(pathname.lastIndexOf('/') + 1), body.toString('utf8'));
         }
 
         response.writeHead(200, { 'content-type': route.type });

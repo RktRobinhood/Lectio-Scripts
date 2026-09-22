@@ -10,7 +10,7 @@ const { chromeEnvironment, createProfile, releaseProfile, runChrome } = require(
    rather than opened off disk. Not Forside, so the count comes from a
    background fetch rather than the live DOM. */
 const PAGE_PATH = '/lectio/223/SkemaNy.aspx';
-const MODULE_PATH = '/modules-unstable/Lectio-Unread-Message-Notifications.user.js';
+const MODULE_PATH = '/modules/Lectio-Unread-Message-Notifications.user.js';
 
 const ROUTES = new Map([
     [PAGE_PATH, {
@@ -18,7 +18,7 @@ const ROUTES = new Map([
         type: 'text/html; charset=utf-8'
     }],
     [MODULE_PATH, {
-        file: resolve(__dirname, '..', 'modules-unstable',
+        file: resolve(__dirname, '..', 'modules',
             'Lectio-Unread-Message-Notifications.user.js'),
         type: 'text/javascript; charset=utf-8'
     }]

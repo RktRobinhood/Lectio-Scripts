@@ -11,7 +11,7 @@ const { chromeEnvironment, createProfile, releaseProfile, runChrome } = require(
    fixture at window.fetch, because what this exercises is a request that
    never answers at all. */
 const PAGE_PATH = '/lectio/223/SkemaNy.aspx';
-const MODULE_PATH = '/modules-unstable/Lectio-Subject-Colours.user.js';
+const MODULE_PATH = '/modules/Lectio-Subject-Colours.user.js';
 
 const ROUTES = new Map([
     [PAGE_PATH, {
@@ -19,7 +19,7 @@ const ROUTES = new Map([
         type: 'text/html; charset=utf-8'
     }],
     [MODULE_PATH, {
-        file: resolve(__dirname, '..', 'modules-unstable', 'Lectio-Subject-Colours.user.js'),
+        file: resolve(__dirname, '..', 'modules', 'Lectio-Subject-Colours.user.js'),
         type: 'text/javascript; charset=utf-8'
     }]
 ]);

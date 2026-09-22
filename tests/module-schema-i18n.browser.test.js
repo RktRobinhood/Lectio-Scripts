@@ -25,14 +25,16 @@ const { chromeEnvironment, createProfile, releaseProfile, runChrome } = require(
 
 const PAGE_PATH = '/lectio/223/SkemaNy.aspx';
 
+// Folder-qualified: each module is served from the channel it actually lives
+// in, so promoting one moves its path here and nothing else changes.
 const MODULES = [
-    'Lectio-Chairs-Up.user.js',
-    'Lectio-Change-Radar.user.js',
-    'Lectio-English-Mode.user.js',
-    'Lectio-Schedule-Summary.user.js',
-    'Lectio-Subject-Colours.user.js',
-    'Lectio-Theming.user.js',
-    'Lectio-Unread-Message-Notifications.user.js'
+    'modules/Lectio-Chairs-Up.user.js',
+    'modules-unstable/Lectio-Change-Radar.user.js',
+    'modules/Lectio-English-Mode.user.js',
+    'modules/Lectio-Schedule-Summary.user.js',
+    'modules/Lectio-Subject-Colours.user.js',
+    'modules/Lectio-Theming.user.js',
+    'modules/Lectio-Unread-Message-Notifications.user.js'
 ];
 
 const MANAGER = 'manager/Lectio-Manager.user.js';
@@ -47,8 +49,8 @@ function routesFor(fixture) {
             file: resolve(__dirname, '..', MANAGER),
             type: 'text/javascript; charset=utf-8'
         }],
-        ...MODULES.map((name) => [`/modules-unstable/${name}`, {
-            file: resolve(__dirname, '..', 'modules-unstable', name),
+        ...MODULES.map((path) => [`/${path}`, {
+            file: resolve(__dirname, '..', path),
             type: 'text/javascript; charset=utf-8'
         }])
     ]);

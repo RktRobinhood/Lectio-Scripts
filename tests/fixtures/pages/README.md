@@ -217,7 +217,7 @@ Three more, from the pages that came after:
   was asserting is absent. Search a clone with the `<script>` elements removed.
 
 To show that a test bites without touching a shared file, take a throwaway
-copy of the test, hook the branch that serves `/modules-unstable/...` and hand
+copy of the test, hook the branch that serves `/modules/...` and hand
 back `source.replace(...)` from memory. Done for three of these: Subject
 Colours without the `new Set` in `holdIdsOf` keys every doubled block as
 `h:HE…+HE…`, Unread with the Danish count pattern misspelled leaves the badge

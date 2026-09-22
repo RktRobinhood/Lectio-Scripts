@@ -8,7 +8,7 @@
          * Issue #61. The pattern-level gaps the Sept 21 audit found on the
          * Study Plan, Annual Summary and Time Tracking screens, each in the
          * DOM shape the live page uses, driven through the copy of English
-         * Mode under test (served at /modules-unstable/ by the test). The
+         * Mode under test (served at /modules/ by the test). The
          * Google fallback is stubbed to answer "GOOGLE::<source>" and to
          * record what it was asked, so a string that was meant to resolve
          * locally and did not is visible twice over: in its rendering and in
@@ -128,7 +128,7 @@
 
     <pre id="detail"></pre>
 
-    <script src="/modules-unstable/Lectio-English-Mode.user.js"></script>
+    <script src="/modules/Lectio-English-Mode.user.js"></script>
     <script>
         const report = [];
         function assert(condition, message) {

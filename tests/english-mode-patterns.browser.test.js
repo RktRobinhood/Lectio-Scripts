@@ -1,15 +1,13 @@
 /*
- * English Mode's pattern-level rules from issue #61, against the copy under
- * test in modules-unstable/.
+ * English Mode's pattern-level rules from issue #61.
  *
- * The other English Mode fixtures load the frozen modules/ copy off disk, so
- * nothing in the suite exercised the Experimental copy's dictionary or its
- * pattern pass. This one serves the fixture and the modules-unstable/ module
- * over the suite's own HTTP server, the way module-storage does, which also
- * makes it possible to hand a deliberately broken copy of the module to the
- * page from memory - the file on disk is never touched - and require the
- * fixture to fail naming the breakage. Two of the seven rules get that
- * treatment, so the assertions are known to bite rather than assumed to.
+ * The other English Mode fixtures load the module off disk. This one serves
+ * the fixture and the module over the suite's own HTTP server, the way
+ * module-storage does, which also makes it possible to hand a deliberately
+ * broken copy of the module to the page from memory - the file on disk is
+ * never touched - and require the fixture to fail naming the breakage. Two
+ * of the seven rules get that treatment, so the assertions are known to bite
+ * rather than assumed to.
  */
 
 const { createServer } = require('node:http');
@@ -27,8 +25,8 @@ const ROUTES = new Map([
         file: resolve(__dirname, 'fixtures', 'english-mode-patterns.html'),
         type: 'text/html; charset=utf-8'
     }],
-    [`/modules-unstable/${MODULE}`, {
-        file: resolve(__dirname, '..', 'modules-unstable', MODULE),
+    [`/modules/${MODULE}`, {
+        file: resolve(__dirname, '..', 'modules', MODULE),
         type: 'text/javascript; charset=utf-8'
     }]
 ]);
@@ -46,7 +44,7 @@ async function runPatternFixture(mutate = (source) => source) {
 
         let body = await readFile(route.file);
 
-        if (pathname.startsWith('/modules-unstable/')) {
+        if (pathname.startsWith('/modules/')) {
             body = mutate(body.toString('utf8'));
         }
 

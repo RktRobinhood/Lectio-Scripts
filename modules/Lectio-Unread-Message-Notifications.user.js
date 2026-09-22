@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Unread Message Notifications
 // @namespace    https://www.lectio.dk/
-// @version      0.6.1
+// @version      0.9.3
 // @description  Shows one unread-message badge using Lectio's own unread count, at any Lectio school. Includes direct and group-addressed messages.
 // @match        https://www.lectio.dk/lectio/*
 // @grant        none
@@ -33,6 +33,15 @@
      * is scoped below.
      */
     const SETTINGS_KEY = 'lectioUnreadMessages.settings.v1';
+    /*
+     * Named here rather than beside CACHE_KEY further down, because the
+     * Manager handshake below runs during this file's own evaluation and would
+     * otherwise read a const that is still in its temporal dead zone. It
+     * covers every cache version and every school this browser has ever seen,
+     * which is exactly what the storage readout and the load-time prune both
+     * need to know about.
+     */
+    const CACHE_KEY_PREFIX = 'lectioUnreadMessages.cache.';
     const DEFAULT_SETTINGS = {
         pollMinutes: 10,
         showPreview: true,
@@ -52,9 +61,53 @@
     (function registerWithLectioManager() {
         const MODULE_ID = 'message-notifications';
         const MODULE_NAME = 'Lectio - Unread Message Notifications';
-        const MODULE_VERSION = '0.6.1';
+        const MODULE_VERSION = '0.9.3';
+
+        /*
+         * The settings panel's own words, in both languages (ADR-0013). The
+         * Manager renders these strings exactly as given, so the schema is
+         * built from whichever language is current each time announce()
+         * runs, and lectio-manager:language re-announces it. Order of
+         * authority: the Manager's published choice, then whatever Lectio
+         * (or English Mode) put on <html lang>, then Danish, because Lectio
+         * is Danish and a module on its own stays Danish.
+         *
+         * The two literals sit between i18n markers so
+         * scripts/check-i18n.mjs can hold their keys in step. Only display
+         * strings live here - never a key, a type, a default or an option
+         * value.
+         */
+        function labels() {
+            const preferred = document.documentElement?.dataset?.lectioLanguage;
+            const language = (preferred || document.documentElement.lang || 'da').toLowerCase();
+
+            return language.startsWith('en')
+                // i18n:en
+                ? {
+                    pollLabel: 'Check for messages',
+                    pollHelp: 'How often to refresh while Lectio is visible.',
+                    pollEvery: minutes => `Every ${minutes} minutes`,
+                    previewLabel: 'Message preview',
+                    previewHelp: 'Show recent unread messages when hovering the badge.',
+                    scaleLabel: 'Bubble size',
+                    scaleHelp: 'Scale the unread-message bubble to suit your screen.'
+                }
+                // i18n:da
+                : {
+                    pollLabel: 'Tjek efter beskeder',
+                    pollHelp: 'Hvor ofte der tjekkes, mens Lectio er synligt.',
+                    pollEvery: minutes => `Hvert ${minutes}. minut`,
+                    previewLabel: 'Forhåndsvisning af beskeder',
+                    previewHelp: 'Vis de seneste ulæste beskeder, når musen holdes over boblen.',
+                    scaleLabel: 'Boblens størrelse',
+                    scaleHelp: 'Skalér boblen med ulæste beskeder, så den passer til din skærm.'
+                };
+                // i18n:end
+        }
 
         function announce() {
+            const text = labels();
+
             window.dispatchEvent(new CustomEvent('lectio-module:register', {
                 detail: {
                     id: MODULE_ID,
@@ -64,27 +117,23 @@
                         {
                             key: 'pollMinutes',
                             type: 'select',
-                            label: 'Check for messages',
-                            description: 'How often to refresh while Lectio is visible.',
-                            options: [
-                                { value: '2', label: 'Every 2 minutes' },
-                                { value: '5', label: 'Every 5 minutes' },
-                                { value: '10', label: 'Every 10 minutes' },
-                                { value: '15', label: 'Every 15 minutes' },
-                                { value: '30', label: 'Every 30 minutes' }
-                            ]
+                            label: text.pollLabel,
+                            description: text.pollHelp,
+                            options: ['2', '5', '10', '15', '30'].map(
+                                value => ({ value, label: text.pollEvery(value) })
+                            )
                         },
                         {
                             key: 'showPreview',
                             type: 'toggle',
-                            label: 'Message preview',
-                            description: 'Show recent unread messages when hovering the badge.'
+                            label: text.previewLabel,
+                            description: text.previewHelp
                         },
                         {
                             key: 'bubbleScale',
                             type: 'range',
-                            label: 'Bubble size',
-                            description: 'Scale the unread-message bubble to suit your screen.',
+                            label: text.scaleLabel,
+                            description: text.scaleHelp,
                             min: 75,
                             max: 175,
                             step: 5,
@@ -95,7 +144,30 @@
                         pollMinutes: String(settings.pollMinutes),
                         showPreview: settings.showPreview,
                         bubbleScale: settings.bubbleScale
-                    }
+                    },
+                    /*
+                     * What this module keeps in the browser, so the Manager
+                     * can show it without knowing what it is (issue #29,
+                     * docs/manager-storage-api.md). The cached count is
+                     * prunable - it expires in ten minutes anyway and is
+                     * re-read on the next check. The settings blob is not.
+                     */
+                    storage: [
+                        {
+                            key: SETTINGS_KEY,
+                            kind: 'setting',
+                            label: { en: 'Settings', da: 'Indstillinger' }
+                        },
+                        {
+                            prefix: CACHE_KEY_PREFIX,
+                            kind: 'cache',
+                            prunable: true,
+                            label: {
+                                en: 'Cached unread count',
+                                da: 'Gemt antal ulæste'
+                            }
+                        }
+                    ]
                 }
             }));
         }
@@ -126,10 +198,138 @@
             announce();
         }
 
+        /*
+         * The Manager asks; this does the deleting, and only for the prefix
+         * it declared prunable. A request naming anything else removes
+         * nothing at all.
+         */
+        function handlePrune(event) {
+            const detail = event?.detail;
+
+            if (detail?.id !== MODULE_ID || detail.prefix !== CACHE_KEY_PREFIX) return;
+
+            dropKeysWithPrefix(CACHE_KEY_PREFIX);
+        }
+
         window.addEventListener('lectio-manager:discover', announce);
         window.addEventListener('lectio-manager:set-setting', handleSetting);
+        window.addEventListener('lectio-manager:prune-storage', handlePrune);
+        // The schema was worded in whichever language was current when it
+        // was announced, so a language chosen later is answered with a fresh
+        // one.
+        window.addEventListener('lectio-manager:language', announce);
         announce();
     })();
+
+    // ============================================================
+    // OWN STORAGE: PRUNE AND REPORT
+    // ============================================================
+
+    /*
+     * A failed write is still caught and the badge still works from memory -
+     * that rule is unchanged. What is new is that it says so once per page
+     * load, as a token with nothing from the page in it (issue #29). The flag
+     * hangs off the function rather than sitting beside it as a module-scope
+     * binding, because a declaration hoists and this file runs its Manager
+     * handshake part-way through its own evaluation.
+     */
+    function reportStorageWriteFailure() {
+        if (reportStorageWriteFailure.reported) return;
+        reportStorageWriteFailure.reported = true;
+
+        try {
+            reportToManager('error', 'storage-write', 0);
+        } catch (_) {
+            // Reporting a failure must never become a second failure.
+        }
+    }
+
+    function dropKeysWithPrefix(prefix) {
+        try {
+            const doomed = [];
+
+            for (let index = 0; index < localStorage.length; index += 1) {
+                const key = localStorage.key(index);
+                if (typeof key === 'string' && key.startsWith(prefix)) doomed.push(key);
+            }
+
+            // Collected first: removing while enumerating renumbers the keys
+            // behind the cursor and skips every other one.
+            for (const key of doomed) localStorage.removeItem(key);
+        } catch (_) {
+            // Nothing to drop if storage cannot be read at all.
+        }
+    }
+
+    /*
+     * Stale-cache pruning on load (issue #29). Two kinds of dead weight:
+     * cache keys written by an older version of this module - v3 and earlier
+     * were explicitly "left behind" and never collected - and a current-shape
+     * entry whose ten minutes are long gone.
+     */
+    function pruneStaleStorage() {
+        try {
+            const doomed = [];
+
+            for (let index = 0; index < localStorage.length; index += 1) {
+                const key = localStorage.key(index);
+                if (typeof key !== 'string' || !key.startsWith(CACHE_KEY_PREFIX)) continue;
+
+                if (key !== CACHE_KEY) {
+                    // Another cache version, or another school in the same
+                    // browser. Either way it is ten minutes' worth of count
+                    // that whichever page needs it will simply re-read.
+                    doomed.push(key);
+                    continue;
+                }
+
+                const cached = normalizeState(JSON.parse(localStorage.getItem(key) || 'null'));
+
+                if (!cached || Date.now() - cached.checkedAt > CACHE_MAX_AGE) doomed.push(key);
+            }
+
+            for (const key of doomed) localStorage.removeItem(key);
+        } catch (_) {
+            // Storage unreadable; there is nothing to prune.
+        }
+
+        pruneLegacyStorage();
+    }
+
+    /*
+     * "v3 and earlier were explicitly left behind" above is true of the cache
+     * shape CACHE_KEY_PREFIX covers, but the cache key was also renamed on the
+     * way there - the oldest entries are `lectioUnreadMessages.v3.<school>`,
+     * with no `cache.` in them at all, so the sweep above never saw them
+     * either. Nothing has read that shape since, and it was never declared to
+     * the Manager, so it only ever showed up as "Not claimed by a running
+     * module" (docs/manager-storage-api.md).
+     */
+    function pruneLegacyStorage() {
+        const legacyKeyShape = /^lectioUnreadMessages\.v\d+\./;
+
+        try {
+            const doomed = [];
+
+            for (let index = 0; index < localStorage.length; index += 1) {
+                const key = localStorage.key(index);
+
+                if (
+                    typeof key !== 'string' ||
+                    key === SETTINGS_KEY ||
+                    key.startsWith(CACHE_KEY_PREFIX)
+                ) {
+                    continue;
+                }
+
+                if (legacyKeyShape.test(key)) doomed.push(key);
+            }
+
+            for (const key of doomed) localStorage.removeItem(key);
+        } catch (_) {
+            // Storage unreadable; there is nothing to prune.
+        }
+    }
 
     function loadSettings() {
         try {
@@ -154,7 +354,10 @@
         try {
             localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
         } catch (_) {
-            // Continue with in-memory settings when storage is unavailable.
+            // Continue with in-memory settings when storage is unavailable -
+            // and say so, because a setting that stops sticking is exactly
+            // the symptom nobody could previously explain (issue #29).
+            reportStorageWriteFailure();
         }
     }
 
@@ -237,13 +440,105 @@
      * cache expires after ten minutes anyway.
      */
     const CACHE_KEY =
-        `lectioUnreadMessages.cache.v4.${SCHOOL}`;
+        `${CACHE_KEY_PREFIX}v4.${SCHOOL}`;
 
     const RETURN_REFRESH_AGE =
         10 * 60 * 1000;
 
     const CACHE_MAX_AGE =
         10 * 60 * 1000;
+
+    /*
+     * Background-fetch safety net (issue #37).
+     *
+     * Eight seconds is longer than a healthy Lectio page takes and
+     * short enough that a hung request cannot outlive the page view
+     * and wedge the in-flight guard for the rest of it.
+     *
+     * The backoff is measured against this module's own rhythm, not
+     * Chairs Up's: a poll is two to thirty minutes apart, so seconds
+     * of backoff would mean nothing. What actually hammers a sick
+     * Lectio here is handleVisibilityChange() - while refreshes keep
+     * failing, state.checkedAt never moves, so every single return to
+     * the tab starts another one. After three consecutive failures the
+     * wait starts at a minute and doubles to a fifteen-minute ceiling;
+     * one success clears it.
+     *
+     * The first check of a page view already waits 700ms for Lectio to
+     * finish rendering. The jitter is added on top of that, so many
+     * browsers opening Lectio on the same bell stop marching in step.
+     * It is small enough that nobody notices it.
+     *
+     * None of these three new failure paths - timeout, abort, backed-off
+     * skip - may ever be mistaken for "no unread messages". Each one
+     * leaves `state`, the cache and the badge exactly as they were; see
+     * refreshUnreadMessages() and fetchDocument() below.
+     */
+    const FETCH_TIMEOUT_MS =
+        8000;
+
+    const FETCH_FAILURES_BEFORE_BACKOFF =
+        3;
+
+    const FETCH_BACKOFF_BASE_MS =
+        60 * 1000;
+
+    const FETCH_BACKOFF_CEILING_MS =
+        15 * 60 * 1000;
+
+    const FIRST_CHECK_DELAY_MS =
+        700;
+
+    const FIRST_CHECK_JITTER_MS =
+        1500;
+
+    /*
+     * The Manager's optional request-slot broker
+     * (docs/manager-request-slots.md). The jitter above keeps this
+     * module out of step with other copies of itself; a slot keeps it
+     * out of step with the other modules, which is the part no module
+     * can arrange on its own because it may not know they exist.
+     *
+     * Both numbers below belong to this page, and that is what makes
+     * the whole thing safe: nothing here can be starved by a Manager.
+     * A live Manager answers inside the dispatch, so no answer at all
+     * within the first window means no Manager, an old Manager, or one
+     * that has stopped - the same case, and it means go now. A `wait`
+     * says a live Manager is holding the request behind somebody else,
+     * which is worth waiting longer for, but only up to a ceiling this
+     * module sets: past it the check goes ahead and hands the slot
+     * straight back. Nothing the Manager sends can ask for more
+     * patience than this.
+     *
+     * A slot this module gave up on is not a failure of any kind and
+     * must never be mistaken for one - a fetch that never ran leaves
+     * `state`, the cache and the badge exactly as they were, like the
+     * three other skip paths above.
+     *
+     * The id is repeated here because the one the handshake uses lives
+     * inside its own function; both are the same string the Manager
+     * knows this module by.
+     */
+    const SLOT_MODULE_ID =
+        'message-notifications';
+
+    const SLOT_REQUEST_EVENT =
+        'lectio-manager:slot:request';
+
+    const SLOT_WAIT_EVENT =
+        'lectio-manager:slot:wait';
+
+    const SLOT_GRANT_EVENT =
+        'lectio-manager:slot:grant';
+
+    const SLOT_RELEASE_EVENT =
+        'lectio-manager:slot:release';
+
+    const SLOT_ANSWER_MS =
+        1200;
+
+    const SLOT_MAX_WAIT_MS =
+        8000;
 
     const MAX_PREVIEW_ITEMS = 6;
 
@@ -276,7 +571,78 @@
 
     let inFlight = false;
 
+    /*
+     * Reported once per page load: the badge re-syncs on every mutation, and
+     * a link that was not recognised will not be recognised on the next one.
+     *
+     * Declared up here with the rest of the page-view state for the reason
+     * written below it - init() runs synchronously a few lines down and
+     * reaches findMessageNavLink(), so a flag declared beside that function
+     * would be read in its temporal dead zone and throw on cold start.
+     */
+    let reportedNavDrift = false;
+
     let observerQueued = false;
+
+    /*
+     * Safety-net state, declared here on purpose - above init(), which
+     * runs synchronously on the next line and reaches every one of
+     * these. State declared down beside the functions that use it would
+     * be read in its temporal dead zone and throw on cold start.
+     *
+     * All of it lives for one page view: pagehide aborts the live
+     * controllers, empties the set, clears the first-check timer and
+     * stops the poll interval, and a bfcache restore puts them back.
+     */
+    const liveFetchControllers =
+        new Set();
+
+    let consecutiveFetchFailures =
+        0;
+
+    let fetchBackoffUntil =
+        0;
+
+    let firstCheckTimer =
+        null;
+
+    let pageIsGoingAway =
+        false;
+
+    /*
+     * Slot requests this page view is still waiting on, and the counter
+     * their names come from. Bounded exactly like the controller set
+     * above: an entry goes in when a request is made and comes out when
+     * it is released, on every exit path, and abortBackgroundWork
+     * empties whatever is left.
+     */
+    const pendingSlots =
+        new Map();
+
+    let slotSeq =
+        0;
+
+    /*
+     * Whether the last request this page made went unanswered. One
+     * page view with no Manager on it must not pay the answer window
+     * once per check: the first request establishes that nothing is
+     * listening and the rest go straight through. Any answer clears
+     * it again, so a Manager evaluated after this module - or one
+     * that comes back - is picked up on the next request rather than
+     * ignored for the life of the page.
+     */
+    let slotsUnanswered =
+        false;
+
+    window.addEventListener(
+        SLOT_WAIT_EVENT,
+        handleSlotAnswer
+    );
+
+    window.addEventListener(
+        SLOT_GRANT_EVENT,
+        handleSlotAnswer
+    );
 
     init();
 
@@ -285,6 +651,10 @@
     // ============================================================
 
     function init() {
+        // Before the badge is drawn: a cache from an older version of this
+        // module, or from a school this browser has left, is dead weight that
+        // nothing else was ever going to collect (issue #29).
+        pruneStaleStorage();
         injectStyles();
         applySettingsToPage();
 
@@ -315,16 +685,246 @@
         );
 
         /*
-         * Give Lectio a moment to finish building the page.
+         * One listener each, registered once per page load, so nothing
+         * accumulates across navigations.
          */
-        window.setTimeout(
-            refreshUnreadMessages,
-            700
+        window.addEventListener(
+            'pagehide',
+            abortBackgroundWork
+        );
+
+        window.addEventListener(
+            'pageshow',
+            handlePageShow
+        );
+
+        /*
+         * Give Lectio a moment to finish building the page, plus a
+         * small random offset so many browsers loading Lectio at the
+         * same time do not all hit Forside in the same instant.
+         */
+        firstCheckTimer = window.setTimeout(
+            () => {
+                firstCheckTimer = null;
+                refreshUnreadMessages();
+            },
+            FIRST_CHECK_DELAY_MS +
+            Math.floor(
+                Math.random() *
+                FIRST_CHECK_JITTER_MS
+            )
         );
 
         /*
          * Normal background refresh.
          */
+        startPolling();
+    }
+
+    /*
+     * Nothing this module started may outlive the page view: every
+     * live request is aborted, the first-check timer is cleared and
+     * the poll interval is stopped.
+     *
+     * This deliberately touches neither `state` nor the cache nor the
+     * badge. An abort is a failure, and a failure here must never be
+     * read as "you have no messages" - whatever the badge was showing
+     * before pagehide, it goes on showing.
+     */
+    function abortBackgroundWork() {
+        pageIsGoingAway = true;
+
+        if (firstCheckTimer !== null) {
+            window.clearTimeout(firstCheckTimer);
+            firstCheckTimer = null;
+        }
+
+        if (pollTimer !== null) {
+            window.clearInterval(pollTimer);
+            pollTimer = null;
+        }
+
+        for (const controller of liveFetchControllers) {
+            try {
+                controller.abort();
+            } catch (_) {
+                // A controller that has already settled cannot be aborted.
+            }
+        }
+
+        liveFetchControllers.clear();
+        releaseManagerSlots();
+    }
+
+    /*
+     * Nothing waiting on a turn may outlive the page view, frozen or
+     * gone: the waiters are resolved so no promise is left dangling,
+     * and every turn is handed back so the Manager is not holding
+     * slots for a page that has stopped. The pageIsGoingAway re-check
+     * in fetchDocument is what keeps a resolved waiter from starting a
+     * request on the way out.
+     */
+    function releaseManagerSlots() {
+        for (const pending of [...pendingSlots.values()]) {
+            pending.go();
+        }
+
+        for (const requestId of [...pendingSlots.keys()]) {
+            pendingSlots.delete(requestId);
+            emitSlot(SLOT_RELEASE_EVENT, requestId);
+        }
+    }
+
+    function emitSlot(
+        name,
+        requestId
+    ) {
+        window.dispatchEvent(new CustomEvent(name, {
+            detail: {
+                moduleId: SLOT_MODULE_ID,
+                requestId
+            }
+        }));
+    }
+
+    function handleSlotAnswer(event) {
+        const detail =
+            event && event.detail;
+
+        if (
+            !detail ||
+            detail.moduleId !== SLOT_MODULE_ID
+        ) {
+            return;
+        }
+
+        /*
+         * Something is listening after all, so the next request pays
+         * the answer window again rather than assuming this page has
+         * no broker on it.
+         */
+        slotsUnanswered = false;
+
+        const pending =
+            pendingSlots.get(detail.requestId);
+
+        if (!pending) {
+            /*
+             * A grant for work this page has already finished or
+             * already given up on. Hand it straight back, or the
+             * Manager holds a turn for nobody until its own lease runs
+             * out and everything else queues behind it.
+             */
+            if (event.type === SLOT_GRANT_EVENT) {
+                emitSlot(SLOT_RELEASE_EVENT, detail.requestId);
+            }
+
+            return;
+        }
+
+        if (event.type === SLOT_GRANT_EVENT) {
+            pending.go();
+        } else {
+            pending.hold();
+        }
+    }
+
+    /*
+     * Resolves with the function that gives the turn back, and
+     * resolves either way - on a grant, or on this page's own timer.
+     * There is no rejection path and no path that never settles, which
+     * is the whole safety property: the worst a missing, old or broken
+     * Manager can cost is SLOT_ANSWER_MS.
+     */
+    function takeManagerSlot() {
+        slotSeq += 1;
+
+        const requestId =
+            `r${slotSeq}`;
+
+        return new Promise((resolve) => {
+            let timer = 0;
+            let settled = false;
+            let held = false;
+
+            const release = () => {
+                pendingSlots.delete(requestId);
+                emitSlot(SLOT_RELEASE_EVENT, requestId);
+            };
+
+            const go = () => {
+                if (settled) {
+                    return;
+                }
+
+                settled = true;
+                window.clearTimeout(timer);
+                timer = 0;
+                resolve(release);
+            };
+
+            /*
+             * Going ahead because nothing answered, rather than
+             * because the page is being torn down or the Manager said
+             * so. That is the one thing worth remembering between
+             * requests.
+             */
+            const giveUp = () => {
+                slotsUnanswered = true;
+                go();
+            };
+
+            pendingSlots.set(requestId, {
+                go,
+
+                /*
+                 * Only the first wait extends anything, so a Manager
+                 * repeating itself cannot keep pushing this page's own
+                 * ceiling further out.
+                 */
+                hold() {
+                    if (settled || held) {
+                        return;
+                    }
+
+                    held = true;
+                    window.clearTimeout(timer);
+
+                    timer = window.setTimeout(
+                        go,
+                        SLOT_MAX_WAIT_MS
+                    );
+                }
+            });
+
+            /*
+             * A live Manager answers inside the dispatch below, so
+             * even the zero here still gets a grant when there is one
+             * to get: the timer cannot fire until the current task
+             * ends, and the answer arrives inside it.
+             */
+            timer = window.setTimeout(
+                giveUp,
+                slotsUnanswered ? 0 : SLOT_ANSWER_MS
+            );
+
+            emitSlot(SLOT_REQUEST_EVENT, requestId);
+        });
+    }
+
+    /*
+     * A page restored from the back/forward cache never re-runs this
+     * script, so without this the module would stay switched off for
+     * the rest of that page's life - polling stopped and every refresh
+     * skipped - and the badge would freeze at whatever it last showed.
+     * That would be a regression against the module's behaviour today.
+     */
+    function handlePageShow(event) {
+        if (!event?.persisted) {
+            return;
+        }
+
+        pageIsGoingAway = false;
         startPolling();
     }
 
@@ -579,7 +1179,29 @@
     // ============================================================
 
     async function refreshUnreadMessages() {
+        /*
+         * Never stack: a tick that arrives while a refresh is still
+         * running is skipped, not queued behind it. This guard already
+         * existed, and the hard timeout below is what makes it safe -
+         * before it, a request that never answered left this flag set
+         * for the rest of the page view and silently stopped every
+         * later poll.
+         */
         if (inFlight) {
+            return;
+        }
+
+        if (pageIsGoingAway) {
+            return;
+        }
+
+        /*
+         * Backed-off skip. Like every other failure path here it
+         * returns before touching anything: `state`, the cache and the
+         * badge are all left exactly as they were, so a skipped check
+         * shows the last known count and never a zero.
+         */
+        if (Date.now() < fetchBackoffUntil) {
             return;
         }
 
@@ -735,63 +1357,149 @@
     // FETCH
     // ============================================================
 
+    /*
+     * Every background request this module makes goes through here,
+     * so the whole net fits around this one function: a hard timeout,
+     * registration with the set pagehide aborts, and the consecutive-
+     * failure count the backoff is built on.
+     *
+     * Every way out of here that is not a parsed document throws. It
+     * never returns an empty document, a null, or anything else the
+     * caller could parse as "nothing unread" - a timeout and an abort
+     * reject exactly like a network error always has, and the caller's
+     * existing "do NOT turn a parsing failure into zero unread" path
+     * catches all three the same way.
+     */
     async function fetchDocument(
         url,
         expectedPath
     ) {
-        const response =
-            await fetch(
-                url,
-                {
-                    method:
-                        'GET',
+        /*
+         * Ask the Manager for a turn before anything is armed, so a
+         * request that waits does not spend its own timeout waiting.
+         */
+        const releaseSlot =
+            await takeManagerSlot();
 
-                    credentials:
-                        'include',
+        if (pageIsGoingAway) {
+            releaseSlot();
 
-                    cache:
-                        'no-store',
+            throw new Error(
+                'The page went away before the request started.'
+            );
+        }
 
-                    headers: {
-                        Accept:
-                            'text/html,application/xhtml+xml'
+        const controller =
+            new AbortController();
+
+        const timeoutTimer =
+            window.setTimeout(
+                () => controller.abort(),
+                FETCH_TIMEOUT_MS
+            );
+
+        liveFetchControllers.add(controller);
+
+        try {
+            const response =
+                await fetch(
+                    url,
+                    {
+                        method:
+                            'GET',
+
+                        credentials:
+                            'include',
+
+                        cache:
+                            'no-store',
+
+                        headers: {
+                            Accept:
+                                'text/html,application/xhtml+xml'
+                        },
+
+                        signal:
+                            controller.signal
                     }
-                }
-            );
+                );
+
+            if (
+                !response.ok
+            ) {
+                throw new Error(
+                    `HTTP ${response.status} for ${url}`
+                );
+            }
+
+            const finalUrl =
+                new URL(
+                    response.url,
+                    location.origin
+                );
+
+            if (
+                !expectedPath.test(
+                    finalUrl.pathname
+                )
+            ) {
+                throw new Error(
+                    'Lectio returned an unexpected page. ' +
+                    'The login session may have expired.'
+                );
+            }
+
+            const html =
+                await response.text();
+
+            /*
+             * Lectio answered. Whatever the page turns out to say,
+             * the connection is healthy, so the backoff clears.
+             */
+            consecutiveFetchFailures = 0;
+            fetchBackoffUntil = 0;
+
+            return new DOMParser()
+                .parseFromString(
+                    html,
+                    'text/html'
+                );
+
+        } catch (error) {
+            noteFetchFailure();
+
+            throw error;
+
+        } finally {
+            window.clearTimeout(timeoutTimer);
+            liveFetchControllers.delete(controller);
+            releaseSlot();
+        }
+    }
+
+    function noteFetchFailure() {
+        consecutiveFetchFailures += 1;
 
         if (
-            !response.ok
+            consecutiveFetchFailures <
+            FETCH_FAILURES_BEFORE_BACKOFF
         ) {
-            throw new Error(
-                `HTTP ${response.status} for ${url}`
-            );
+            return;
         }
 
-        const finalUrl =
-            new URL(
-                response.url,
-                location.origin
+        const wait =
+            Math.min(
+                FETCH_BACKOFF_BASE_MS *
+                Math.pow(
+                    2,
+                    consecutiveFetchFailures -
+                    FETCH_FAILURES_BEFORE_BACKOFF
+                ),
+                FETCH_BACKOFF_CEILING_MS
             );
 
-        if (
-            !expectedPath.test(
-                finalUrl.pathname
-            )
-        ) {
-            throw new Error(
-                'Lectio returned an unexpected page. ' +
-                'The login session may have expired.'
-            );
-        }
-
-        const html =
-            await response.text();
-
-        return new DOMParser()
-            .parseFromString(
-                html,
-                'text/html'
-            );
+        fetchBackoffUntil =
+            Date.now() + wait;
     }
 
     // ============================================================
@@ -1008,18 +1716,73 @@
             );
     }
 
+    /*
+     * Telling the Manager that a selector matched nothing
+     * (docs/manager-problem-log.md). One-way and additive: with no Manager
+     * installed this lands on a window nobody is listening to, which is a
+     * no-op.
+     *
+     * `code` is a token written here, never text read off the page - there is
+     * deliberately no field for a message, because this log is written to be
+     * pasted into a public issue.
+     */
+    function reportToManager(
+        kind,
+        code,
+        found
+    ) {
+        window.dispatchEvent(
+            new CustomEvent(
+                'lectio-module:report',
+                {
+                    detail: {
+                        moduleId:
+                            'message-notifications',
+                        kind,
+                        code,
+                        found
+                    }
+                }
+            )
+        );
+    }
+
     function findMessageNavLink() {
-        const candidates = [
+        const links = [
             ...document.querySelectorAll(
                 MESSAGE_LINK_SELECTOR
             )
-        ].filter(
-            isMessageNavCandidate
-        );
+        ];
+
+        const candidates =
+            links.filter(
+                isMessageNavCandidate
+            );
 
         if (
             !candidates.length
         ) {
+            /*
+             * This module's own rule is that a parse failure is never read as
+             * zero unread, so a link it cannot recognise shows as nothing at
+             * all - indistinguishable from an empty inbox, and the reason
+             * nobody has ever reported it from a school other than the one it
+             * was written against. If the page links to Beskeder and none of
+             * those links matched, say so once.
+             */
+            if (
+                links.length &&
+                !reportedNavDrift
+            ) {
+                reportedNavDrift = true;
+
+                reportToManager(
+                    'drift',
+                    'messages-nav-link',
+                    0
+                );
+            }
+
             return null;
         }
 
@@ -1681,7 +2444,8 @@
             );
 
         } catch (_) {
-            // Cache failure is non-fatal.
+            // Cache failure is non-fatal, and now visible.
+            reportStorageWriteFailure();
         }
     }
 

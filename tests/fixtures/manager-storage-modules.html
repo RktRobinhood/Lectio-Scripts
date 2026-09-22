@@ -16,8 +16,8 @@
          * leaves the palette beside it untouched; and a key nobody claims is
          * still listed, so adding two claimants took nothing off the list.
          *
-         * Both modules load from modules-unstable/, because that is the only
-         * copy that declares anything - the copies in modules/ are frozen.
+         * Both modules load from modules/: their declarations were promoted
+         * to Stable, so that is where the only copy of each now lives.
          */
         const catalogue = {
             schemaVersion: 1,
@@ -35,7 +35,7 @@
                     audience: ['student', 'teacher'],
                     status: 'experimental',
                     version: '0.18.1',
-                    installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Theming.user.js'
+                    installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Theming.user.js'
                 },
                 {
                     id: 'schedule-summary',
@@ -45,7 +45,7 @@
                     audience: ['student', 'teacher'],
                     status: 'experimental',
                     version: '0.2.5',
-                    installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Schedule-Summary.user.js'
+                    installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Schedule-Summary.user.js'
                 }
             ]
         };
@@ -93,8 +93,8 @@
             window.pruneRequests.push(JSON.stringify(event.detail || {}));
         });
     </script>
-    <script src="../../modules-unstable/Lectio-Theming.user.js"></script>
-    <script src="../../modules-unstable/Lectio-Schedule-Summary.user.js"></script>
+    <script src="../../modules/Lectio-Theming.user.js"></script>
+    <script src="../../modules/Lectio-Schedule-Summary.user.js"></script>
     <script src="../../manager/Lectio-Manager.user.js"></script>
     <script>
         function assert(condition, message) {

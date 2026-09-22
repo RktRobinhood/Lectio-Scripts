@@ -31,7 +31,7 @@
         // The module's own version, so the card shows "Installed" rather than
         // an update or a channel target, whatever number the module is at.
         const request = new XMLHttpRequest();
-        request.open('GET', '/modules-unstable/Lectio-Chairs-Up.user.js', false);
+        request.open('GET', '/modules/Lectio-Chairs-Up.user.js', false);
         request.send();
         window.chairsUpSource = request.responseText;
         const chairsUpVersion = window.chairsUpSource.match(/@version\s+(\S+)/)[1];

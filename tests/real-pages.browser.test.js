@@ -433,7 +433,7 @@ test('Subject Colours paints a real week and leaves the cancelled activity alone
                 scanWeeks: 0, colourOther: true, overrides: {}
             }));
         `,
-        modules: ['/modules-unstable/Lectio-Subject-Colours.user.js'],
+        modules: ['/modules/Lectio-Subject-Colours.user.js'],
         postlude: `${REPORTER}
             setTimeout(() => {
                 const lessons = [...document.querySelectorAll('.s2skemabrik[data-tooltip]')];
@@ -486,7 +486,7 @@ test('Subject Colours promotes a hold that recurs inside the real week to a clas
                 scanWeeks: 1, colourOther: true, overrides: {}
             }));
         `,
-        modules: ['/modules-unstable/Lectio-Subject-Colours.user.js'],
+        modules: ['/modules/Lectio-Subject-Colours.user.js'],
         postlude: `${REPORTER}
             setTimeout(() => {
                 const lessons = [...document.querySelectorAll('.s2skemabrik[data-tooltip]')];
@@ -919,7 +919,7 @@ test('Chairs Up reads the 15 roomed lessons off the real week and marks the last
                 realInfo.apply(console, args);
             };
         `,
-        modules: ['/modules-unstable/Lectio-Chairs-Up.user.js'],
+        modules: ['/modules/Lectio-Chairs-Up.user.js'],
         postlude: `${REPORTER}
             setTimeout(() => {
                 const lessons = [...document.querySelectorAll('a.s2skemabrik.s2brik[data-tooltip]')];
@@ -986,7 +986,7 @@ test('Subject Colours reads one hold, not two, off a block that renders its cont
                 scanWeeks: 0, colourOther: true, overrides: {}
             }));
         `,
-        modules: ['/modules-unstable/Lectio-Subject-Colours.user.js'],
+        modules: ['/modules/Lectio-Subject-Colours.user.js'],
         postlude: `${REPORTER}
             setTimeout(() => {
                 const blocks = [...document.querySelectorAll('.s2skemabrik[data-tooltip]')];
@@ -1097,7 +1097,7 @@ test('Unread Message Notifications reads 4 unread off the real Forside without f
                 realWarn.apply(console, args);
             };
         `,
-        modules: ['/modules-unstable/Lectio-Unread-Message-Notifications.user.js'],
+        modules: ['/modules/Lectio-Unread-Message-Notifications.user.js'],
         postlude: `${REPORTER}
             // The first check waits 700ms plus up to 1500ms of jitter, then
             // up to 1200ms for a Manager slot before the preview fetch.
@@ -1173,7 +1173,7 @@ test('English Mode leaves every lesson block tooltip on the real week untouched'
                 subtree: true, attributes: true, attributeOldValue: true, attributeFilter: ['data-tooltip']
             });
         `,
-        modules: ['/modules-unstable/Lectio-English-Mode.user.js'],
+        modules: ['/modules/Lectio-English-Mode.user.js'],
         postlude: `${REPORTER}
             setTimeout(async () => {
                 check(document.documentElement.lang === 'en', 'English Mode did not switch the page to en');
