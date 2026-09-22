@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Unread Message Notifications
 // @namespace    https://www.lectio.dk/
-// @version      0.9.1
+// @version      0.9.2
 // @description  Shows one unread-message badge using Lectio's own unread count, at any Lectio school. Includes direct and group-addressed messages.
 // @match        https://www.lectio.dk/lectio/*
 // @grant        none
@@ -61,7 +61,7 @@
     (function registerWithLectioManager() {
         const MODULE_ID = 'message-notifications';
         const MODULE_NAME = 'Lectio - Unread Message Notifications';
-        const MODULE_VERSION = '0.9.1';
+        const MODULE_VERSION = '0.9.2';
 
         /*
          * The settings panel's own words, in both languages (ADR-0013). The
@@ -286,6 +286,43 @@
                 const cached = normalizeState(JSON.parse(localStorage.getItem(key) || 'null'));
 
                 if (!cached || Date.now() - cached.checkedAt > CACHE_MAX_AGE) doomed.push(key);
+            }
+
+            for (const key of doomed) localStorage.removeItem(key);
+        } catch (_) {
+            // Storage unreadable; there is nothing to prune.
+        }
+
+        pruneLegacyStorage();
+    }
+
+    /*
+     * "v3 and earlier were explicitly left behind" above is true of the cache
+     * shape CACHE_KEY_PREFIX covers, but the cache key was also renamed on the
+     * way there - the oldest entries are `lectioUnreadMessages.v3.<school>`,
+     * with no `cache.` in them at all, so the sweep above never saw them
+     * either. Nothing has read that shape since, and it was never declared to
+     * the Manager, so it only ever showed up as "Not claimed by a running
+     * module" (docs/manager-storage-api.md).
+     */
+    function pruneLegacyStorage() {
+        const legacyKeyShape = /^lectioUnreadMessages\.v\d+\./;
+
+        try {
+            const doomed = [];
+
+            for (let index = 0; index < localStorage.length; index += 1) {
+                const key = localStorage.key(index);
+
+                if (
+                    typeof key !== 'string' ||
+                    key === SETTINGS_KEY ||
+                    key.startsWith(CACHE_KEY_PREFIX)
+                ) {
+                    continue;
+                }
+
+                if (legacyKeyShape.test(key)) doomed.push(key);
             }
 
             for (const key of doomed) localStorage.removeItem(key);

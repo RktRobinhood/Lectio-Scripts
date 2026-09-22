@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Theming
 // @namespace    https://www.lectio.dk/
-// @version      0.18.2
+// @version      0.18.3
 // @description  Gives Lectio a soft, translucent glass shell with 46 built-in colour schemes (Catppuccin, Nord, Dracula, Cyberpunk, sports, social-app, IB and Danish-landscape palettes and more), each with its own distinct background photo, and can derive a scheme from a website or image, take its background from your own picture, and let you hand-pick every key colour.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-start
@@ -16,7 +16,7 @@
 
     const MODULE_ID = 'lectio-theming';
     const MODULE_NAME = 'Lectio Theming';
-    const MODULE_VERSION = '0.18.2';
+    const MODULE_VERSION = '0.18.3';
     const STORAGE_KEY = 'lectioTheming.settings.v2';
     // The chosen background picture lives in its own entry rather than in the
     // settings blob: it is orders of magnitude larger than every other setting
@@ -368,6 +368,8 @@
         customColours: null,
         backgroundVeil: 35
     });
+
+    pruneLegacyStorage();
 
     let settings = loadSettings();
     let customBackground = loadCustomBackground();
@@ -818,6 +820,19 @@
 
     function cloneDefaults() {
         return { ...DEFAULT_SETTINGS, customColours: null };
+    }
+
+    // The settings key was bumped from v1 to v2 with nothing left behind to
+    // read it back or migrate it, so the old blob just sat there forever -
+    // never declared to the Manager, so its only visibility was "Not claimed
+    // by a running module" in the storage readout (docs/manager-storage-api.md).
+    // Removed once, on load, rather than left for someone to notice.
+    function pruneLegacyStorage() {
+        try {
+            localStorage.removeItem('lectioTheming.settings.v1');
+        } catch (_) {
+            // Storage unavailable; there is nothing to prune.
+        }
     }
 
     // The picture is read back on its own so a corrupt or outsized entry can
