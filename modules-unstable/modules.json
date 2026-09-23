@@ -18,15 +18,15 @@
         "teacher"
       ],
       "status": "unstable",
-      "version": "0.9.5",
-      "changelog": "All thirty settings and their six sections now read in Danish as well as English, in the Manager and in the floating radar’s own panel alike. They follow the Manager’s language and switch with it in place.",
+      "version": "0.9.6",
+      "changelog": "A detected change now shows what it was against what it is. Each changed field gets its own labelled row, with the old value struck through and the new one beside it, instead of every field running into one line - and homework and notes keep the old text rather than only quoting the new. A coloured stripe down the left says at a glance whether something was cancelled, added, moved or is coming due.",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Change-Radar.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
       "i18n": {
         "da": {
           "name": "Lectio Ændringsradar",
           "description": "Eksperimentel Lectio-vagt med en kompakt radar-HUD i temaets farver. Du vælger selv, hvad den holder øje med - aflysninger, flytninger, lokaler, lærere og lektier i skemaet, plus valgfri overvågning af opgaver, fravær og dokumenter - plus kommende opgavefrister, der meldes, når de kommer inden for det valgte tidsrum - med hastestatus, styr på usete ændringer og en roterende lokal ændringslog.",
-          "changelog": "Alle tredive indstillinger og deres seks afsnit kan nu læses på dansk såvel som engelsk, både i Manageren og i den flydende radars eget panel. De følger Managerens sprog og skifter med det på stedet."
+          "changelog": "En fundet ændring viser nu, hvad den var, over for hvad den er. Hvert ændret felt får sin egen linje med etiket, hvor den gamle værdi er streget ud og den nye står ved siden af, i stedet for at alle felter løber sammen på én linje - og lektier og noter beholder den gamle tekst i stedet for kun at citere den nye. En farvet stribe i venstre side siger med det samme, om noget er aflyst, tilføjet, flyttet eller på vej til at forfalde."
         }
       }
     },

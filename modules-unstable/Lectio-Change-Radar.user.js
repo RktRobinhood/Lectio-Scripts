@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Change Radar
 // @namespace    https://github.com/RktRobinhood/Lectio-Scripts
-// @version      0.9.5
+// @version      0.9.6
 // @description  Watches Lectio for the changes you choose to track - timetable, assignments, absence, documents - and keeps a compact recent-change HUD.
 // @author       RktRobinhood
 // @match        https://www.lectio.dk/lectio/*
@@ -20,7 +20,7 @@
     id: 'change-radar',
     aliases: ['schedule-change-radar', 'lectio-change-radar', 'change-log'],
     name: 'Lectio Change Radar',
-    version: '0.9.5',
+    version: '0.9.6',
     channel: 'unstable'
   });
 
@@ -1525,6 +1525,11 @@
             kind: 'assignment',
             title: next.title,
             detail: withContext(next.dueDate ? `New assignment, due ${formatDeadline(next)}` : 'New assignment', next),
+            facets: [
+              flagFacet('', 'New on the assignment list'),
+              ...(next.dueDate ? [flagFacet('Due', formatDeadline(next))] : []),
+              ...contextFacets(next)
+            ],
             noticedAt,
             record: next
           }));
@@ -1539,6 +1544,7 @@
           kind: 'deadline',
           title: next.title,
           detail: withContext(`Deadline: ${formatDeadline(previous)} -> ${formatDeadline(next)}`, next),
+          facets: [pairFacet('Deadline', formatDeadline(previous), formatDeadline(next)), ...contextFacets(next)],
           noticedAt,
           record: next
         }));
@@ -1555,6 +1561,7 @@
           kind: 'due',
           title: next.title,
           detail: withContext(`Due ${formatDeadline(next)}`, next),
+          facets: [flagFacet('Due', formatDeadline(next)), ...contextFacets(next)],
           noticedAt,
           record: next
         }));
@@ -1565,6 +1572,7 @@
           kind: 'status',
           title: next.title,
           detail: `Status: ${previous.status || 'none'} -> ${next.status || 'none'}`,
+          facets: [pairFacet('Status', previous.status, next.status)],
           noticedAt,
           record: next
         }));
@@ -1587,6 +1595,10 @@
             kind: 'absence',
             title: next.title,
             detail: next.detail ? `New absence registration · ${truncate(next.detail, 70)}` : 'New absence registration',
+            facets: [
+              flagFacet('', 'New absence registration'),
+              ...(next.detail ? [flagFacet('Details', next.detail)] : [])
+            ],
             noticedAt,
             record: next
           }));
@@ -1599,6 +1611,7 @@
           kind: 'absence',
           title: next.title,
           detail: `Absence: ${previous.detail || 'none'} -> ${next.detail || 'none'}`,
+          facets: [pairFacet('Absence', previous.detail, next.detail)],
           noticedAt,
           record: next
         }));
@@ -1621,6 +1634,10 @@
             kind: 'document',
             title: next.title,
             detail: next.detail ? `New document · ${truncate(next.detail, 70)}` : 'New document',
+            facets: [
+              flagFacet('', 'New document'),
+              ...(next.detail ? [flagFacet('Details', next.detail)] : [])
+            ],
             noticedAt,
             record: next
           }));
@@ -1633,6 +1650,7 @@
           kind: 'document',
           title: next.title,
           detail: `Updated · ${truncate(next.detail, 70)}`,
+          facets: [pairFacet('Document', previous.detail, next.detail)],
           noticedAt,
           record: next
         }));
@@ -1645,7 +1663,7 @@
   // Source records reuse the timetable history entry, so an assignment deadline
   // lands in eventDate/eventStart and is picked up by the existing urgency
   // window for free. A record with no date simply never counts as urgent.
-  function makeSourceEntry({ kind, title, detail, noticedAt, record }) {
+  function makeSourceEntry({ kind, title, detail, facets, noticedAt, record }) {
     return makeHistoryEntry({
       event: {
         id: record.id,
@@ -1656,6 +1674,7 @@
       kind,
       title,
       detail,
+      facets,
       noticedAt
     });
   }
@@ -1702,6 +1721,7 @@
           kind: 'added',
           title: next.title,
           detail: `Added to schedule${scheduleSuffix(next)}`,
+          facets: [flagFacet('', 'Added to your schedule')],
           noticedAt
         }));
       }
@@ -1719,6 +1739,7 @@
           kind: 'removed',
           title: before.title,
           detail: `Removed from schedule${scheduleSuffix(before)}`,
+          facets: [flagFacet('', 'Removed from your schedule')],
           noticedAt
         }));
       }
@@ -1734,15 +1755,18 @@
   function compareEvent(before, next, noticedAt) {
     const settings = runtime.settings || DEFAULT_SETTINGS;
     const details = [];
+    const facets = [];
     let kind = 'changed';
 
     if (settings.trackCancellations) {
       if (next.status === 'cancelled' && before.status !== 'cancelled') {
         kind = 'cancelled';
         details.push('Cancelled');
+        facets.push(flagFacet('Status', 'Cancelled'));
       } else if (before.status === 'cancelled' && next.status !== 'cancelled') {
         kind = 'restored';
         details.push('Cancellation cleared');
+        facets.push(flagFacet('Status', 'Cancellation cleared'));
       }
     }
 
@@ -1750,46 +1774,56 @@
         (before.dateIso !== next.dateIso || before.start !== next.start || before.end !== next.end || before.allDay !== next.allDay)) {
       if (kind === 'changed') kind = 'time';
       details.push(`Time: ${formatEventWhen(before)} -> ${formatEventWhen(next)}`);
+      facets.push(pairFacet('Time', formatEventWhen(before), formatEventWhen(next)));
     }
 
     if (settings.trackRoomChanges && fieldChanged(before.room, next.room)) {
       if (kind === 'changed') kind = 'room';
       details.push(`Room: ${before.room || 'none'} -> ${next.room || 'none'}`);
+      facets.push(pairFacet('Room', before.room, next.room));
     }
 
     if (settings.trackTeacherChanges && fieldChanged(before.teacher, next.teacher)) {
       if (kind === 'changed') kind = 'teacher';
       details.push(`Teacher: ${before.teacher || 'none'} -> ${next.teacher || 'none'}`);
+      facets.push(pairFacet('Teacher', before.teacher, next.teacher));
     }
 
     if (settings.trackHomework && fieldChanged(before.homework, next.homework)) {
       if (kind === 'changed') kind = 'homework';
       details.push(`Homework ${summarizeFieldChange(before.homework, next.homework)}`);
+      facets.push(pairFacet('Homework', before.homework, next.homework));
     }
 
     if (settings.trackLessonNotes) {
       if (fieldChanged(before.note, next.note)) {
         if (kind === 'changed') kind = 'note';
         details.push(`Note ${summarizeFieldChange(before.note, next.note)}`);
+        facets.push(pairFacet('Note', before.note, next.note));
       }
       if (fieldChanged(before.otherContent, next.otherContent)) {
         if (kind === 'changed') kind = 'note';
         details.push(`Other content ${summarizeFieldChange(before.otherContent, next.otherContent)}`);
+        facets.push(pairFacet('Other content', before.otherContent, next.otherContent));
       }
     }
 
     if (settings.trackLessonDetails) {
       if (fieldChanged(before.hold, next.hold)) {
         details.push(`Class: ${before.hold || 'none'} -> ${next.hold || 'none'}`);
+        facets.push(pairFacet('Class', before.hold, next.hold));
       }
       if (fieldChanged(before.title, next.title)) {
         details.push(`Title: ${before.title || 'untitled'} -> ${next.title || 'untitled'}`);
+        facets.push(pairFacet('Title', before.title, next.title));
       }
       if (fieldChanged(before.resources, next.resources)) {
         details.push(`Resources: ${before.resources || 'none'} -> ${next.resources || 'none'}`);
+        facets.push(pairFacet('Resources', before.resources, next.resources));
       }
       if (fieldChanged(before.participants, next.participants)) {
         details.push(`Participants: ${before.participants || 'none'} -> ${next.participants || 'none'}`);
+        facets.push(pairFacet('Participants', before.participants, next.participants));
       }
 
       // Lectio sometimes marks a brick changed even when the compact tooltip does
@@ -1797,6 +1831,7 @@
       // is exactly the administrative noise this toggle governs.
       if (!details.length && next.status === 'changed' && before.status !== 'changed') {
         details.push('Lectio marked this activity as changed');
+        facets.push(flagFacet('', 'Lectio marked this activity as changed'));
       }
     }
 
@@ -1810,6 +1845,7 @@
       kind,
       title: next.title,
       detail: details.join(' · '),
+      facets,
       noticedAt
     });
   }
@@ -1826,12 +1862,50 @@
     return `changed: ${truncate(next, 70)}`;
   }
 
+  /*
+   * A change is two values, not a sentence. Every comparison above keeps
+   * writing the flat sentence it always wrote - it is what the history dedupe
+   * fingerprints, what entries stored by an earlier version carry, and what
+   * the panel falls back to - and now also records the pair the sentence was
+   * made of, so the panel can set the old value against the new one instead of
+   * running every changed field into a single line.
+   *
+   * The limit is inside the function rather than beside it, for the reason
+   * boundedStateForStorage() spells out: this file is evaluated top to bottom
+   * with init() called from a boot block above here, so a module-scope const
+   * this far down is still in its temporal dead zone when an early caller
+   * runs. It is more generous than the sentence's 70-character excerpt because
+   * reading the two values against each other is the whole point of the pair.
+   */
+  function pairFacet(label, before, next) {
+    const valueLimit = 160;
+    return {
+      label,
+      before: truncate(before, valueLimit),
+      after: truncate(next, valueLimit)
+    };
+  }
+
+  // A change with no "before" to show: a cancellation, a new document, a
+  // deadline arriving. One value, stated rather than compared.
+  function flagFacet(label, text) {
+    const valueLimit = 160;
+    return { label, text: truncate(text, valueLimit) };
+  }
+
+  // A source record often knows which class or hold it belongs to, which the
+  // sentence appends with withContext(). As a facet it gets its own labelled
+  // row instead of trailing off the end of the line.
+  function contextFacets(record) {
+    return record?.context ? [flagFacet('Class', record.context)] : [];
+  }
+
   function truncate(value, limit) {
     const text = cleanText(value);
     return text.length > limit ? `${text.slice(0, limit - 3)}...` : text;
   }
 
-  function makeHistoryEntry({ event, kind, title, detail, noticedAt }) {
+  function makeHistoryEntry({ event, kind, title, detail, facets, noticedAt }) {
     const fingerprint = [
       event.id,
       kind,
@@ -1840,7 +1914,7 @@
       event.start
     ].join('|');
 
-    return {
+    const entry = {
       id: `${noticedAt}-${simpleHash(fingerprint)}`,
       eventId: event.id,
       kind,
@@ -1852,6 +1926,21 @@
       eventEnd: event.end || '',
       url: event.url || ''
     };
+
+    // Deliberately absent rather than empty when there is nothing laid out to
+    // show: the stored log is size-bounded, and an entry that has only its
+    // sentence should not spend bytes saying so.
+    const laidOut = usableFacets(facets);
+    if (laidOut.length) entry.facets = laidOut;
+
+    return entry;
+  }
+
+  // A pair whose two sides are both empty says nothing; a pair with one empty
+  // side says the field was filled in or cleared, which is news worth a row.
+  function usableFacets(facets) {
+    if (!Array.isArray(facets)) return [];
+    return facets.filter((facet) => facet && (facet.text || facet.before || facet.after));
   }
 
   function mergeHistory(changes, history) {
@@ -1998,7 +2087,7 @@
         position: absolute;
         top: 100%;
         right: 0;
-        width: min(348px, calc(100vw - 24px));
+        width: min(380px, calc(100vw - 24px));
         box-sizing: border-box;
         padding-top: 7px;
         display: none;
@@ -2058,7 +2147,7 @@
       }
 
       #${UI.list} {
-        max-height: min(50vh, 420px);
+        max-height: min(62vh, 520px);
         overflow-y: auto;
         overscroll-behavior: contain;
         background: var(--lcr-surface) !important;
@@ -2069,11 +2158,26 @@
         box-sizing: border-box;
         border: 0;
         border-bottom: 1px solid var(--lcr-border) !important;
+        border-left: 3px solid var(--lcr-border) !important;
         background: var(--lcr-surface) !important;
         color: var(--lcr-text) !important;
-        padding: 9px 11px;
+        padding: 9px 11px 10px 9px;
         text-decoration: none !important;
       }
+
+      /*
+       * The stripe carries the category, so the eye lands on the right entry
+       * before it reads a word of it. Colour on a 3px rule rather than on text:
+       * the panel takes its surface from whatever Lectio is wearing, and a hue
+       * that has to stay legible as 9px type on both a white and a near-black
+       * background is a hue that ends up legible on neither.
+       */
+      .lcr-item[data-tone="drop"] { border-left-color: #d94b43 !important; }
+      .lcr-item[data-tone="add"] { border-left-color: #3b9a58 !important; }
+      .lcr-item[data-tone="move"] { border-left-color: #d79619 !important; }
+      .lcr-item[data-tone="watch"] { border-left-color: #4a7fbf !important; }
+      .lcr-item[data-tone="content"] { border-left-color: #7b62b0 !important; }
+      .lcr-item[data-tone="plain"] { border-left-color: transparent !important; }
       .lcr-item:last-child { border-bottom: 0 !important; }
       a.lcr-item:hover, a.lcr-item:focus-visible {
         background: var(--lcr-soft) !important;
@@ -2115,6 +2219,111 @@
         opacity: .90;
         font-size: 10.5px;
         overflow-wrap: anywhere;
+      }
+
+      /*
+       * One row per changed field: a label in a narrow left column, the old and
+       * the new value in the right one. Short pairs sit on a line with an arrow
+       * between them; anything longer stacks as was / now, because the pair
+       * wrapping into each other is exactly the run-on line this replaces.
+       */
+      .lcr-facets {
+        margin-top: 5px;
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
+      .lcr-facet {
+        display: grid;
+        grid-template-columns: 66px minmax(0, 1fr);
+        column-gap: 8px;
+        align-items: baseline;
+      }
+      /* A row whose label would only repeat the chip above it drops the column
+         rather than the alignment. */
+      .lcr-facet.is-bare { grid-template-columns: minmax(0, 1fr); }
+      .lcr-facet-label {
+        color: var(--lcr-muted) !important;
+        font-size: 8.5px;
+        font-weight: 800;
+        letter-spacing: .045em;
+        line-height: 1.5;
+        text-transform: uppercase;
+        overflow-wrap: normal;
+        word-break: keep-all;
+      }
+      .lcr-facet-values {
+        min-width: 0;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 2px 6px;
+        font-size: 10.5px;
+        line-height: 1.45;
+      }
+      .lcr-facet.is-stacked .lcr-facet-values {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 2px;
+      }
+      .lcr-side-line {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+      }
+      .lcr-side {
+        flex: 0 0 26px;
+        color: var(--lcr-muted) !important;
+        font-size: 8.5px;
+        font-weight: 700;
+        letter-spacing: .04em;
+        text-transform: uppercase;
+      }
+      .lcr-was {
+        min-width: 0;
+        color: var(--lcr-muted) !important;
+        text-decoration: line-through !important;
+        text-decoration-thickness: 1px;
+        overflow-wrap: anywhere;
+      }
+      .lcr-now {
+        min-width: 0;
+        border-radius: 4px;
+        background: var(--lcr-soft) !important;
+        color: var(--lcr-text) !important;
+        padding: 1px 5px;
+        font-weight: 700;
+        overflow-wrap: anywhere;
+      }
+      .lcr-was.is-blank, .lcr-now.is-blank {
+        color: var(--lcr-muted) !important;
+        font-style: italic;
+        font-weight: 400;
+        text-decoration: none !important;
+      }
+      .lcr-now.is-blank { background: transparent !important; padding: 0; }
+      .lcr-arrow {
+        flex: 0 0 auto;
+        color: var(--lcr-muted) !important;
+        font-weight: 700;
+      }
+      .lcr-flag {
+        min-width: 0;
+        color: var(--lcr-text) !important;
+        font-weight: 700;
+        overflow-wrap: anywhere;
+      }
+
+      /* Read aloud, never drawn: the arrow and the strikethrough are the only
+         thing saying which value is which, and neither reaches a screen reader. */
+      .lcr-sr {
+        position: absolute !important;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
       }
       .lcr-meta {
         margin-top: 4px;
@@ -2497,6 +2706,7 @@
     const node = document.createElement(item.url ? 'a' : 'div');
     node.className = 'lcr-item';
     node.dataset.kind = item.kind || 'changed';
+    node.dataset.tone = kindTone(item.kind);
 
     if (item.url) {
       node.href = item.url;
@@ -2513,9 +2723,115 @@
         ${unseen ? '<span class="lcr-unseen">UNSEEN</span>' : ''}
         <span class="lcr-title">${escapeHtml(item.title || 'Lectio activity')}</span>
       </div>
-      <div class="lcr-detail">${escapeHtml(item.detail || 'Schedule changed')}</div>
+      ${renderChangeBody(item)}
       <div class="lcr-meta">${escapeHtml(when)}${when && noticed ? ' · ' : ''}${escapeHtml(noticed)}</div>`;
     return node;
+  }
+
+  /*
+   * What actually changed, laid out as rows rather than as one run-on line.
+   *
+   * Three sources, in order of how much they know. An entry written by this
+   * version carries the pairs the comparison found. An entry stored by an
+   * earlier one has only the sentence, so the sentence is read back into pairs
+   * - the log holds at most twenty entries and turns over in days, but the
+   * ones already on screen when this version lands should not be the only
+   * unreadable ones. Anything that parses into nothing is shown exactly as it
+   * always was, which is also where a future detail shape lands.
+   */
+  function renderChangeBody(item) {
+    const stored = usableFacets(item.facets);
+    const facets = stored.length ? stored : parseDetailFacets(item.detail);
+
+    if (!facets.length) {
+      return `<div class="lcr-detail">${escapeHtml(item.detail || 'Schedule changed')}</div>`;
+    }
+
+    // A single row labelled the same as the chip above it says "ROOM" twice in
+    // two lines. The chip is the one that stays: it is what the eye scans.
+    const bare = facets.length === 1 &&
+      cleanText(facets[0].label).toLowerCase() === kindLabel(item.kind).toLowerCase();
+
+    return `<div class="lcr-facets">${facets.map((facet) => renderFacet(facet, bare)).join('')}</div>`;
+  }
+
+  function renderFacet(facet, bare) {
+    const label = bare || !facet.label
+      ? ''
+      : `<span class="lcr-facet-label">${escapeHtml(facet.label)}</span>`;
+
+    const row = label ? 'lcr-facet' : 'lcr-facet is-bare';
+
+    if (facet.text) {
+      return `<div class="${row}">${label}<div class="lcr-facet-values">` +
+        `<span class="lcr-flag">${escapeHtml(facet.text)}</span></div></div>`;
+    }
+
+    const before = cleanText(facet.before);
+    const after = cleanText(facet.after);
+    const was = before
+      ? `<span class="lcr-was" title="${escapeHtml(before)}">${escapeHtml(before)}</span>`
+      : '<span class="lcr-was is-blank">nothing</span>';
+    const now = after
+      ? `<span class="lcr-now" title="${escapeHtml(after)}">${escapeHtml(after)}</span>`
+      : '<span class="lcr-now is-blank">cleared</span>';
+
+    // A room code against a room code reads fine on one line; two paragraphs of
+    // homework in a 380px panel does not. The threshold is where the pair stops
+    // fitting the width the panel actually has.
+    if (before.length + after.length <= 34 && before.length <= 20 && after.length <= 20) {
+      return `<div class="${row}">${label}<div class="lcr-facet-values">` +
+        `<span class="lcr-sr">was </span>${was}` +
+        `<span class="lcr-arrow"><span class="lcr-sr">, now </span><span aria-hidden="true">&#8594;</span></span>` +
+        `${now}</div></div>`;
+    }
+
+    return `<div class="${row} is-stacked">${label}<div class="lcr-facet-values">` +
+      `<div class="lcr-side-line"><span class="lcr-side">was</span>${was}</div>` +
+      `<div class="lcr-side-line"><span class="lcr-side">now</span>${now}</div>` +
+      `</div></div>`;
+  }
+
+  // The sentence's own grammar, read backwards: fields joined with " · ", a
+  // pair written "Label: before -> after". A part that does not fit that shape
+  // is kept whole as a stated line, so nothing is ever dropped on the way.
+  function parseDetailFacets(detail) {
+    const text = cleanText(detail);
+    if (!text) return [];
+
+    // The words the sentence writes where a field was empty. Read back as the
+    // empty values they stand for, so an old entry says 'nothing' in the same
+    // italics a new one does rather than the literal word 'none'.
+    const blank = (value) => (/^(?:none|untitled)$/i.test(value) ? '' : value);
+
+    return text.split(' · ').map((part) => {
+      const pair = part.match(/^([^:]{1,24}): (.+?) -> (.+)$/);
+      return pair ? pairFacet(pair[1], blank(pair[2]), blank(pair[3])) : flagFacet('', part);
+    });
+  }
+
+  // The colour of the stripe down the left of an item, so a cancellation and a
+  // room move are told apart before either is read. Four meanings, not sixteen:
+  // something is gone, something arrived, something moved, something is owed.
+  function kindTone(kind) {
+    const tones = {
+      cancelled: 'drop',
+      removed: 'drop',
+      added: 'add',
+      restored: 'add',
+      assignment: 'add',
+      document: 'add',
+      time: 'move',
+      room: 'move',
+      teacher: 'move',
+      deadline: 'move',
+      due: 'watch',
+      absence: 'watch',
+      status: 'watch',
+      homework: 'content',
+      note: 'content'
+    };
+    return tones[kind] || 'plain';
   }
 
   function renderFooter(status, history) {
