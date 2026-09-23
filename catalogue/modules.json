@@ -2,13 +2,13 @@
   "schemaVersion": 1,
   "generatedAt": "2026-09-22T12:00:00Z",
   "manager": {
-    "version": "1.32.1",
-    "changelog": "A module card no longer offers an update that is already installed. If two copies of one module are running at once - which can happen after a module moves from Experimental to Stable - the card now says so, and which one to delete.",
+    "version": "1.32.2",
+    "changelog": "Remove no longer appears just because a module does not run on the page you are on - that is normal, and removing it there only undid itself. It shows once a module has not run anywhere for two weeks, and says what it cannot do.",
     "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/manager/Lectio-Manager.user.js",
     "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
     "i18n": {
       "da": {
-        "changelog": "Et modulkort tilbyder ikke længere en opdatering, der allerede er installeret. Kører der to kopier af samme modul på én gang - det kan ske, når et modul flytter fra Eksperimentel til Stabil - siger kortet det nu, og hvilken du skal slette."
+        "changelog": "Fjern dukker ikke længere op, bare fordi et modul ikke kører på den side, du er på - det er normalt, og det gjorde ingen forskel at fjerne det der. Nu vises den først, når et modul ikke har kørt nogen steder i to uger."
       }
     }
   },

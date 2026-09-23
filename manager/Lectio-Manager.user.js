@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.32.1
+// @version      1.32.2
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules, including their settings and shared dock controls.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
@@ -116,8 +116,10 @@
             notActiveHereTitle: (name) => `${name} is installed but does not run on this Lectio page, so its settings cannot be changed from here.`,
             notDetected: 'Not detected',
             settings: 'Settings',
-            remove: 'Remove',
-            removeHint: 'Remove from Installed — use this only if you have uninstalled the module in Tampermonkey.',
+            remove: 'Remove from list',
+            removeHint: (lastSeen) => `This module has not run on any Lectio page ${lastSeen}, so it may have been uninstalled. Removing it clears the Manager's own list and nothing else — the Manager cannot uninstall a script, so if it is still in Tampermonkey it will come back, and Tampermonkey's dashboard is the only place to delete it for good.`,
+            lastSeenDays: (days) => `for ${days} days`,
+            lastSeenNever: 'since the Manager started keeping track',
             loading: 'Loading catalogue…',
             noInstalled: 'No installed modules detected yet.',
             allInstalled: 'All available modules are installed.',
@@ -268,8 +270,10 @@
             notActiveHereTitle: (name) => `${name} er installeret, men kører ikke på denne Lectio-side, så modulets indstillinger kan ikke ændres herfra.`,
             notDetected: 'Ikke fundet',
             settings: 'Indstillinger',
-            remove: 'Fjern',
-            removeHint: 'Fjern fra Installeret — brug kun dette, hvis du har afinstalleret modulet i Tampermonkey.',
+            remove: 'Fjern fra listen',
+            removeHint: (lastSeen) => `Dette modul har ikke kørt på nogen Lectio-side ${lastSeen}, så det er måske afinstalleret. At fjerne det rydder kun Managerens egen liste — Manageren kan ikke afinstallere et script, så ligger det stadig i Tampermonkey, kommer det igen, og Tampermonkeys oversigt er det eneste sted, det kan slettes helt.`,
+            lastSeenDays: (days) => `i ${days} dage`,
+            lastSeenNever: 'siden Manageren begyndte at holde regnskab',
             loading: 'Henter kataloget…',
             noInstalled: 'Ingen installerede moduler fundet endnu.',
             allInstalled: 'Alle tilgængelige moduler er installeret.',
@@ -405,7 +409,7 @@
     // Kept in step with the @version header by scripts/check-versions.mjs. The
     // header is metadata Tampermonkey reads; this is the only copy the running
     // script can see, and it is what the self-update notice compares.
-    const MANAGER_VERSION = '1.32.1';
+    const MANAGER_VERSION = '1.32.2';
 
     const STABLE_CATALOGUE_URL =
         'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/catalogue/modules.json';
@@ -424,6 +428,30 @@
 
     const UNSTABLE_REFRESH_INTERVAL_MS =
         5 * 60 * 1000;
+
+    /*
+     * How long a module has to go without running anywhere before the Manager
+     * will offer to drop it from Installed.
+     *
+     * There is no way to ask Tampermonkey what is installed - a userscript
+     * cannot see, let alone remove, another userscript, and the dashboard is
+     * an extension page no script here can reach. So the Installed list is
+     * memory, and the only evidence the Manager has that a module is gone is
+     * that it has stopped registering.
+     *
+     * Not running on THIS page is no evidence at all: Schedule Summary only
+     * matches SkemaNy.aspx, and half of Lectio is not SkemaNy.aspx. Offering
+     * Remove on that basis put the button on an ordinary card, where it could
+     * only mislead - and undo itself, because the module registers again the
+     * moment the person opens a page it does run on.
+     *
+     * A fortnight is the smallest window that clears every way a module can be
+     * idle for a while and still be installed: a holiday, a page the person
+     * rarely opens, a module scoped to one school. Missing all of that means
+     * missing ten school days in a row.
+     */
+    const FORGET_AFTER_MS =
+        14 * 24 * 60 * 60 * 1000;
 
     const DISCOVER_EVENT = 'lectio-manager:discover';
     const LANGUAGE_EVENT = 'lectio-manager:language';
@@ -1639,6 +1667,46 @@
         detected.delete(moduleId);
         saveInstalledRegistry();
         renderModuleList();
+    }
+
+    /*
+     * Whether a module looks gone rather than merely quiet, which is the only
+     * state in which the Manager offers to forget it. See FORGET_AFTER_MS for
+     * why the question has to be asked this way at all.
+     *
+     * Registering here answers it outright. Otherwise it is the last sighting
+     * on any Lectio page, from the persisted registry - a stamp of 0 means a
+     * registry written before the Manager kept one, which is no evidence the
+     * module has ever run and so is treated as gone.
+     */
+    /*
+     * Whole days since a sighting, for the Remove hint. A registry with no
+     * stamp has no number to give, and says so instead of guessing one.
+     */
+    function formatRelativeDays(lastSeenAt) {
+        const stamp = Number(lastSeenAt) || 0;
+
+        if (stamp === 0) {
+            return t('lastSeenNever');
+        }
+
+        return t('lastSeenDays', Math.floor((Date.now() - stamp) / (24 * 60 * 60 * 1000)));
+    }
+
+    function looksUninstalled(moduleId) {
+        if (detected.has(moduleId)) {
+            return false;
+        }
+
+        const record = installed.get(moduleId);
+
+        if (!record) {
+            return false;
+        }
+
+        const lastSeenAt = Number(record.lastSeenAt) || 0;
+
+        return lastSeenAt === 0 || Date.now() - lastSeenAt > FORGET_AFTER_MS;
     }
 
     // A module is installed if it has ever registered, not merely if it is running
@@ -5673,13 +5741,22 @@
                 actions.appendChild(settingsBtn);
             }
 
-            if (!live) {
+            /*
+             * Not `!live`. A module that does not run on the page in front of
+             * us is the ordinary case, not a broken one, and a button offering
+             * to remove it there reads as an uninstall the Manager cannot
+             * perform - and undoes itself on the next page the module does run
+             * on. It is offered only once the module has stopped registering
+             * anywhere for FORGET_AFTER_MS, which is the one thing that
+             * actually suggests it is no longer installed.
+             */
+            if (looksUninstalled(module.id)) {
                 const forgetBtn = document.createElement('button');
                 forgetBtn.type = 'button';
                 forgetBtn.className = 'lectio-manager-forget-btn';
                 forgetBtn.textContent = t('remove');
                 forgetBtn.title =
-                    t('removeHint');
+                    t('removeHint', formatRelativeDays(record.lastSeenAt));
                 forgetBtn.addEventListener('click', () => forgetInstalled(module.id));
                 actions.appendChild(forgetBtn);
             }

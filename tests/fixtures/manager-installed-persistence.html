@@ -34,6 +34,16 @@
                     installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/PageScoped.user.js'
                 },
                 {
+                    id: 'long-gone',
+                    name: 'Long Gone',
+                    description: 'Registered once, a long time ago, and never again.',
+                    category: 'Interface',
+                    audience: ['student'],
+                    status: 'stable',
+                    version: '1.0.0',
+                    installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/LongGone.user.js'
+                },
+                {
                     id: 'never-installed',
                     name: 'Never Installed',
                     description: 'Genuinely not installed.',
@@ -47,12 +57,16 @@
         };
 
         // page-scoped registered on an earlier page load and was persisted then.
+        // long-gone did too, but months ago: it is the one that looks uninstalled
+        // rather than merely quiet, and the only one Remove is offered on.
+        const LONG_AGO = Date.now() - 90 * 24 * 60 * 60 * 1000;
         const storage = new Map([
             ['lectioManager.catalogue.v1', JSON.stringify(catalogue)],
             ['lectioManager.lastRefresh.v1', Date.now()],
             ['lectioManager.updateTipDismissed.v1', true],
             ['lectioManager.installed.v1', JSON.stringify({
-                'page-scoped': { name: 'Page Scoped', version: '1.1.0', lastSeenAt: Date.now() - 60000 }
+                'page-scoped': { name: 'Page Scoped', version: '1.1.0', lastSeenAt: Date.now() - 60000 },
+                'long-gone': { name: 'Long Gone', version: '1.0.0', lastSeenAt: LONG_AGO }
             })]
         ]);
 
@@ -98,11 +112,11 @@
                 const availableTab = document.querySelector('[data-primary-view="all"]');
 
                 // A module that did not register on this page is still installed.
-                assert(installedTab.textContent.trim() === 'Installed 2',
+                assert(installedTab.textContent.trim() === 'Installed 3',
                     `Installed count ignored a module that is not running here: ${installedTab.textContent}`);
                 assert(availableTab.textContent.trim() === 'Available 1',
                     `Available count counted an installed module: ${availableTab.textContent}`);
-                assert(names().join('|') === 'Always On|Page Scoped',
+                assert([...names()].sort().join('|') === 'Always On|Long Gone|Page Scoped',
                     `Installed view dropped a module that is not running here: ${names()}`);
 
                 // It is marked as installed-but-idle, and its update still shows.
@@ -125,15 +139,41 @@
                 assert(names().join('|') === 'Never Installed',
                     `Available repeated an installed module: ${names()}`);
 
-                // Remove is the escape hatch for a module actually uninstalled.
+                // Remove is the escape hatch for a module actually uninstalled,
+                // and nothing here can ask Tampermonkey whether one was. The
+                // only evidence is that the module has stopped registering
+                // anywhere, so that is the only thing it is offered on.
+                //
+                // Not running on THIS page is not that evidence and never was.
+                // Offering Remove on that basis put the button on an ordinary
+                // card - page-scoped is installed, working, and simply scoped
+                // to a page this is not - where it read as an uninstall the
+                // Manager cannot perform and undid itself on the next page the
+                // module ran on.
                 installedTab.click();
-                card('page-scoped').querySelector('.lectio-manager-forget-btn').click();
-                assert(installedTab.textContent.trim() === 'Installed 1',
+                assert(!card('page-scoped').querySelector('.lectio-manager-forget-btn'),
+                    'Remove was offered for a module that is merely not running on this page');
+                assert(!card('always-on').querySelector('.lectio-manager-forget-btn'),
+                    'Remove was offered for a module running on this very page');
+
+                const forget = card('long-gone').querySelector('.lectio-manager-forget-btn');
+                assert(forget, 'Remove was not offered for a module that has not run in months');
+                assert(forget.textContent === 'Remove from list',
+                    `Remove still reads as an uninstall: ${forget.textContent}`);
+                assert(forget.title.includes('cannot uninstall a script'),
+                    `Remove does not say what it cannot do: ${forget.title}`);
+                assert(forget.title.includes('for 90 days'),
+                    `Remove does not say how long it has been: ${forget.title}`);
+
+                forget.click();
+                assert(installedTab.textContent.trim() === 'Installed 2',
                     `Remove did not drop the module from Installed: ${installedTab.textContent}`);
                 assert(availableTab.textContent.trim() === 'Available 2',
                     `Remove did not return the module to Available: ${availableTab.textContent}`);
-                assert(!JSON.parse(storage.get('lectioManager.installed.v1'))['page-scoped'],
+                assert(!JSON.parse(storage.get('lectioManager.installed.v1'))['long-gone'],
                     'Remove did not persist; the module would come back on the next page');
+                assert(JSON.parse(storage.get('lectioManager.installed.v1'))['page-scoped'],
+                    'Remove took the quiet module with it');
 
                 document.body.dataset.testResult = 'pass';
             } catch (error) {
