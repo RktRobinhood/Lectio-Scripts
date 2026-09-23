@@ -23,6 +23,8 @@ Stable therefore skips numbers — `1.9.3` straight to `1.9.7` — and that is c
 
 **The promotion bump is not ceremony.** A tester installed the Unstable file, so their Tampermonkey copy points `@updateURL`/`@downloadURL` at `modules-unstable/`, which promotion deletes. If Stable shipped the same number the tester was already on, the Manager would see an installed version equal to the catalogue's, offer nothing, and leave them on a file whose update URL now 404s — stranded forever on the last Unstable build, silently. One more patch makes the Manager offer them an update whose `installUrl` is the Stable path, and installing it moves them back onto the Stable file.
 
+**And installing it does not always remove the Unstable copy** — issue #70, found in the field after the 2026-09-22 promotion of six modules. The two files carry the same `@name` and `@namespace` but different download URLs, and a tester ended up with both installed and both running: the Stable file at the new version, and the deleted-from-GitHub Unstable file still sitting beside it at the old one. Both announce to the Manager, so the older copy could define the version the Manager reported, and the panel offered an update that was already installed — permanently, since installing it again only replaced the copy that was already current. Manager 1.32.1 makes that state legible rather than silent: two answers to one Discovery pass under two versions is counted as two copies, the newer one defines the module, and the card asks for the older one to be deleted instead of offering an update that cannot take. Nothing in the repository can remove the stale install; only the person can, from the Tampermonkey dashboard.
+
 ### Promoting
 
 Promotion is one commit that does all of this:
@@ -33,6 +35,7 @@ Promotion is one commit that does all of this:
 4. Update the module's entry in `catalogue/modules.json` — `version`, and anything else the work changed, `description` included — or add the entry if the module is new to Stable.
 5. Delete `modules-unstable/<Name>.user.js`, its entry from `modules-unstable/modules.json`, and its section from `modules-unstable/README.md` — that README says what is on the channel now, and a promoted module is not.
 6. Run `node scripts/check-versions.mjs` and the browser suite, then push.
+7. Tell testers to check the Tampermonkey dashboard for a second entry under the same module name and delete the one whose update URL still says `modules-unstable/`. Step 5 deletes the file, not their install of it.
 
 ### The one exception
 

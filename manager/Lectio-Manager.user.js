@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.32.0
+// @version      1.32.1
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules, including their settings and shared dock controls.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-idle
@@ -124,6 +124,9 @@
             noneMatch: 'No available modules match this filter.',
             installedVersion: (version) => `Installed v${version}`,
             updateAvailable: (version, installed) => `Update available: v${version} (installed v${installed})`,
+            duplicateCopies: (versions) =>
+                `${versions.length} copies running: ${versions.map((version) => `v${version}`).join(' and ')}`,
+            duplicateCopiesHelp: 'More than one install of this module is running on this page at once — this usually happens when a module moves from Experimental to Stable. Open the Tampermonkey dashboard and delete the older one. Until it is gone, installing the update again changes nothing.',
             whatsNew: 'What’s new:',
             channelTarget: (channel, version, installed) => `${channel} target: v${version} (installed v${installed})`,
             selectedTarget: 'Selected',
@@ -273,6 +276,9 @@
             noneMatch: 'Ingen tilgængelige moduler matcher dette filter.',
             installedVersion: (version) => `Installeret v${version}`,
             updateAvailable: (version, installed) => `Opdatering tilgængelig: v${version} (installeret v${installed})`,
+            duplicateCopies: (versions) =>
+                `Der kører ${versions.length} kopier: ${versions.map((version) => `v${version}`).join(' og ')}`,
+            duplicateCopiesHelp: 'Der kører mere end én installation af dette modul på siden på én gang — det sker typisk, når et modul flytter fra Eksperimentel til Stabil. Åbn Tampermonkeys oversigt og slet den ældste. Indtil den er væk, ændrer det ingenting at installere opdateringen igen.',
             whatsNew: 'Nyt i denne version:',
             channelTarget: (channel, version, installed) => `Mål for ${channel}: v${version} (installeret v${installed})`,
             selectedTarget: 'den valgte kanal',
@@ -399,7 +405,7 @@
     // Kept in step with the @version header by scripts/check-versions.mjs. The
     // header is metadata Tampermonkey reads; this is the only copy the running
     // script can see, and it is what the self-update notice compares.
-    const MANAGER_VERSION = '1.32.0';
+    const MANAGER_VERSION = '1.32.1';
 
     const STABLE_CATALOGUE_URL =
         'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/catalogue/modules.json';
@@ -728,6 +734,33 @@
     // Modules seen at least once on any Lectio page, persisted across page loads.
     // This is what Installed/Available are counted from.
     const installed = new Map();
+
+    /*
+     * Module ids that answered one Discovery call twice, under two different
+     * versions (issue #70). That is two copies of the same module running side
+     * by side, which is the state a tester is left in when a module is
+     * promoted from Unstable to Stable: the two files carry the same @name but
+     * different download URLs, so installing the Stable one does not always
+     * replace the Unstable one. ADR-0014 assumed it did.
+     *
+     * Without this the older copy simply wins whichever race it happens to
+     * win, the Manager compares its version to the catalogue, and it offers an
+     * update that is already installed - forever, through refreshes, cache
+     * clearing and page changes. That is exactly what #70 reported.
+     *
+     * In memory and per page load: two copies is a fact about what is running
+     * here, not something to remember about the browser.
+     */
+    const duplicateCopies = new Map();
+
+    /*
+     * Non-null only while a Discovery dispatch is in flight. The dispatch is
+     * synchronous and every module answers inside it, so one pass is an exact
+     * head count: two registrations for one id within a single pass are two
+     * copies, never one module announcing twice. Re-announcements outside a
+     * pass - a setting change, a language change - never reach it.
+     */
+    let discoveryPass = null;
 
     // ============================================================
     // BOOT
@@ -1626,7 +1659,79 @@
     // ============================================================
 
     function requestDiscovery() {
-        window.dispatchEvent(new CustomEvent(DISCOVER_EVENT));
+        discoveryPass = new Map();
+
+        try {
+            window.dispatchEvent(new CustomEvent(DISCOVER_EVENT));
+        } finally {
+            // Cleared even when a module's listener throws, so one broken
+            // module cannot leave every later registration inside a half-run
+            // pass looking like a second copy.
+            discoveryPass = null;
+        }
+    }
+
+    /*
+     * The head count. Called for every registration; does nothing outside a
+     * Discovery pass, and nothing for the first answer an id gives inside one.
+     *
+     * A second answer under a different version is two copies, and it goes in
+     * the problem log rather than being papered over: only the person can
+     * delete the older install in Tampermonkey, and the log is what names the
+     * module when they ask why. One entry per version pair - the repeat
+     * counter in recordLogEntry covers the rest.
+     */
+    function noteRegistrationInPass(moduleId, version) {
+        if (!discoveryPass || !version) {
+            return;
+        }
+
+        const earlier = discoveryPass.get(moduleId);
+
+        if (earlier === undefined) {
+            discoveryPass.set(moduleId, version);
+            return;
+        }
+
+        if (earlier === version) {
+            return;
+        }
+
+        const seen = duplicateCopies.get(moduleId) || new Set();
+        const before = seen.size;
+
+        seen.add(earlier);
+        seen.add(version);
+        duplicateCopies.set(moduleId, seen);
+
+        if (seen.size !== before) {
+            /*
+             * The versions go in the code token, because a notice does not
+             * render `found` and the pair is the whole diagnostic - "two
+             * copies" without them is a fact nobody can act on. They are
+             * repository-authored version strings, never page text, and
+             * safeIdentifier is still the gate: if one is not a token the code
+             * comes back empty and `found` keeps the entry alive.
+             */
+            recordLogEntry({
+                moduleId,
+                kind: 'notice',
+                code: `duplicate-copies.${duplicateVersionsFor(moduleId).join('-')}`,
+                found: seen.size
+            });
+        }
+    }
+
+    // Oldest first, because the line built from it asks for the oldest to go.
+    // Null unless there really are two, so every caller can read it as a flag.
+    function duplicateVersionsFor(moduleId) {
+        const seen = duplicateCopies.get(moduleId);
+
+        if (!seen || seen.size < 2) {
+            return null;
+        }
+
+        return [...seen].sort((left, right) => compareVersions(left, right) ?? 0);
     }
 
     function handleModuleRegister(event) {
@@ -1636,10 +1741,14 @@
             return;
         }
 
-        detected.set(detail.id, {
+        const version = isNonEmptyString(detail.version) ? detail.version : '';
+
+        noteRegistrationInPass(detail.id, version);
+
+        const record = {
             id: detail.id,
             name: isNonEmptyString(detail.name) ? detail.name : detail.id,
-            version: isNonEmptyString(detail.version) ? detail.version : '',
+            version,
             settingsSchema: Array.isArray(detail.settingsSchema) ? detail.settingsSchema : [],
             currentValues: (detail.currentValues && typeof detail.currentValues === 'object')
                 ? detail.currentValues
@@ -1649,9 +1758,28 @@
             // that module - not the Manager - that would carry out a prune.
             storage: normalizeStorageDeclaration(detail.storage),
             seenAt: Date.now()
-        });
+        };
 
-        rememberInstalled(detected.get(detail.id));
+        /*
+         * With two copies running, the panel follows the newer one: it is the
+         * one the person just installed, and its schema is the current one.
+         * Last-write-wins let the load order of two files decide which version
+         * the Manager reported, which is how #70 kept being told to install an
+         * update it already had. Only ids already known to be doubled take
+         * this path, so a single module re-announcing is untouched.
+         */
+        if (duplicateCopies.has(detail.id)) {
+            const standing = detected.get(detail.id);
+            const comparison = standing ? compareVersions(version, standing.version) : null;
+
+            if (comparison !== null && comparison < 0) {
+                renderModuleList({ refreshFocusedSettings: detail.id === openSettingsModuleId });
+                return;
+            }
+        }
+
+        detected.set(detail.id, record);
+        rememberInstalled(record);
         renderModuleList({ refreshFocusedSettings: detail.id === openSettingsModuleId });
     }
 
@@ -2160,6 +2288,12 @@
             // Installed but not on the selected channel: the card deliberately
             // offers no update for it either.
             if (module.outsideSelectedChannel) continue;
+
+            // Two copies running is not an update waiting. The newer of the
+            // two is already installed, so counting it here is the loop #70
+            // reported; the problem log carries it instead, because what is
+            // outstanding is a removal only the person can make.
+            if (duplicateVersionsFor(module.id)) continue;
 
             const record = getModuleRecord(module.id);
             if (!record) continue;
@@ -5468,20 +5602,30 @@
         let changelogNote = null;
 
         if (record) {
+            const copies = duplicateVersionsFor(module.id);
+
             const comparison = module.outsideSelectedChannel
                 ? 0
                 : compareVersions(record.version, module.version);
 
-            const hasUpdate = comparison !== null && comparison < 0;
-            const hasDowngrade = comparison !== null && comparison > 0;
+            const hasUpdate = !copies && comparison !== null && comparison < 0;
+            const hasDowngrade = !copies && comparison !== null && comparison > 0;
 
             const installedLabel = document.createElement('span');
 
-            installedLabel.className = (hasUpdate || hasDowngrade)
+            installedLabel.className = (copies || hasUpdate || hasDowngrade)
                 ? 'lectio-manager-status-update'
                 : 'lectio-manager-status-installed';
 
-            if (hasUpdate) {
+            if (copies) {
+                // Deliberately not an update line and deliberately without an
+                // Update button (issue #70): the newest of the two is already
+                // installed, so that button sends the person back to a page
+                // they have already accepted. The outstanding action is a
+                // deletion in Tampermonkey, which only they can make.
+                installedLabel.textContent = t('duplicateCopies', copies);
+                installedLabel.title = t('duplicateCopiesHelp');
+            } else if (hasUpdate) {
                 installedLabel.textContent =
                     t('updateAvailable', module.version, record.version);
                 changelogNote = buildChangelogNote(module);

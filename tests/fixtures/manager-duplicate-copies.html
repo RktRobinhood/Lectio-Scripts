@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio Manager duplicate-copies fixture</title>
+</head>
+<body>
+    <script>
+        /*
+         * Issue #70. A tester who had installed a module from modules-unstable
+         * installed the Stable file over it, and ended up with both running:
+         * the two files carry the same @name, so they look like one script,
+         * but their download URLs differ, so Tampermonkey kept them apart.
+         *
+         * Both copies register. Before 1.32.1 the last one to answer defined
+         * the version the Manager reported, so the older copy kept telling the
+         * Manager it was on 0.9.2 while 0.9.3 sat installed next to it. The
+         * card offered an update that was already installed, the gear counted
+         * it, and installing it again changed nothing - through refreshes,
+         * cache clearing and page changes, which is how the report put it.
+         *
+         * `twinned` is that module, doubled. `single` is the control: one
+         * copy, genuinely out of date, and its update must still be offered
+         * exactly as it was.
+         */
+        const entry = (id) => ({
+            id,
+            name: id[0].toUpperCase() + id.slice(1),
+            description: `Catalogue entry for ${id}.`,
+            category: 'Interface',
+            audience: ['student'],
+            status: 'stable',
+            version: '2.0.0',
+            installUrl: `https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/${id}.user.js`,
+            supportUrl: 'https://github.com/RktRobinhood/Lectio-Scripts/issues'
+        });
+
+        const catalogue = {
+            schemaVersion: 1,
+            generatedAt: '2026-09-20T00:00:00.000Z',
+            manager: {
+                // Older than the running Manager: nothing here is the
+                // Manager's own self-update.
+                version: '1.0.0',
+                installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/manager/Lectio-Manager.user.js'
+            },
+            modules: [entry('twinned'), entry('single')]
+        };
+
+        const storage = new Map([
+            ['lectioManager.catalogue.v1', JSON.stringify(catalogue)],
+            ['lectioManager.lastRefresh.v1', Date.now()],
+            ['lectioManager.updateTipDismissed.v1', true]
+        ]);
+
+        window.GM_getValue = (key, fallback) => storage.has(key) ? storage.get(key) : fallback;
+        window.GM_setValue = (key, value) => storage.set(key, value);
+
+        let networkCalls = 0;
+        window.GM_xmlhttpRequest = () => { networkCalls += 1; };
+
+        window.pageErrors = [];
+        window.addEventListener('error', (event) => window.pageErrors.push(String(event.message)));
+
+        function announce(id, version) {
+            window.dispatchEvent(new CustomEvent('lectio-module:register', {
+                detail: { id, name: id[0].toUpperCase() + id.slice(1), version, settingsSchema: [] }
+            }));
+        }
+
+        /*
+         * A copy behaves exactly as a real module does: it announces once as it
+         * is evaluated, and again every time the Manager asks. Both copies are
+         * installed here before the Manager, which is the order that matters -
+         * it means both are listening when the Manager's first Discovery goes
+         * out, and both answer inside that one dispatch.
+         *
+         * The newer copy answers first and the older one second, which is the
+         * order that used to lose: last write won, so the stale version was
+         * the one the panel reported.
+         */
+        function installCopy(id, version) {
+            announce(id, version);
+            window.addEventListener('lectio-manager:discover', () => announce(id, version));
+        }
+
+        installCopy('twinned', '2.0.0');
+        installCopy('twinned', '1.0.0');
+        installCopy('single', '1.0.0');
+    </script>
+    <script src="../../manager/Lectio-Manager.user.js"></script>
+    <script>
+        function assert(condition, message) {
+            if (!condition) throw new Error(message);
+        }
+
+        const card = (id) => document.querySelector(`.lectio-manager-card[data-module-id="${id}"]`);
+        const status = (id) => card(id)?.querySelector('.lectio-manager-card-status')?.textContent ?? '';
+        const updateButton = (id) => card(id)?.querySelector('.lectio-manager-update-btn');
+
+        window.addEventListener('load', () => {
+            try {
+                const gear = document.querySelector('#lectio-manager-toggle');
+                assert(gear, 'The gear was not built');
+
+                const badge = () => gear.getAttribute('data-update-count');
+                const log = () => JSON.parse(storage.get('lectioManager.log.v1') || '[]');
+
+                // 1. The count is the part of #70 that shows without anyone
+                //    opening anything, and it is the part that never went away.
+                //    One module is genuinely behind; the doubled one is not an
+                //    update waiting, because its newer copy is already here.
+                assert(!document.querySelector('#lectio-manager-panel'),
+                    'The panel was built without a gear click');
+                assert(badge() === '1',
+                    `The doubled module was counted as an update waiting: ${badge()}`);
+                assert(gear.getAttribute('aria-label') === 'Lectio Tools — 1 problem recorded — 1 update available',
+                    `The gear does not carry both signals: ${gear.getAttribute('aria-label')}`);
+
+                // 2. It is recorded as a problem instead, naming the module and
+                //    both versions - the pair is the whole diagnostic, and a
+                //    notice does not render its `found`.
+                const entries = log().filter((item) => String(item.code).startsWith('duplicate-copies'));
+                assert(entries.length === 1,
+                    `Two copies were recorded ${entries.length} times`);
+                assert(entries[0].moduleId === 'twinned',
+                    `The log entry does not name the module: ${entries[0].moduleId}`);
+                assert(entries[0].kind === 'notice',
+                    `Two copies were logged as something other than a notice: ${entries[0].kind}`);
+                assert(entries[0].code === 'duplicate-copies.1.0.0-2.0.0',
+                    `The log entry does not carry both versions: ${entries[0].code}`);
+                assert(entries[0].found === 2,
+                    `The log entry does not carry the head count: ${entries[0].found}`);
+
+                // 3. The newer copy defines the module, whichever order the two
+                //    answered in. This is the fix: before it, the older copy
+                //    won simply by answering last.
+                gear.click();
+                assert(card('twinned'), 'The doubled module has no card');
+                assert(!status('twinned').includes('Update available'),
+                    `The card still offers an update that is installed: ${status('twinned')}`);
+                assert(status('twinned').includes('2 copies running: v1.0.0 and v2.0.0'),
+                    `The card does not say what is actually wrong: ${status('twinned')}`);
+                assert(card('twinned').querySelector('.lectio-manager-status-update'),
+                    'The duplicate line is drawn as though nothing were wrong');
+
+                // 4. And no Update button, because pressing it is the loop the
+                //    report described: the file behind it is already installed.
+                assert(!updateButton('twinned'),
+                    'The card still offers an Update button for a version already installed');
+
+                // 5. The control is untouched: one copy, genuinely behind, and
+                //    the ordinary update path in full.
+                assert(status('single').includes('Update available: v2.0.0 (installed v1.0.0)'),
+                    `A single out-of-date copy lost its update line: ${status('single')}`);
+                assert(updateButton('single'), 'A single out-of-date copy lost its Update button');
+
+                // 6. Opening the panel fires another Discovery, so both copies
+                //    answer again. That must not multiply the log or change
+                //    what the card says - the repeat is the same two copies.
+                assert(log().filter((item) => String(item.code).startsWith('duplicate-copies')).length === 1,
+                    'A second Discovery recorded the same two copies again');
+                assert(badge() === '1', `A second Discovery changed the count: ${badge()}`);
+                assert(status('twinned').includes('2 copies running: v1.0.0 and v2.0.0'),
+                    `A second Discovery changed the card: ${status('twinned')}`);
+
+                // 7. A module announcing outside a Discovery pass - a setting
+                //    change, a language change - is one copy talking, never
+                //    two. The control re-announces at a new version the way an
+                //    install would, and must simply be up to date.
+                announce('single', '2.0.0');
+                assert(status('single').includes('Installed v2.0.0'),
+                    `A re-announcement was mistaken for a second copy: ${status('single')}`);
+                assert(log().filter((item) => String(item.code).startsWith('duplicate-copies')).length === 1,
+                    'A re-announcement outside a Discovery pass was logged as two copies');
+                assert(badge() === null, `The count survived the one real update: ${badge()}`);
+
+                // 8. None of it cost a request or threw.
+                assert(networkCalls === 0, `The duplicate check caused ${networkCalls} network requests`);
+                assert(window.pageErrors.length === 0,
+                    `The duplicate check threw: ${window.pageErrors.join(' | ')}`);
+
+                document.documentElement.dataset.testResult = 'pass';
+            } catch (error) {
+                document.documentElement.dataset.testResult = `fail: ${error.message}`;
+            }
+        });
+    </script>
+</body>
+</html>
