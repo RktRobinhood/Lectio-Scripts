@@ -16,6 +16,12 @@ permissions:
 
 jobs:
   checks:
+    # A fork's pull request is never merged here (ADR-0004) and is closed within
+    # about a minute by decline-pull-requests.yml, so there is nothing to gate
+    # and no reason to run a stranger's code on a runner in the meantime - the
+    # test suite executes the checked-out tree. Pull requests from a branch in
+    # this repository are still checked, so the owner's own can use one.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     # The suite drives real Chrome processes; a hung one should fail, not idle.
     timeout-minutes: 20

@@ -1,0 +1,65 @@
+# Issues only — no external pull requests are merged (ADR-0004). GitHub has no
+# switch that turns pull requests off on a public repository, and forking cannot
+# be disabled on one either, so the policy is enforced here instead: any pull
+# request from someone other than the repository owner is answered with the
+# reason and closed, within about a minute of being opened.
+#
+# `pull_request_target` rather than `pull_request` on purpose. A fork's
+# `pull_request` run gets a read-only token and cannot close anything.
+# `pull_request_target` runs this file as it exists on `main`, with a token that
+# can — which is only safe because this job never checks out, builds, or
+# otherwise executes one byte of the pull request's own code. It reads the
+# event payload and calls the API. Keep it that way: do not add a checkout step.
+name: Decline pull requests
+
+on:
+  pull_request_target:
+    types: [opened, reopened]
+
+# Closing the pull request needs `pull-requests`; the explanation is posted
+# through the issue-comments endpoint, which a pull request shares, so it needs
+# `issues` too. Everything else stays at none - this job reads the event payload
+# and calls two API endpoints, and wants no more than that.
+permissions:
+  pull-requests: write
+  issues: write
+
+jobs:
+  decline:
+    # The owner's own pull requests are left alone. The policy is about code
+    # from outside the project, not about the maintainer's choice of workflow.
+    if: github.event.pull_request.user.login != github.repository_owner
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Explain and close
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const author = context.payload.pull_request.user.login;
+
+            const body = [
+              `Thanks for the interest, @${author} — but this repository doesn't accept pull requests, so this one is being closed automatically and unread. Nothing about your code, and no reflection on you.`,
+              ``,
+              `**Why.** These are userscripts. They run with broad access inside an authenticated Lectio session — timetables, messages, grades — on the machines of students and teachers who installed them from this repository on trust. Merged code runs there too, and a careful reading of a friendly-looking diff is a thin defence against code written to survive exactly that reading. The maintainer won't take that risk on other people's behalf. It's also a one-person project: reviewing outside code to a standard that would actually catch a hostile change is slower than writing the feature. See [ADR-0004](https://github.com/${context.repo.owner}/${context.repo.repo}/blob/main/docs/adr/0004-issues-only-no-external-prs.md).`,
+              ``,
+              `**What does work.** [Open an Issue](https://github.com/${context.repo.owner}/${context.repo.repo}/issues/new/choose). Issues are how this project decides what to build, and they're genuinely wanted — you don't need to write any code or propose an implementation. Describe what Lectio does, what you wish it did instead, and which module and version you're on. If it fits the project, it gets built here.`,
+              ``,
+              `If you changed a script for your own use, that's entirely fine — the licence allows it and the README has a section on doing it safely. Just describe the behaviour in an Issue rather than sending the diff.`,
+              ``,
+              `Full reasoning: [CONTRIBUTING.md](https://github.com/${context.repo.owner}/${context.repo.repo}/blob/main/CONTRIBUTING.md).`,
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body,
+            });
+
+            await github.rest.pulls.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number,
+              state: 'closed',
+            });

@@ -19,6 +19,7 @@ They run locally in your browser while you use Lectio. Install only the modules 
 - [Using and updating things](#using-and-updating-things)
 - [Troubleshooting](#troubleshooting)
 - [Reporting bugs and ideas](#reporting-bugs-and-ideas)
+- [Issues, not pull requests](#issues-not-pull-requests)
 - [Getting Console errors](#getting-console-errors)
 - [Make it yours with an LLM](#make-it-yours-with-an-llm)
 - [Privacy and security](#privacy-and-security)
@@ -349,6 +350,18 @@ A report that only says **"it doesn't work"** usually is not enough to diagnose.
 
 ---
 
+## Issues, not pull requests
+
+**This project accepts Issues. It does not accept pull requests** — anything opened is closed automatically, unread.
+
+Userscripts run with broad access inside your authenticated Lectio session, on the machines of students and teachers who installed them from this repository on trust. Merging code the maintainer cannot vet to that standard would run it there too, and a careful reading of a friendly-looking diff is a thin defence against code written to survive exactly that reading. It is also a one-person project: reviewing outside code properly is slower than building the feature from a good description of it.
+
+So the way to shape this project is to describe what you want, not to write it. That is not a consolation prize — the modules here exist because someone described a daily annoyance in Lectio well enough to build against, and you need no JavaScript to do that. Changing a script for your own use is entirely fine; see [Make it yours with an LLM](#make-it-yours-with-an-llm).
+
+Full reasoning, and what makes an Issue easy to act on: **[CONTRIBUTING.md](./CONTRIBUTING.md)** and [ADR-0004](./docs/adr/0004-issues-only-no-external-prs.md).
+
+---
+
 ## Getting Console errors
 
 The browser Console often shows exactly where a userscript failed.
@@ -482,7 +495,7 @@ Then help me make one small change myself.
 5. Ask for a diff or concise list of changed lines.
 6. Save the result under a different `@name` while testing.
 7. Test on non-sensitive Lectio pages first.
-8. If the change is generally useful, submit an Issue or Pull Request.
+8. If the change is generally useful, open an Issue describing what it does — the project builds from Issues and does not take pull requests.
 
 For example:
 
@@ -571,7 +584,8 @@ Lectio-Scripts/
 ├── scripts/                         Version and icon checks (Node, no build step).
 ├── tests/                           Browser tests for the Manager and every module.
 ├── assets/
-├── .github/                         Issue templates
+├── .github/                         Issue templates, CI checks, and the workflow that closes pull requests.
+├── CONTRIBUTING.md                  Issues only; why pull requests are not accepted.
 ├── AGENTS.md                        How changes are made here.
 ├── CONTEXT.md                       What the words in this project mean.
 └── README.md
@@ -591,6 +605,7 @@ Each module owns its own `@version` and update URL. Adding a new module means ad
 | Catalogue (Stable) | [`catalogue/modules.json`](https://github.com/RktRobinhood/Lectio-Scripts/tree/main/catalogue) |
 | Experimental channel | [`/modules-unstable`](https://github.com/RktRobinhood/Lectio-Scripts/tree/main/modules-unstable) |
 | Report a problem or idea | [GitHub Issues](https://github.com/RktRobinhood/Lectio-Scripts/issues) |
+| Contribution policy | [CONTRIBUTING.md](https://github.com/RktRobinhood/Lectio-Scripts/blob/main/CONTRIBUTING.md) |
 | Tampermonkey | [tampermonkey.net](https://www.tampermonkey.net/) |
 | Installing userscripts | [Tampermonkey FAQ](https://www.tampermonkey.net/faq.php?q=Q102) |
 | Chrome/Edge userscript permission | [Tampermonkey FAQ](https://www.tampermonkey.net/faq.php?locale=en&q=Q209) |
