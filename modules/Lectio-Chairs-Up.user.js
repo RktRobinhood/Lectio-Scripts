@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Chairs Up
 // @namespace    https://www.lectio.dk/
-// @version      1.4.4
+// @version      1.4.6
 // @description  Shows when a lesson is the final active booking of the day in its room. Universal Lectio version.
 // @match        https://www.lectio.dk/lectio/*
 // @grant        none
@@ -47,13 +47,25 @@
   // =========================================================
 
   /*
+   * The one place this module's version is written down in code, at module
+   * scope because two things read it: the handshake below, and the start-up
+   * banner further down. The banner used to carry its own copy typed in by
+   * hand, which is exactly what drifted - it printed v1.1.2 for months while
+   * this said 1.4.x. Anything that needs the number reads it from here.
+   *
+   * It has to be declared out here rather than inside the handshake: the
+   * banner runs at module scope and could not see a const scoped to that
+   * function. Keep it above the boot block (scripts/check-boot-order.mjs).
+   */
+  const MODULE_VERSION = '1.4.6';
+
+  /*
    * Lets the Manager show this module as installed without
    * touching its private storage. See catalogue/modules.json.
    */
   (function registerWithLectioManager() {
     const MODULE_ID = 'chairs-up';
     const MODULE_NAME = 'Lectio - Chairs Up';
-    const MODULE_VERSION = '1.4.4';
 
     /*
      * The settings panel's own words, in both languages (ADR-0013). The
@@ -510,7 +522,7 @@
     schoolMatch[1];
 
   console.info(
-    `[Lectio Chairs Up] v1.1.2 started - school ${SCHOOL}`
+    `[Lectio Chairs Up] v${MODULE_VERSION} started - school ${SCHOOL}`
   );
 
 

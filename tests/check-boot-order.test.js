@@ -83,9 +83,9 @@ test('the default run passes, checks every userscript, and reports exactly the e
     const onDisk = CHECKED_DIRECTORIES.flatMap((directory) =>
         readdirSync(resolve(repoRoot, directory)).filter((name) => name.endsWith('.user.js')).map((name) => `${directory}/${name}`));
     // A floor, not a count: it catches a directory walk that has stopped
-    // finding anything. Nine is the whole set today - six modules, Change
-    // Radar on Unstable, the Manager and the template - where it was fifteen
-    // while six modules existed in both channels at once.
+    // finding anything. Nine is the whole set today - seven modules, the
+    // Manager and the template, with nothing on Unstable - where it was
+    // fifteen while six modules existed in both channels at once.
     assert.ok(onDisk.length >= 9, `only ${onDisk.length} userscripts found on disk`);
 
     const summary = result.stdout.match(/^Checked (\d+) file\(s\): (\d+) passed, (\d+) with deferred findings, (\d+) not checked, (\d+) failed\.$/m);

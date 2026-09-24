@@ -36,7 +36,7 @@
                 version: '0.4.0',
                 description: 'Test radar',
                 status: 'unstable',
-                installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Change-Radar.user.js'
+                installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Change-Radar.user.js'
             }]
         };
         const storage = new Map([
@@ -79,7 +79,7 @@
         window.addEventListener('load', async () => {
             try {
                 if (withManager) await inject('/manager/Lectio-Manager.user.js');
-                await inject('/modules-unstable/Lectio-Change-Radar.user.js');
+                await inject('/modules/Lectio-Change-Radar.user.js');
             } catch (error) {
                 window.bootErrors.push(error.message);
             }

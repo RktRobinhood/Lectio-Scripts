@@ -75,17 +75,10 @@ All modules are designed for Lectio and are intended to work across Lectio insta
 | **[Unread Message Notifications](modules/Lectio-Unread-Message-Notifications.user.js)** | Shows an unread-message badge beside **Beskeder / Messages**, with an optional preview of what is waiting when you hover it. Works at any Lectio school, reading the school id from the page address. | Students and staff |
 | **[Subject Colours](modules/Lectio-Subject-Colours.user.js)** | Works out which classes are really yours from your own timetable and gives each one its own colour, keeping one-off activities in a separate muted spectrum. | Students and staff |
 | **[Lectio Theming](modules/Lectio-Theming.user.js)** | Applies a soft, translucent glass shell with **46 built-in colour schemes** (Catppuccin, Nord, Dracula, Cyberpunk, plus sports, social-app, IB and Danish-landscape palettes), each with its own distinct background photo, or build your own: pick the key colours yourself, derive them from an **image or website URL**, and use **your own picture** as the background. | Students and staff |
+| **[Change Radar](modules/Lectio-Change-Radar.user.js)** | Watches your own Lectio for the changes you choose to track and keeps a compact radar with a rotating log of what changed — cancellations, moves, rooms, teachers and homework in the timetable, plus optional assignment, absence and document watching, and a warning when an assignment deadline comes inside your chosen lookahead. | Students and staff |
 
-### On the Experimental channel
-
-One more module exists but has never had a Stable release, so it appears in the Manager only once **Release channel** is set to **Experimental** in Manager preferences. It lives in [`modules-unstable/`](modules-unstable/) rather than `modules/`.
-
-| Module | What it does | Best for |
-|---|---|---|
-| **[Change Radar](modules-unstable/Lectio-Change-Radar.user.js)** | Watches your own Lectio for the changes you choose to track and keeps a compact radar with a rotating log of what changed — cancellations, moves, rooms, teachers and homework in the timetable, plus optional assignment, absence and document watching, and a warning when an assignment deadline comes inside your chosen lookahead. | Students and staff |
-
-> [!WARNING]
-> Experimental means what it says. Change Radar is still being built, so it can change or break between versions. Its timetable watching is the part that has had real use; the optional assignment, absence and document watching has not yet been verified against live Lectio pages, and the way it fails is to report nothing rather than to report an error — so if one of those stays silent when you know something changed, that is worth an Issue.
+> [!NOTE]
+> Change Radar's timetable watching is the part with the most real use. Its optional assignment, absence and document watching fails by reporting nothing rather than by reporting an error, so if one of those stays silent when you know something changed, that is worth an Issue.
 
 You can install one, several, or all of them, either through the Manager or by copying a file directly (see below).
 
@@ -186,10 +179,7 @@ Current raw files:
 - [Unread Message Notifications — Raw](https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Unread-Message-Notifications.user.js)
 - [Subject Colours — Raw](https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Subject-Colours.user.js)
 - [Lectio Theming — Raw](https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Theming.user.js)
-
-On the Experimental channel:
-
-- [Change Radar — Raw](https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Change-Radar.user.js)
+- [Change Radar — Raw](https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Change-Radar.user.js)
 
 Installing this way (rather than copy-paste) lets Tampermonkey check that raw URL for updates automatically.
 
@@ -284,7 +274,7 @@ To remove it completely, delete it from the Dashboard, then click **Remove** on 
 | **A module I removed still shows as installed** | The Manager can't see removals in Tampermonkey. Click **Remove** on its card to forget it. |
 | **A module never appears as installed** | Confirm it is **enabled** (not just installed) in the Tampermonkey Dashboard, then load a Lectio page that module actually runs on. |
 | **I can't find the Tampermonkey dashboard** | The Manager no longer links to it, because no link works on every browser. Click the Tampermonkey icon in your browser toolbar and choose **Dashboard**; on Safari, open Safari's own Settings → Extensions instead. The Manager's **?** button repeats this inside the panel. |
-| **A module is missing from the Manager's list** | Some modules are only on the Experimental channel. Open Manager preferences (the settings button in the header), set **Release channel** to **Experimental**, and look again. |
+| **A module is missing from the Manager's list** | A module still being tested is only on the Experimental channel. Open Manager preferences (the settings button in the header), set **Release channel** to **Experimental**, and look again. |
 | **GitHub Raw only shows JavaScript** | Copy the complete file and use **Create a new script...** instead. |
 | **English translation is incomplete** | Reload, switch **DA → EN**, and report repeatable untranslated text. |
 | **English Mode requests extra permissions** | It can use Tampermonkey storage and Google Translate fallback; review the permissions before installing. |

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "channel": "unstable",
-  "generatedAt": "2026-09-22T12:00:00Z",
+  "generatedAt": "2026-09-24T12:00:00Z",
   "modules": [
     {
       "id": "change-radar",
@@ -11,65 +11,22 @@
         "change-log"
       ],
       "name": "Lectio Change Radar",
-      "description": "Experimental Lectio watcher with a compact themed radar HUD. Choose exactly what it tracks - timetable cancellations, moves, rooms, teachers and homework, plus optional assignment, absence and document watching - plus upcoming assignment deadlines raised as they come inside your chosen lookahead - with urgency states, unseen-change tracking and a rotating local change log.",
+      "description": "Lectio watcher with a compact themed radar HUD. Choose exactly what it tracks - timetable cancellations, moves, rooms, teachers and homework, plus optional assignment, absence and document watching - plus upcoming assignment deadlines raised as they come inside your chosen lookahead - with urgency states, unseen-change tracking and a rotating local change log.",
       "category": "Timetable",
       "audience": [
         "student",
         "teacher"
       ],
-      "status": "unstable",
-      "version": "0.9.6",
-      "changelog": "A change now shows what it was against what it is: a labelled row per changed field, the old value struck through beside the new one, and the old homework or note kept. A coloured stripe says whether it was cancelled, added, moved or due.",
-      "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Change-Radar.user.js",
+      "status": "stable",
+      "version": "0.9.7",
+      "changelog": "Change Radar leaves Experimental and is now on Stable. A change shows what it was against what it is: the old value struck through beside the new one, with a coloured stripe for cancelled, added, moved or due.",
+      "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Change-Radar.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
       "i18n": {
         "da": {
           "name": "Lectio Ændringsradar",
-          "description": "Eksperimentel Lectio-vagt med en kompakt radar-HUD i temaets farver. Du vælger selv, hvad den holder øje med - aflysninger, flytninger, lokaler, lærere og lektier i skemaet, plus valgfri overvågning af opgaver, fravær og dokumenter - plus kommende opgavefrister, der meldes, når de kommer inden for det valgte tidsrum - med hastestatus, styr på usete ændringer og en roterende lokal ændringslog.",
-          "changelog": "En ændring viser nu, hvad den var, over for hvad den er: en linje med etiket per ændret felt, den gamle værdi streget ud ved siden af den nye, og den gamle lektie beholdt. En farvet stribe siger, om noget er aflyst, tilføjet eller flyttet."
-        }
-      }
-    },
-    {
-      "id": "chairs-up",
-      "name": "Chairs Up",
-      "description": "Marks a lesson when it is the last active booking of the day in that room.",
-      "category": "Timetable",
-      "audience": [
-        "teacher"
-      ],
-      "status": "unstable",
-      "version": "1.4.5",
-      "changelog": "The version in the start-up line this writes to the browser console is now the version it really is. It had been stuck at 1.1.2 for months, so a bug report quoting it named a version that no longer existed.",
-      "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Chairs-Up.user.js",
-      "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
-      "i18n": {
-        "da": {
-          "name": "Stole Op",
-          "description": "Markerer en lektion, når den er dagens sidste aktive booking i det lokale.",
-          "changelog": "Versionen i opstartslinjen i browserens konsol er nu den version, modulet faktisk har. Den stod fast på 1.1.2 i månedsvis, så en fejlrapport, der citerede den, nævnte en version, som ikke længere fandtes."
-        }
-      }
-    },
-    {
-      "id": "english-mode",
-      "name": "English Mode",
-      "description": "Adds a DA / EN switch and translates the Lectio interface into context-aware English.",
-      "category": "Interface",
-      "audience": [
-        "student",
-        "teacher"
-      ],
-      "status": "unstable",
-      "version": "1.11.7",
-      "changelog": "The version in the start-up line this writes to the browser console is now the version it really is. It had been stuck at 1.5.3 for months, so a bug report quoting it named a version that no longer existed.",
-      "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-English-Mode.user.js",
-      "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
-      "i18n": {
-        "da": {
-          "name": "English Mode",
-          "description": "Tilføjer en DA / EN-knap og oversætter Lectios brugerflade til kontekstbevidst engelsk.",
-          "changelog": "Versionen i opstartslinjen i browserens konsol er nu den version, modulet faktisk har. Den stod fast på 1.5.3 i månedsvis, så en fejlrapport, der citerede den, nævnte en version, som ikke længere fandtes."
+          "description": "Lectio-vagt med en kompakt radar-HUD i temaets farver. Du vælger selv, hvad den holder øje med - aflysninger, flytninger, lokaler, lærere og lektier i skemaet, plus valgfri overvågning af opgaver, fravær og dokumenter - plus kommende opgavefrister, der meldes, når de kommer inden for det valgte tidsrum - med hastestatus, styr på usete ændringer og en roterende lokal ændringslog.",
+          "changelog": "Ændringsradaren forlader Eksperimentel og er nu på Stabil. En ændring viser, hvad den var, over for hvad den er: den gamle værdi streget ud ved siden af den nye, med en farvet stribe for aflyst, tilføjet, flyttet eller forfalden."
         }
       }
     }

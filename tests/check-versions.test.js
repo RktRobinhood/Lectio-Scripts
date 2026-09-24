@@ -48,16 +48,14 @@ const script = resolve(repoRoot, 'scripts', 'check-versions.mjs');
 
 /*
  * The banners that disagree with their file today and cannot be fixed in
- * place: both live in modules/, which ADR-0014 freezes while the fix is under
- * test in modules-unstable/. Each entry here must match one in
- * DEFERRED_BANNERS in the script. Promoting either module empties its entry
- * from both places in the same commit - the script fails on a deferral that no
- * longer matches, so it cannot be forgotten.
+ * place, because they live in modules/, which ADR-0014 freezes while the fix is
+ * under test in modules-unstable/. Each entry here must match one in
+ * DEFERRED_BANNERS in the script. Promoting a module empties its entry from
+ * both places in the same commit - the script fails on a deferral that no
+ * longer matches, so it cannot be forgotten. Empty since Chairs Up 1.4.6 and
+ * English Mode 1.11.8.
  */
-const EXPECTED_DEFERRED = [
-    'modules/Lectio-Chairs-Up.user.js prints v1.1.2, declares 1.4.4',
-    'modules/Lectio-English-Mode.user.js prints v1.5.3, declares 1.11.6'
-];
+const EXPECTED_DEFERRED = [];
 
 function run(cwd) {
     const result = spawnSync(process.execPath, [script, '--no-drift'], { cwd, encoding: 'utf8' });
@@ -82,9 +80,12 @@ test('the default run over the repo passes and reports exactly the expected defe
  * A complete little repo in a temporary directory. `module` is the body of the
  * one module in modules/; everything else is the minimum the script insists on
  * finding. The module declares 2.1.0 throughout, so any `v<x.y.z>` in the body
- * other than v2.1.0 is drift.
+ * other than v2.1.0 is drift. Nothing is under test in it, so the overlay is
+ * what it is in the real repo in that state: one exact copy of a stable entry.
  */
-async function withTree(body) {
+const DEMO_ENTRY = { id: 'demo', name: 'Demo', description: 'd', version: '2.1.0', installUrl: 'https://example.invalid/' };
+
+async function withTree(body, { overlay = [DEMO_ENTRY] } = {}) {
     const directory = await mkdtemp(join(tmpdir(), 'lectio-check-versions-'));
 
     for (const folder of ['manager', 'modules', 'modules-unstable', 'catalogue']) {
@@ -122,13 +123,13 @@ async function withTree(body) {
     await writeFile(join(directory, 'catalogue', 'modules.json'), JSON.stringify({
         schemaVersion: 1,
         manager: { version: '3.0.0' },
-        modules: [{ id: 'demo', name: 'Demo', description: 'd', version: '2.1.0', installUrl: 'https://example.invalid/' }]
+        modules: [DEMO_ENTRY]
     }));
 
     await writeFile(join(directory, 'modules-unstable', 'modules.json'), JSON.stringify({
         schemaVersion: 1,
         channel: 'unstable',
-        modules: []
+        modules: overlay
     }));
 
     try {
@@ -200,4 +201,32 @@ test('refuses to pass a file it cannot lex, rather than reporting it clean', asy
 
     assert.equal(result.status, 1, result.output);
     assert.match(result.output, /could not lex the file to check the version it prints/);
+});
+
+/*
+ * The state a promotion that empties Unstable leaves behind. Every shipped
+ * Manager rejects an overlay with no modules, so the overlay keeps an exact
+ * copy of one stable entry - and only an exact copy, because an entry with no
+ * file behind it that says anything else is offering something nobody wrote.
+ */
+test('passes an overlay whose only entry is an exact copy of its stable entry', async () => {
+    const { result } = await withTree('', { overlay: [{ ...DEMO_ENTRY }] });
+
+    assert.equal(result.status, 0, result.output);
+});
+
+test('fails an overlay with no modules in it', async () => {
+    const { result } = await withTree('', { overlay: [] });
+
+    assert.equal(result.status, 1, result.output);
+    assert.match(result.output, /modules-unstable\/modules\.json: lists no modules/);
+});
+
+test('fails an overlay entry with no file behind it that differs from its stable entry', async () => {
+    for (const drift of [{ version: '2.1.1' }, { installUrl: 'https://example.invalid/modules-unstable/' }, { description: 'e' }]) {
+        const { result } = await withTree('', { overlay: [{ ...DEMO_ENTRY, ...drift }] });
+
+        assert.equal(result.status, 1, `${JSON.stringify(drift)}: ${result.output}`);
+        assert.match(result.output, /lists 'demo' with no userscript in that folder, and the entry is not an exact copy/);
+    }
 });

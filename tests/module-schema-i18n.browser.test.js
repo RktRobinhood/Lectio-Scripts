@@ -29,7 +29,7 @@ const PAGE_PATH = '/lectio/223/SkemaNy.aspx';
 // in, so promoting one moves its path here and nothing else changes.
 const MODULES = [
     'modules/Lectio-Chairs-Up.user.js',
-    'modules-unstable/Lectio-Change-Radar.user.js',
+    'modules/Lectio-Change-Radar.user.js',
     'modules/Lectio-English-Mode.user.js',
     'modules/Lectio-Schedule-Summary.user.js',
     'modules/Lectio-Subject-Colours.user.js',

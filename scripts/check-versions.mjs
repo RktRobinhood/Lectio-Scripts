@@ -57,11 +57,11 @@ const notes = [];
  * nothing FAILS the run - so the promotion that carries the fix into modules/
  * is forced to delete the entry in that same commit. Do not add an entry here
  * to silence a banner you could simply fix.
+ *
+ * Empty since Chairs Up 1.4.6 and English Mode 1.11.8 carried their banner
+ * fixes into modules/.
  */
-const DEFERRED_BANNERS = [
-    { path: 'modules/Lectio-Chairs-Up.user.js', printed: '1.1.2', fixedIn: 'modules-unstable at 1.4.5' },
-    { path: 'modules/Lectio-English-Mode.user.js', printed: '1.5.3', fixedIn: 'modules-unstable at 1.11.7' }
-];
+const DEFERRED_BANNERS = [];
 
 // Git stores these files with LF and checks them out with CRLF, so a raw
 // comparison marks every file as changed. Only the content difference matters.
@@ -401,7 +401,7 @@ function readCatalogue(path) {
     const entries = new Map();
     for (const entry of JSON.parse(readFileSync(path, 'utf8')).modules) {
         checkChangelog(path, entry);
-        entries.set(entry.id, { version: entry.version, path });
+        entries.set(entry.id, { version: entry.version, path, json: JSON.stringify(entry) });
     }
     return entries;
 }
@@ -561,10 +561,33 @@ for (const path of userscripts) {
     }
 }
 
+/*
+ * When nothing is under test the overlay cannot simply be emptied: every
+ * shipped Manager rejects a catalogue with no modules in it, keeps its cached
+ * overlay instead, and reports the failure on every refresh - and a Manager
+ * older than 1.22.1 lets that cached overlay win outright, so it goes on
+ * offering installs from modules-unstable/ URLs the promotion deleted. The
+ * overlay keeps one entry instead that is an exact copy of its stable entry,
+ * installUrl and all. A current Manager resolves equal versions to Stable, and
+ * an old one installs the Stable file whichever entry it picks.
+ */
+if (unstableCatalogue.size === 0) {
+    problems.push(
+        'modules-unstable/modules.json: lists no modules, and every shipped Manager rejects an overlay ' +
+        'with none - keep one entry that is an exact copy of its catalogue/modules.json entry'
+    );
+}
+
 for (const [id, entry] of [...stableCatalogue, ...unstableCatalogue]) {
-    if (!seen[entry.path].has(id)) {
-        problems.push(`${entry.path}: lists '${id}', but no userscript in that folder declares it`);
-    }
+    if (seen[entry.path].has(id)) continue;
+    if (entry.path === 'modules-unstable/modules.json' && entry.json === stableCatalogue.get(id)?.json) continue;
+
+    problems.push(
+        entry.path === 'modules-unstable/modules.json' && stableCatalogue.has(id)
+            ? `${entry.path}: lists '${id}' with no userscript in that folder, and the entry is not an exact ` +
+              `copy of its catalogue/modules.json entry - so it offers something no file in the repo is`
+            : `${entry.path}: lists '${id}', but no userscript in that folder declares it`
+    );
 }
 
 /*

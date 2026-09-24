@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Change Radar
 // @namespace    https://github.com/RktRobinhood/Lectio-Scripts
-// @version      0.9.6
+// @version      0.9.7
 // @description  Watches Lectio for the changes you choose to track - timetable, assignments, absence, documents - and keeps a compact recent-change HUD.
 // @author       RktRobinhood
 // @match        https://www.lectio.dk/lectio/*
@@ -9,8 +9,8 @@
 // @run-at       document-idle
 // @homepageURL  https://github.com/RktRobinhood/Lectio-Scripts
 // @supportURL   https://github.com/RktRobinhood/Lectio-Scripts/issues
-// @updateURL    https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Change-Radar.user.js
-// @downloadURL  https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Change-Radar.user.js
+// @updateURL    https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Change-Radar.user.js
+// @downloadURL  https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Change-Radar.user.js
 // ==/UserScript==
 
 (() => {
@@ -20,8 +20,8 @@
     id: 'change-radar',
     aliases: ['schedule-change-radar', 'lectio-change-radar', 'change-log'],
     name: 'Lectio Change Radar',
-    version: '0.9.6',
-    channel: 'unstable'
+    version: '0.9.7',
+    channel: 'stable'
   });
 
   const BASE_CONFIG = Object.freeze({

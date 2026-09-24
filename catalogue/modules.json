@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-09-22T12:00:00Z",
+  "generatedAt": "2026-09-24T12:00:00Z",
   "manager": {
     "version": "1.32.3",
     "changelog": "The Manager no longer draws a second gear and dock inside Lectio's pop-up windows, such as Vælg materiale. It now runs only on the page itself.",
@@ -23,15 +23,15 @@
         "teacher"
       ],
       "status": "stable",
-      "version": "1.11.6",
-      "changelog": "Translates the hover text on the Study Plan calendar (week ranges and column headers). Timetable lesson blocks keep their Danish tooltip untouched, so Chairs Up, Subject Colours and Change Radar keep reading them.",
+      "version": "1.11.8",
+      "changelog": "The version in the start-up line this writes to the browser console is now the version it really is. It had been stuck at 1.5.3 for months, so a bug report quoting it named a version that no longer existed.",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-English-Mode.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
       "i18n": {
         "da": {
           "name": "English Mode",
           "description": "Tilføjer en DA / EN-knap og oversætter Lectios brugerflade til kontekstbevidst engelsk.",
-          "changelog": "Oversætter svæveteksten i studieplanens kalender (ugeintervaller og kolonneoverskrifter). Skemabrikkernes danske svævetekst røres ikke, så Chairs Up, Subject Colours og Change Radar læser dem stadig."
+          "changelog": "Versionen i opstartslinjen i browserens konsol er nu den version, modulet faktisk har. Den stod fast på 1.5.3 i månedsvis, så en fejlrapport, der citerede den, nævnte en version, som ikke længere fandtes."
         }
       }
     },
@@ -44,15 +44,15 @@
         "teacher"
       ],
       "status": "stable",
-      "version": "1.4.4",
-      "changelog": "Removes cache keys left behind by older cache-format versions, which the Manager's storage readout could only ever show as unclaimed. Nothing reads those keys any more, so they're now cleared on load.",
+      "version": "1.4.6",
+      "changelog": "The version in the start-up line this writes to the browser console is now the version it really is. It had been stuck at 1.1.2 for months, so a bug report quoting it named a version that no longer existed.",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Chairs-Up.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
       "i18n": {
         "da": {
           "name": "Stole Op",
           "description": "Markerer en lektion, når den er dagens sidste aktive booking i det lokale.",
-          "changelog": "Fjerner cache-nøgler efterladt af ældre cache-formater, som Managerens lagerplads-oversigt kun kunne vise som ikke-tilknyttede. Ingen version læser dem længere, så de ryddes nu ved indlæsning."
+          "changelog": "Versionen i opstartslinjen i browserens konsol er nu den version, modulet faktisk har. Den stod fast på 1.1.2 i månedsvis, så en fejlrapport, der citerede den, nævnte en version, som ikke længere fandtes."
         }
       }
     },
@@ -141,6 +141,33 @@
           "name": "Fagfarver",
           "description": "Lærer ud fra dit eget skema, hvilke hold der rent faktisk er dine, og giver hvert af dem sin egen farve, med et separat dæmpet farvespektrum til enkeltstående aktiviteter som morgensamlinger og møder. En valgfri figurmarkør pr. hold hjælper, når farve alene ikke er nok.",
           "changelog": "Alle indstillinger, afsnit og linjen pr. hold (Set N gange over N uger) kan nu læses på dansk såvel som engelsk; de følger Managerens sprog og skifter med det på stedet. Holdnavne står som Lectio viser dem."
+        }
+      }
+    },
+    {
+      "id": "change-radar",
+      "aliases": [
+        "schedule-change-radar",
+        "lectio-change-radar",
+        "change-log"
+      ],
+      "name": "Lectio Change Radar",
+      "description": "Lectio watcher with a compact themed radar HUD. Choose exactly what it tracks - timetable cancellations, moves, rooms, teachers and homework, plus optional assignment, absence and document watching - plus upcoming assignment deadlines raised as they come inside your chosen lookahead - with urgency states, unseen-change tracking and a rotating local change log.",
+      "category": "Timetable",
+      "audience": [
+        "student",
+        "teacher"
+      ],
+      "status": "stable",
+      "version": "0.9.7",
+      "changelog": "Change Radar leaves Experimental and is now on Stable. A change shows what it was against what it is: the old value struck through beside the new one, with a coloured stripe for cancelled, added, moved or due.",
+      "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Change-Radar.user.js",
+      "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
+      "i18n": {
+        "da": {
+          "name": "Lectio Ændringsradar",
+          "description": "Lectio-vagt med en kompakt radar-HUD i temaets farver. Du vælger selv, hvad den holder øje med - aflysninger, flytninger, lokaler, lærere og lektier i skemaet, plus valgfri overvågning af opgaver, fravær og dokumenter - plus kommende opgavefrister, der meldes, når de kommer inden for det valgte tidsrum - med hastestatus, styr på usete ændringer og en roterende lokal ændringslog.",
+          "changelog": "Ændringsradaren forlader Eksperimentel og er nu på Stabil. En ændring viser, hvad den var, over for hvad den er: den gamle værdi streget ud ved siden af den nye, med en farvet stribe for aflyst, tilføjet, flyttet eller forfalden."
         }
       }
     }

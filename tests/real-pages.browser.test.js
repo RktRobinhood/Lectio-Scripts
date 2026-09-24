@@ -729,7 +729,7 @@ test('Change Radar, run over all four real pages, reads every list', async () =>
                 return realGetItem.call(this, key);
             };
         `,
-        modules: ['/modules-unstable/Lectio-Change-Radar.user.js'],
+        modules: ['/modules/Lectio-Change-Radar.user.js'],
         postlude: `${REPORTER}
             setTimeout(() => {
                 const stateKey = Object.keys(localStorage)

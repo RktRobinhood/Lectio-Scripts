@@ -26,7 +26,7 @@ const MODULES = [
     'modules/Lectio-Subject-Colours.user.js',
     'modules/Lectio-Chairs-Up.user.js',
     'modules/Lectio-Unread-Message-Notifications.user.js',
-    'modules-unstable/Lectio-Change-Radar.user.js'
+    'modules/Lectio-Change-Radar.user.js'
 ];
 
 const ROUTES = new Map([

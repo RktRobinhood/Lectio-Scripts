@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio English Mode
 // @namespace    lectio-english-mode
-// @version      1.11.6
+// @version      1.11.8
 // @description  Context-aware English layer for Lectio with instant core UI translation, persistent cache and Google fallback.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-start
@@ -59,6 +59,19 @@
     }
 
     /*
+     * The one place this module's version is written down in code, at module
+     * scope because two things read it: the handshake below, and the start-up
+     * banner in init(). The banner used to carry its own copy typed in by
+     * hand, which is exactly what drifted - it printed v1.5.3 for months while
+     * this said 1.11.x. Anything that needs the number reads it from here.
+     *
+     * It has to be declared out here rather than inside the handshake: init()
+     * could not see a const scoped to that function. Keep it above the boot
+     * block (scripts/check-boot-order.mjs).
+     */
+    const MODULE_VERSION = '1.11.8';
+
+    /*
      * Lectio Manager handshake.
      * Lets the Manager show this module as installed without
      * touching its private storage. See catalogue/modules.json.
@@ -66,7 +79,6 @@
     (function registerWithLectioManager() {
         const MODULE_ID = 'english-mode';
         const MODULE_NAME = 'Lectio English Mode';
-        const MODULE_VERSION = '1.11.6';
 
         /*
          * The settings panel's own words, in both languages (ADR-0013). The
@@ -4755,7 +4767,7 @@
     function init() {
         console.log(
             LOG,
-            'v1.5.3 started'
+            `v${MODULE_VERSION} started`
         );
 
         installStyles();
