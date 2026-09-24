@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio Manager frames fixture</title>
+</head>
+<body>
+    <script>
+        /*
+         * TOP PAGE ONLY
+         * =============
+         *
+         * Lectio opens some dialogs - "Vælg materiale" is the one that was
+         * reported - as another Lectio page inside an iframe. The Manager's
+         * @match covers both, so up to 1.32.2 the frame booted a second
+         * Manager: its own gear and dock drawn over the dialog, fed by the
+         * frame's copies of the modules, disagreeing with the dock behind it.
+         *
+         * @noframes keeps Tampermonkey from injecting into the frame at all,
+         * but a browser cannot read a userscript header, so this exercises
+         * the runtime guard that says the same thing. The top page loads the
+         * Manager as usual; a same-origin frame loads the same file. The top
+         * must build as it always has, and the frame must build nothing,
+         * answer nothing, and never touch GM storage.
+         *
+         * The frame's script onload is recorded, so a Manager that failed to
+         * load at all cannot pass for one that loaded and stood aside.
+         */
+        const storage = new Map([
+            ['lectioManager.lastRefresh.v1', Date.now()],
+            ['lectioManager.updateTipDismissed.v1', true]
+        ]);
+
+        window.GM_getValue = (key, fallback) => storage.has(key) ? storage.get(key) : fallback;
+        window.GM_setValue = (key, value) => storage.set(key, value);
+        window.GM_xmlhttpRequest = () => {};
+    </script>
+    <script src="../../manager/Lectio-Manager.user.js"></script>
+    <script>
+        function assert(condition, message) {
+            if (!condition) throw new Error(message);
+        }
+
+        function registerDockItem(target) {
+            target.dispatchEvent(new target.CustomEvent('lectio-manager:dock:register', {
+                detail: {
+                    moduleId: 'test-module', itemId: 'action', type: 'action', icon: 'refresh',
+                    label: 'Run action', badge: 10, defaultPriority: 20
+                }
+            }));
+        }
+
+        const frameDocument = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"></head><body>
+<script>
+    window.gmCalls = [];
+    window.GM_getValue = (key, fallback) => { window.gmCalls.push('get:' + key); return fallback; };
+    window.GM_setValue = (key) => { window.gmCalls.push('set:' + key); };
+    window.GM_xmlhttpRequest = () => { window.gmCalls.push('xhr'); };
+<\/script>
+<script src="../../manager/Lectio-Manager.user.js"
+    onload="window.managerScriptLoaded = true"
+    onerror="window.managerScriptFailed = true"><\/script>
+</body></html>`;
+
+        window.addEventListener('load', () => {
+            const frame = document.createElement('iframe');
+            frame.addEventListener('load', () => {
+                try {
+                    const child = frame.contentWindow;
+                    const childDocument = frame.contentDocument;
+
+                    // The top page is the control: without it, a guard that
+                    // stopped the Manager everywhere would pass as well.
+                    assert(document.querySelector('#lectio-manager-toggle'),
+                        'The Manager built no gear on the top page');
+                    registerDockItem(window);
+                    assert(document.querySelectorAll('.lectio-manager-dock-item').length === 1,
+                        'The top page\'s dock did not answer a registration');
+
+                    assert(!child.managerScriptFailed, 'The frame could not load the Manager file');
+                    assert(child.managerScriptLoaded, 'The frame never ran the Manager file');
+
+                    registerDockItem(child);
+                    assert(!childDocument.querySelector('#lectio-manager-toggle'),
+                        'The Manager drew a gear inside the frame');
+                    assert(!childDocument.querySelector('#lectio-manager-dock-root'),
+                        'The Manager drew a dock inside the frame');
+                    assert(!childDocument.querySelector('.lectio-manager-dock-item'),
+                        'The frame\'s Manager answered a dock registration');
+                    assert(child.gmCalls.length === 0,
+                        `The frame's Manager touched GM storage: ${child.gmCalls.join(', ')}`);
+                    assert(document.querySelectorAll('.lectio-manager-dock-item').length === 1,
+                        'A registration inside the frame reached the top page\'s dock');
+
+                    document.documentElement.dataset.testResult = 'pass';
+                } catch (error) {
+                    document.documentElement.dataset.testResult = `fail: ${error.message}`;
+                }
+            }, { once: true });
+            frame.srcdoc = frameDocument;
+            document.body.appendChild(frame);
+        });
+    </script>
+</body>
+</html>

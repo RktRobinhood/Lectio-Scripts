@@ -1,9 +1,10 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.32.2
+// @version      1.32.3
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules, including their settings and shared dock controls.
 // @match        https://www.lectio.dk/lectio/*
+// @noframes
 // @run-at       document-idle
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -28,6 +29,28 @@
      * feature code, or touch Tampermonkey's own enable/disable
      * switches. Catalogue fields are rendered as text/links only.
      */
+
+    /*
+     * Top page only. Lectio opens some dialogs - "Vælg materiale" is one - as
+     * another Lectio page inside an iframe, and @match cannot tell the two
+     * apart. A Manager booted in the frame is a second, independent instance:
+     * its own gear and dock drawn over the dialog, answering whatever the
+     * frame's copies of the modules register, and disagreeing with the dock
+     * on the page behind it. @noframes stops Tampermonkey injecting here at
+     * all; this is the same rule for a script manager that ignores it.
+     *
+     * frameElement is null on the top page, and for a frame of another
+     * origin. Anything unexpected is read as "top page", so the worst this
+     * check can do is leave the old behaviour in place - never hide the
+     * Manager from the page it belongs on.
+     */
+    let hostFrame = null;
+    try {
+        hostFrame = window.frameElement;
+    } catch (_) {
+        hostFrame = null;
+    }
+    if (hostFrame) return;
 
     /*
      * LANGUAGE
@@ -409,7 +432,7 @@
     // Kept in step with the @version header by scripts/check-versions.mjs. The
     // header is metadata Tampermonkey reads; this is the only copy the running
     // script can see, and it is what the self-update notice compares.
-    const MANAGER_VERSION = '1.32.2';
+    const MANAGER_VERSION = '1.32.3';
 
     const STABLE_CATALOGUE_URL =
         'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/catalogue/modules.json';
