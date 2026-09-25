@@ -25,8 +25,11 @@ The extra patch bump at promotion is not ceremony. A tester's installed copy poi
 
 ## What is here now
 
-Nothing. Every module was promoted on 2026-09-24, Change Radar to its first Stable release, so the Experimental channel currently offers exactly what Stable does.
+**English Mode 1.11.9** (Stable ships 1.11.8). Two fixes found while investigating issue #72:
 
-`modules.json` still has one entry, and must not be emptied. Every shipped Manager rejects an overlay with no modules in it, keeps the overlay it cached last, and reports the failure on every refresh. A Manager older than 1.22.1 also lets that cached overlay win outright, so it would keep offering installs from the `modules-unstable/` URLs a promotion deletes. So while nothing is under test, the overlay holds one entry that is an exact copy of its entry in `catalogue/modules.json`, `installUrl` included — Change Radar's today. A current Manager resolves equal versions to Stable, and an old one installs the Stable file whichever entry it picks. `node scripts/check-versions.mjs` accepts an overlay entry with no file here only when it is that exact copy, and fails an overlay with no entries at all.
+- Nothing inside a rich-text editor is translated any more. In English mode, 1.11.8 rewrote the `alt`/`title` of images and links in the homework editor, and a line of the teacher's own text split by `<br>` that matched a dictionary phrase, into English that Lectio then saved. `tests/english-mode-editor.browser.test.js`.
+- Switching language reloads with a GET to the same address instead of `location.reload()`, which re-sent the postback a page was the answer to - adding a homework file or link a second time. A Manager set-setting that names the language already in use no longer reloads at all. `tests/english-mode-resubmit.browser.test.js`.
 
-The next module to start work here replaces that copy with its own entry, following step 4 of *Working here*. If it is the same module, the copy simply becomes its real entry.
+Both tests load the Unstable copy while it exists and the Stable one after promotion, so neither needs editing then.
+
+`modules.json` must never be emptied. Every shipped Manager rejects an overlay with no modules in it, keeps the overlay it cached last, and reports the failure on every refresh; a Manager older than 1.22.1 also lets that cached overlay win outright, so it would keep offering installs from the `modules-unstable/` URLs a promotion deletes. So when the last module here is promoted, the overlay keeps one entry that is an exact copy of its entry in `catalogue/modules.json`, `installUrl` included. A current Manager resolves equal versions to Stable, and an old one installs the Stable file whichever entry it picks. `node scripts/check-versions.mjs` accepts an overlay entry with no file here only when it is that exact copy, and fails an overlay with no entries at all.

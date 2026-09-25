@@ -1,32 +1,27 @@
 {
   "schemaVersion": 1,
   "channel": "unstable",
-  "generatedAt": "2026-09-24T12:00:00Z",
+  "generatedAt": "2026-09-25T12:00:00Z",
   "modules": [
     {
-      "id": "change-radar",
-      "aliases": [
-        "schedule-change-radar",
-        "lectio-change-radar",
-        "change-log"
-      ],
-      "name": "Lectio Change Radar",
-      "description": "Lectio watcher with a compact themed radar HUD. Choose exactly what it tracks - timetable cancellations, moves, rooms, teachers and homework, plus optional assignment, absence and document watching - plus upcoming assignment deadlines raised as they come inside your chosen lookahead - with urgency states, unseen-change tracking and a rotating local change log.",
-      "category": "Timetable",
+      "id": "english-mode",
+      "name": "English Mode",
+      "description": "Adds a DA / EN switch and translates the Lectio interface into context-aware English.",
+      "category": "Interface",
       "audience": [
         "student",
         "teacher"
       ],
-      "status": "stable",
-      "version": "0.9.7",
-      "changelog": "Change Radar leaves Experimental and is now on Stable. A change shows what it was against what it is: the old value struck through beside the new one, with a coloured stripe for cancelled, added, moved or due.",
-      "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Change-Radar.user.js",
+      "status": "unstable",
+      "version": "1.11.9",
+      "changelog": "Nothing inside the homework editor is translated any more, so English cannot end up in homework you save. Switching language no longer re-sends a form you just sent, which could add a file or link twice.",
+      "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-English-Mode.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
       "i18n": {
         "da": {
-          "name": "Lectio Ændringsradar",
-          "description": "Lectio-vagt med en kompakt radar-HUD i temaets farver. Du vælger selv, hvad den holder øje med - aflysninger, flytninger, lokaler, lærere og lektier i skemaet, plus valgfri overvågning af opgaver, fravær og dokumenter - plus kommende opgavefrister, der meldes, når de kommer inden for det valgte tidsrum - med hastestatus, styr på usete ændringer og en roterende lokal ændringslog.",
-          "changelog": "Ændringsradaren forlader Eksperimentel og er nu på Stabil. En ændring viser, hvad den var, over for hvad den er: den gamle værdi streget ud ved siden af den nye, med en farvet stribe for aflyst, tilføjet, flyttet eller forfalden."
+          "name": "English Mode",
+          "description": "Tilføjer en DA / EN-knap og oversætter Lectios brugerflade til kontekstbevidst engelsk.",
+          "changelog": "Intet i lektie-editoren bliver oversat længere, så der kan ikke havne engelsk i lektier, du gemmer. Skift af sprog sender ikke længere en formular, du lige har sendt, igen - det kunne tilføje en fil eller et link to gange."
         }
       }
     }

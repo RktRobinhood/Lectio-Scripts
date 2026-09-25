@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>English Mode resubmission fixture</title>
+    <script>
+        /* GM storage lives in localStorage so the language survives the
+           module's own reload, as it does in Tampermonkey. */
+        window.GM_getValue = (key, fallback) => {
+            const saved = localStorage.getItem('gm.' + key);
+            return saved === null ? fallback : JSON.parse(saved);
+        };
+        window.GM_setValue = (key, value) => localStorage.setItem('gm.' + key, JSON.stringify(value));
+        window.GM_xmlhttpRequest = () => {};
+    </script>
+</head>
+<body>
+    <!-- Lectio's shape: one form posting back to the page's own address.
+         Adding a file or link to homework is exactly this. -->
+    <form id="aspnetForm" method="post" action="">
+        <input type="hidden" name="__EVENTTARGET" value="HomeworkPicker">
+        <input type="hidden" name="selectedSourceId" value="material-1">
+    </form>
+
+    <script src="/module.user.js"></script>
+
+    <script>
+        /* The server writes the method it answered into the page. */
+        const method = document.documentElement.dataset.method;
+        const step = sessionStorage.getItem('step') || 'start';
+
+        window.addEventListener('load', () => {
+            if (step === 'start') {
+                /* 1. The teacher adds a material: one postback. */
+                localStorage.clear();
+                sessionStorage.setItem('step', 'posted');
+                document.getElementById('aspnetForm').submit();
+            } else if (step === 'posted' && method === 'POST') {
+                /* 2. On the page that answered the post, they switch to
+                   English. The module reloads the page itself. */
+                sessionStorage.setItem('step', 'switched');
+                setTimeout(() => {
+                    document.querySelector('#lectio-english-switch button[data-lang="en"]').click();
+                }, 200);
+            }
+        });
+    </script>
+</body>
+</html>

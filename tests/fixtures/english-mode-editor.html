@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>English Mode rich-text editor fixture</title>
+    <script>
+        /* English is switched on before the module loads, and the fallback
+           translator never answers, so everything below comes from the
+           module's own dictionary. */
+        const store = new Map([['lectioEnglish.mode', 'en']]);
+        window.GM_getValue = (key, fallback) => store.has(key) ? store.get(key) : fallback;
+        window.GM_setValue = (key, value) => store.set(key, value);
+        window.GM_xmlhttpRequest = () => {};
+    </script>
+</head>
+<body>
+    <!-- Lectio's own UI: this is what English Mode is for. -->
+    <p id="ui-br">Mine<br>hold</p>
+    <span id="ui-title" title="Gem">x</span>
+
+    <!-- A homework being written in Lectio's rich-text editor. Everything in
+         here is the teacher's text and is what Lectio saves. -->
+    <div id="editor" class="cke_editable cke_wysiwyg_div" contenteditable="true">
+        <p id="editor-br">Mine<br>hold</p>
+        <p><img id="editor-img" alt="Gem" title="Rediger" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></p>
+        <p><a id="editor-link" href="#" title="Slet">Slet</a></p>
+    </div>
+
+    <!-- The test names the copy under test, so the fixture outlives a
+         promotion: Unstable while the fix is under test, then Stable. -->
+    <script>
+        const modulePath = new URLSearchParams(location.search).get('module') ||
+            '../../modules/Lectio-English-Mode.user.js';
+        document.write('<script src="' + modulePath + '"><\/script>');
+    </script>
+
+    <script>
+        const failures = [];
+        const assert = (condition, message) => {
+            if (!condition) failures.push(message);
+        };
+
+        const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+        const text = (id) => document.getElementById(id).textContent.replace(/\s+/g, ' ').trim();
+        const attr = (id, name) => document.getElementById(id).getAttribute(name);
+
+        (async () => {
+            /* The UI outside the editor is translated: without this the test
+               would pass on a module that translated nothing at all. */
+            for (let attempt = 0; attempt < 60; attempt += 1) {
+                if (attr('ui-title', 'title') !== 'Gem' && text('ui-br') !== 'Minehold') break;
+                await wait(50);
+            }
+
+            assert(attr('ui-title', 'title') !== 'Gem', 'the UI title outside the editor was never translated');
+            assert(text('ui-br') === 'MyClasses', 'the UI phrase split by <br> was never translated: ' + text('ui-br'));
+
+            /* Give the module's repair passes time to reach the editor too. */
+            await wait(1500);
+
+            assert(text('editor-br') === 'Minehold', 'the teacher\'s own text in the editor was rewritten: ' + text('editor-br'));
+            assert(attr('editor-img', 'alt') === 'Gem', 'an image alt in the editor was rewritten: ' + attr('editor-img', 'alt'));
+            assert(attr('editor-img', 'title') === 'Rediger', 'an image title in the editor was rewritten: ' + attr('editor-img', 'title'));
+            assert(attr('editor-link', 'title') === 'Slet', 'a link title in the editor was rewritten: ' + attr('editor-link', 'title'));
+            assert(text('editor-link') === 'Slet', 'link text in the editor was rewritten: ' + text('editor-link'));
+
+            document.documentElement.dataset.testResult = failures.length ? 'fail: ' + failures.join(' | ') : 'pass';
+        })();
+    </script>
+</body>
+</html>
