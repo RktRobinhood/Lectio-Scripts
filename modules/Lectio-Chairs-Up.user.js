@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Chairs Up
 // @namespace    https://www.lectio.dk/
-// @version      1.4.6
+// @version      1.4.7
 // @description  Shows when a lesson is the final active booking of the day in its room. Universal Lectio version.
 // @match        https://www.lectio.dk/lectio/*
 // @grant        none
@@ -57,7 +57,7 @@
    * banner runs at module scope and could not see a const scoped to that
    * function. Keep it above the boot block (scripts/check-boot-order.mjs).
    */
-  const MODULE_VERSION = '1.4.6';
+  const MODULE_VERSION = '1.4.7';
 
   /*
    * Lets the Manager show this module as installed without
@@ -4480,9 +4480,21 @@
 
     style.textContent = `
 
-      a.s2skemabrik.s2brik {
+      /* Only a marked lesson lets its badge hang over the corner. Every
+         other block keeps Lectio's own overflow: hidden, and a marked one
+         clips its text one level down instead - otherwise the text of a
+         short lesson spills out of its box (issue #73). */
+      a.s2skemabrik.s2brik.${LAST_CLASS} {
         overflow:
           visible !important;
+      }
+
+      a.s2skemabrik.s2brik.${LAST_CLASS} > :not(.${ICON_CLASS}) {
+        overflow:
+          hidden;
+
+        max-height:
+          100%;
       }
 
 

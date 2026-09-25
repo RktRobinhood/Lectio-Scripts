@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>Chairs Up brick overflow fixture</title>
+    <script>
+        /* Issue #73 is about the stylesheet, not the room data, so nothing
+           here needs the network. Any request the module makes fails. */
+        window.fetch = () => Promise.reject(new TypeError('offline fixture'));
+        localStorage.clear();
+    </script>
+    <style>
+        /* Lectio's own rules for a timetable block, from lectio-css.bundle.css.
+           Lectio clips a block's text to its box; the bug was a module
+           switching that off for every block on the page. */
+        A.s2skemabrik {
+            display: block;
+            overflow: hidden;
+            z-index: 1;
+        }
+
+        .s2skemabrikInnerContainer {
+            display: block;
+            text-align: left;
+            margin: 0;
+            height: 100%;
+            padding: 0.15em 0 0 0.25em;
+            box-sizing: border-box;
+        }
+
+        .s2skemabrikInnerContainer .s2skemabrikcontent {
+            display: inline;
+        }
+
+        .day {
+            position: relative;
+            height: 20em;
+            width: 16em;
+        }
+    </style>
+</head>
+<body>
+    <div id="masterContent">
+        <div class="day">
+            <!-- A fifteen-minute assembly: 2.55em tall, far too much text. -->
+            <a id="plain" class="s2skemabrik s2bgbox s2normal s2brik"
+               href="/lectio/223/aktivitet/aktivitetforside2.aspx?absid=82002865648"
+               style="position:absolute; top:1em; left:0.55em;height:2.55em;width:6.73em;word-wrap:break-word;">
+                <div class="s2skemabrikInnerContainer"><div class="s2skemabrikcontent">
+                    <span>Fællessamling/Assembly</span> ... • <span>UA</span> • Q
+                </div></div>
+            </a>
+
+            <!-- The same block once Chairs Up has marked it: the class and the
+                 badge exactly as decorateTimetableLesson adds them. -->
+            <a id="marked" class="s2skemabrik s2bgbox s2normal s2brik lectio-chairs-up-last"
+               href="/lectio/223/aktivitet/aktivitetforside2.aspx?absid=82002865649"
+               style="position:absolute; top:8em; left:0.55em;height:2.55em;width:6.73em;word-wrap:break-word;">
+                <div class="s2skemabrikInnerContainer"><div class="s2skemabrikcontent">
+                    <span>Fællessamling/Assembly</span> ... • <span>UA</span> • Q
+                </div></div>
+                <div class="lectio-chairs-up-icon" title="Sidste booking"></div>
+            </a>
+        </div>
+    </div>
+
+    <script src="/modules/Lectio-Chairs-Up.user.js"></script>
+
+    <script>
+        const failures = [];
+        const assert = (condition, message) => {
+            if (!condition) failures.push(message);
+        };
+
+        const report = () => {
+            const output = document.createElement('pre');
+            output.id = 'test-result';
+            output.textContent = failures.length ? failures.join(' | ') : 'pass';
+            document.body.dataset.testResult = failures.length ? 'fail' : 'pass';
+            document.body.appendChild(output);
+        };
+
+        const clips = (element) => ['hidden', 'clip'].includes(getComputedStyle(element).overflowY);
+
+        const plain = document.getElementById('plain');
+        const marked = document.getElementById('marked');
+        const markedInner = marked.querySelector('.s2skemabrikInnerContainer');
+        const badge = marked.querySelector('.lectio-chairs-up-icon');
+
+        /* The module's stylesheet goes in at load; without it this proves
+           nothing about the module. */
+        assert(
+            [...document.querySelectorAll('style')].some((style) =>
+                style.textContent.includes('lectio-chairs-up-icon')),
+            'Chairs Up never injected its stylesheet'
+        );
+
+        assert(
+            plain.scrollHeight > plain.clientHeight + 4,
+            'fixture no longer overflows - the text should be taller than the block'
+        );
+
+        /* An unmarked block keeps Lectio's clipping. */
+        assert(
+            clips(plain),
+            'an unmarked lesson lets its text spill out of its box (overflow ' +
+                getComputedStyle(plain).overflowY + ')'
+        );
+
+        /* A marked block lets its badge out over the corner... */
+        assert(
+            getComputedStyle(marked).overflowY === 'visible',
+            'a marked lesson clips its own badge (overflow ' +
+                getComputedStyle(marked).overflowY + ')'
+        );
+
+        const markedBox = marked.getBoundingClientRect();
+        const badgeBox = badge.getBoundingClientRect();
+        assert(
+            badgeBox.top < markedBox.top && badgeBox.right > markedBox.right,
+            'the badge no longer hangs over the top-right corner'
+        );
+
+        /* ...and still clips its text, one level down. */
+        assert(
+            clips(markedInner),
+            'a marked lesson lets its text spill out of its box (inner overflow ' +
+                getComputedStyle(markedInner).overflowY + ')'
+        );
+        assert(
+            markedInner.getBoundingClientRect().bottom <= markedBox.bottom + 1,
+            'a marked lesson\'s text box is taller than the lesson'
+        );
+
+        report();
+    </script>
+</body>
+</html>
