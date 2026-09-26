@@ -133,7 +133,11 @@
                 assert(root.querySelector('.lcr-panel-heading strong')?.textContent === 'Change Radar settings',
                     `the panel heading did not switch to settings: ${root.querySelector('.lcr-panel-heading strong')?.textContent}`);
                 assert(root.querySelectorAll('.lcr-setting-row').length > 5, 'the settings panel rendered no settings');
-                assert(root.querySelector('.lcr-setting-control')?.value === (withManager ? 'floating' : 'auto'),
+                // Found by its options rather than its position: 0.9.8 regrouped
+                // the settings, and Radar location is no longer the first select.
+                const location = [...root.querySelectorAll('.lcr-setting-control')]
+                    .find((select) => [...select.options].some((option) => option.value === 'floating'));
+                assert(location?.value === (withManager ? 'floating' : 'auto'),
                     'the Radar location control did not show the stored choice');
                 assert(root.classList.contains('is-expanded'), 'opening settings closed the panel');
 
