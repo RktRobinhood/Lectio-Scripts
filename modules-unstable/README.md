@@ -32,4 +32,11 @@ The extra patch bump at promotion is not ceremony. A tester's installed copy poi
 
 Both tests load the Unstable copy while it exists and the Stable one after promotion, so neither needs editing then.
 
+**Change Radar 0.9.8** (Stable ships 0.9.7). Issue #76, as a teacher-only part of Change Radar rather than a new module:
+
+- A teacher to-do. On the Forside, a small card counts lessons still waiting for absence registration (with the oldest), submissions waiting in the *Afventer lærer* column of the teacher's own assignments, and assignments due in the rest of this ISO week; each line links to the Lectio page with the detail. A lesson block on any timetable whose absence is unregistered gets a small corner mark linking to its registration page. It is read-only (ADR-0009), rides the existing checks (request slots, backoff, at most every 30 minutes), and a table it cannot read shows no line at all rather than a 0.
+- The settings are regrouped - What to watch, Teacher to-do, Notifications, Appearance, then four folded *details* groups - and each role-specific control carries an `audience`. The module itself ignores a watch meant for the other role, whatever is stored for it: the absence watch and its trackers and the assignment status tracker are students', the to-do is teachers'.
+
+`tests/change-radar-teacher-todo.browser.test.js` runs it over the real saved pages; like English Mode's tests it loads the Unstable copy while it exists.
+
 `modules.json` must never be emptied. Every shipped Manager rejects an overlay with no modules in it, keeps the overlay it cached last, and reports the failure on every refresh; a Manager older than 1.22.1 also lets that cached overlay win outright, so it would keep offering installs from the `modules-unstable/` URLs a promotion deletes. So when the last module here is promoted, the overlay keeps one entry that is an exact copy of its entry in `catalogue/modules.json`, `installUrl` included. A current Manager resolves equal versions to Stable, and an old one installs the Stable file whichever entry it picks. `node scripts/check-versions.mjs` accepts an overlay entry with no file here only when it is that exact copy, and fails an overlay with no entries at all.

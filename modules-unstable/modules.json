@@ -24,6 +24,33 @@
           "changelog": "Intet i lektie-editoren bliver oversat længere, så der kan ikke havne engelsk i lektier, du gemmer. Skift af sprog sender ikke længere en formular, du lige har sendt, igen - det kunne tilføje en fil eller et link to gange."
         }
       }
+    },
+    {
+      "id": "change-radar",
+      "aliases": [
+        "schedule-change-radar",
+        "lectio-change-radar",
+        "change-log"
+      ],
+      "name": "Lectio Change Radar",
+      "description": "Lectio watcher with a compact themed radar HUD. Choose exactly what it tracks - timetable cancellations, moves, rooms, teachers and homework, plus optional assignment, absence and document watching - plus upcoming assignment deadlines raised as they come inside your chosen lookahead - with urgency states, unseen-change tracking and a rotating local change log.",
+      "category": "Timetable",
+      "audience": [
+        "student",
+        "teacher"
+      ],
+      "status": "unstable",
+      "version": "0.9.8",
+      "changelog": "For teachers: a to-do card on the front page (absence to register, marking waiting, deadlines this week) and a mark on unregistered lessons. Settings are now in a few clear groups.",
+      "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Change-Radar.user.js",
+      "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
+      "i18n": {
+        "da": {
+          "name": "Lectio Ændringsradar",
+          "description": "Lectio-vagt med en kompakt radar-HUD i temaets farver. Du vælger selv, hvad den holder øje med - aflysninger, flytninger, lokaler, lærere og lektier i skemaet, plus valgfri overvågning af opgaver, fravær og dokumenter - plus kommende opgavefrister, der meldes, når de kommer inden for det valgte tidsrum - med hastestatus, styr på usete ændringer og en roterende lokal ændringslog.",
+          "changelog": "For lærere: et huskekort på forsiden (fravær at registrere, retning der venter, frister i denne uge) og et mærke på uregistrerede lektioner. Indstillingerne er samlet i få, tydelige grupper."
+        }
+      }
     }
   ]
 }
