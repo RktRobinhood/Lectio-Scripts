@@ -2,13 +2,13 @@
   "schemaVersion": 1,
   "generatedAt": "2026-09-24T12:00:00Z",
   "manager": {
-    "version": "1.32.3",
-    "changelog": "The Manager no longer draws a second gear and dock inside Lectio's pop-up windows, such as Vælg materiale. It now runs only on the page itself.",
+    "version": "1.33.0",
+    "changelog": "The Manager now recognises whether you are signed in as a teacher or a student. On Stable it offers only the modules and settings meant for your kind of account; Experimental shows everything, for testing.",
     "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/manager/Lectio-Manager.user.js",
     "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
     "i18n": {
       "da": {
-        "changelog": "Manageren tegner ikke længere et ekstra tandhjul og en ekstra dock inde i Lectios pop op-vinduer, fx Vælg materiale. Den kører nu kun på selve siden."
+        "changelog": "Manageren kan nu se, om du er logget ind som lærer eller elev. På Stabil tilbyder den kun de moduler og indstillinger, der er beregnet til din slags konto; Eksperimentel viser alt, til test."
       }
     }
   },

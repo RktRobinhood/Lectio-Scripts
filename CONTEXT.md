@@ -54,8 +54,12 @@ A single Lectio installation/tenant, identified by the numeric id in its URL pat
 _Avoid_: institution, tenant, organization.
 
 **Audience**:
-A catalogue tag (student, teacher) describing who a module is aimed at. Used to filter the Manager's module list; does not restrict installation.
+A catalogue tag (student, teacher) describing who a module is aimed at. A Settings Schema control may carry the same tag. On the Stable channel the Manager offers an account only the modules and controls whose Audience includes its Account Type (or that have none); Experimental shows every Audience, for testing. Hiding is presentation: it does not restrict installation, and a module decides for itself what it does for each Account Type.
 _Avoid_: role, user type.
+
+**Account Type**:
+Whether the signed-in Lectio account is a student's or a teacher's, read by the Manager from the `msapplication-starturl` tag Lectio writes into every page (`forside.aspx?elevid=` or `?laererid=`) and remembered per school for pages without it. Never read off links in the page, which name other people. Unknown filters nothing.
+_Avoid_: user mode, role.
 
 **Category**:
 A catalogue tag grouping modules by feature area (e.g. Interface, Timetable, Messages), used to organize the Manager's module list.

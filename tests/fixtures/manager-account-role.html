@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio Manager account role fixture</title>
+    <!--
+        What Lectio serves on every page for a signed-in student: the person's
+        own front page. A teacher's reads forside.aspx?laererid=<n>.
+    -->
+    <meta name="msapplication-starturl" content="/lectio/223/forside.aspx?elevid=1000001">
+</head>
+<body>
+    <!--
+        A student's page links to teachers, and a teacher's to students. The
+        Manager must not read the role off links like this one.
+    -->
+    <a href="/lectio/223/SkemaNy.aspx?type=laerer&amp;laererid=1000093">A teacher</a>
+    <script>
+        /*
+         * Issue #78. A student account on Stable is offered student and shared
+         * modules, not a teacher-only one, and sees no teacher-only setting.
+         * Experimental is for testing and shows everything.
+         */
+        const catalogue = {
+            schemaVersion: 1,
+            generatedAt: '2026-09-26T00:00:00.000Z',
+            manager: { version: '1.33.0' },
+            modules: [
+                {
+                    id: 'teacher-only',
+                    name: 'Teacher Only',
+                    description: 'For teachers.',
+                    category: 'Timetable',
+                    audience: ['teacher'],
+                    status: 'stable',
+                    version: '1.0.0',
+                    installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Teacher-Only.user.js'
+                },
+                {
+                    id: 'student-only',
+                    name: 'Student Only',
+                    description: 'For students.',
+                    category: 'Timetable',
+                    audience: ['student'],
+                    status: 'stable',
+                    version: '1.0.0',
+                    installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Student-Only.user.js'
+                },
+                {
+                    id: 'everyone',
+                    name: 'Everyone',
+                    description: 'For both.',
+                    category: 'Interface',
+                    audience: ['student', 'teacher'],
+                    status: 'stable',
+                    version: '1.0.0',
+                    installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Everyone.user.js'
+                },
+                {
+                    id: 'shared-settings',
+                    name: 'Shared Settings',
+                    description: 'Installed, with a teacher-only setting.',
+                    category: 'Interface',
+                    audience: ['student', 'teacher'],
+                    status: 'stable',
+                    version: '1.0.0',
+                    installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Shared-Settings.user.js'
+                }
+            ]
+        };
+
+        const overlay = {
+            schemaVersion: 1,
+            channel: 'unstable',
+            generatedAt: '2026-09-26T00:00:00.000Z',
+            modules: []
+        };
+
+        const storage = new Map([
+            ['lectioManager.catalogue.v1', JSON.stringify(catalogue)],
+            ['lectioManager.lastRefresh.v1', Date.now()],
+            ['lectioManager.catalogue.unstable.v1', JSON.stringify(overlay)],
+            ['lectioManager.lastRefresh.unstable.v1', Date.now()],
+            ['lectioManager.releaseChannel.v1', 'stable'],
+            ['lectioManager.updateTipDismissed.v1', true]
+        ]);
+
+        window.GM_getValue = (key, fallback) => storage.has(key) ? storage.get(key) : fallback;
+        window.GM_setValue = (key, value) => storage.set(key, value);
+        window.GM_xmlhttpRequest = (options) => {
+            const body = options.url.includes('modules-unstable') ? overlay : catalogue;
+            setTimeout(() => options.onload({ status: 200, responseText: JSON.stringify(body) }), 0);
+        };
+
+        function register() {
+            window.dispatchEvent(new CustomEvent('lectio-module:register', {
+                detail: {
+                    id: 'shared-settings',
+                    name: 'Shared Settings',
+                    version: '1.0.0',
+                    settingsSchema: [
+                        { key: 'enabled', type: 'toggle', label: 'Enabled', section: 'General' },
+                        { key: 'homework', type: 'toggle', label: 'Watch my homework', section: 'Watch', audience: ['student'] },
+                        { key: 'marking', type: 'toggle', label: 'Watch marking waiting', section: 'Teacher to-do', audience: ['teacher'] }
+                    ],
+                    currentValues: { enabled: true, homework: true, marking: true }
+                }
+            }));
+        }
+
+        window.addEventListener('lectio-manager:discover', register);
+    </script>
+    <script src="../../manager/Lectio-Manager.user.js"></script>
+    <script>
+        function assert(condition, message) {
+            if (!condition) throw new Error(message);
+        }
+
+        async function waitFor(condition, message, timeoutMs = 4000) {
+            const deadline = Date.now() + timeoutMs;
+            while (Date.now() < deadline) {
+                if (condition()) return;
+                await new Promise(resolve => setTimeout(resolve, 25));
+            }
+            throw new Error(message);
+        }
+
+        const card = (id) => document.querySelector(`.lectio-manager-card[data-module-id="${id}"]`);
+
+        function settingLabels() {
+            return [...document.querySelectorAll('.lectio-manager-settings-view .lectio-manager-setting-label')]
+                .map((element) => element.textContent.trim());
+        }
+
+        function navItems() {
+            return [...document.querySelectorAll('.lectio-manager-nav-item')].map((item) => item.dataset.view);
+        }
+
+        window.addEventListener('load', async () => {
+            try {
+                register();
+                document.querySelector('#lectio-manager-toggle').click();
+
+                // Installed side: the shared module's settings hide the teacher row.
+                await waitFor(() => card('shared-settings'), 'The installed module never rendered');
+                card('shared-settings').querySelector('.lectio-manager-settings-btn').click();
+                await waitFor(() => settingLabels().length, 'Settings never rendered');
+                assert(
+                    settingLabels().join('|') === 'Enabled|Watch my homework',
+                    `Stable showed a student the wrong settings: ${settingLabels().join('|')}`
+                );
+                document.querySelector('.lectio-manager-settings-back').click();
+
+                // Available side, Stable: no teacher-only module, no audience filter.
+                document.querySelector('.lectio-manager-tab[data-primary-view="all"]').click();
+                await waitFor(() => card('student-only'), 'The student module never rendered');
+                assert(!card('teacher-only'), 'Stable offered a student a teacher-only module');
+                assert(card('everyone'), 'A module for both roles went missing');
+                assert(
+                    document.querySelector('.lectio-manager-available-count').textContent === '2',
+                    `Available count still counts the other role: ${document.querySelector('.lectio-manager-available-count').textContent}`
+                );
+                assert(
+                    !navItems().some((view) => view.startsWith('audience:')),
+                    `Stable still offers a Student / Teacher filter: ${navItems().join(', ')}`
+                );
+
+                // The panel says why.
+                document.querySelector('.lectio-manager-channel-btn').click();
+                const note = document.querySelector('.lectio-manager-role-note');
+                assert(!note.hidden && /student account/.test(note.textContent), `No account note: ${note.textContent}`);
+
+                // Experimental: everything, marked.
+                const select = document.querySelector('.lectio-manager-channel-select');
+                select.value = 'unstable';
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+
+                await waitFor(() => card('teacher-only'), 'Experimental did not offer the teacher-only module');
+                assert(
+                    card('teacher-only').querySelector('.lectio-manager-card-other-role'),
+                    'The other-role module was not marked as not for this account'
+                );
+                assert(
+                    !card('student-only').querySelector('.lectio-manager-card-other-role'),
+                    'A module for this account was marked as not for it'
+                );
+                assert(
+                    navItems().includes('audience:teacher'),
+                    `Experimental lost the audience filter: ${navItems().join(', ')}`
+                );
+                assert(/Experimental also shows/.test(note.textContent), `Note did not follow the channel: ${note.textContent}`);
+
+                document.querySelector('.lectio-manager-tab[data-primary-view="installed"]').click();
+                card('shared-settings').querySelector('.lectio-manager-settings-btn').click();
+                await waitFor(() => settingLabels().length === 3, `Experimental hid a setting: ${settingLabels().join('|')}`);
+
+                document.documentElement.dataset.testResult = 'pass';
+            } catch (error) {
+                document.documentElement.dataset.testResult = `fail: ${error.message}`;
+            }
+        });
+    </script>
+</body>
+</html>

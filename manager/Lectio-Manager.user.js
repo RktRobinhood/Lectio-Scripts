@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.32.3
+// @version      1.33.0
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules, including their settings and shared dock controls.
 // @match        https://www.lectio.dk/lectio/*
 // @noframes
@@ -92,6 +92,13 @@
             releaseChannelInfo: 'What is a release channel?',
             releaseChannelHelp: 'A release channel decides which list of modules the Manager reads. <strong>Stable</strong> offers finished modules only. <strong>Experimental</strong> also offers modules that are still being built, so they can change or break without warning.',
             unstableNote: 'Experimental also offers modules that are still being built and tested. Switching channel only changes what the Manager offers. It never installs, disables, or removes a userscript automatically.',
+            accountRoleNote: (role) => role === 'teacher'
+                ? 'This is a teacher account, so Stable shows only the modules and settings meant for teachers.'
+                : 'This is a student account, so Stable shows only the modules and settings meant for students.',
+            accountRoleNoteUnstable: (role) => role === 'teacher'
+                ? 'This is a teacher account. Experimental also shows modules and settings meant for students, for testing: they may not work in your account.'
+                : 'This is a student account. Experimental also shows modules and settings meant for teachers, for testing: they may not work in your account.',
+            otherRole: 'Not for your account',
             stable: 'Stable',
             unstable: 'Experimental',
             dock: 'Dock',
@@ -246,6 +253,13 @@
             releaseChannelInfo: 'Hvad er en udgivelseskanal?',
             releaseChannelHelp: 'En udgivelseskanal afgør, hvilken liste over moduler Manageren læser. <strong>Stabil</strong> tilbyder kun færdige moduler. <strong>Eksperimentel</strong> tilbyder også moduler, der stadig er under udvikling, og som derfor kan ændre sig eller gå i stykker uden varsel.',
             unstableNote: 'Eksperimentel tilbyder også moduler, der stadig er under udvikling og test. At skifte kanal ændrer kun, hvad Manageren tilbyder dig. Den installerer, deaktiverer eller fjerner aldrig et userscript af sig selv.',
+            accountRoleNote: (role) => role === 'teacher'
+                ? 'Dette er en lærerkonto, så Stabil viser kun de moduler og indstillinger, der er beregnet til lærere.'
+                : 'Dette er en elevkonto, så Stabil viser kun de moduler og indstillinger, der er beregnet til elever.',
+            accountRoleNoteUnstable: (role) => role === 'teacher'
+                ? 'Dette er en lærerkonto. Eksperimentel viser også moduler og indstillinger beregnet til elever, til test: de virker måske ikke i din konto.'
+                : 'Dette er en elevkonto. Eksperimentel viser også moduler og indstillinger beregnet til lærere, til test: de virker måske ikke i din konto.',
+            otherRole: 'Ikke til din konto',
             stable: 'Stabil',
             unstable: 'Eksperimentel',
             dock: 'Dock',
@@ -432,7 +446,7 @@
     // Kept in step with the @version header by scripts/check-versions.mjs. The
     // header is metadata Tampermonkey reads; this is the only copy the running
     // script can see, and it is what the self-update notice compares.
-    const MANAGER_VERSION = '1.32.3';
+    const MANAGER_VERSION = '1.33.0';
 
     const STABLE_CATALOGUE_URL =
         'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/catalogue/modules.json';
@@ -524,6 +538,9 @@
     const STORAGE_UNSTABLE_LAST_REFRESH = 'lectioManager.lastRefresh.unstable.v1';
     const STORAGE_RELEASE_CHANNEL = 'lectioManager.releaseChannel.v1';
     const STORAGE_LANGUAGE = 'lectioManager.language.v1';
+    // Which kind of Lectio account this is, per school id, as last read off a
+    // page that said so (issue #78). Remembered because not every page does.
+    const STORAGE_ACCOUNT_ROLE = 'lectioManager.accountRole.v1';
 
     const STORAGE_VIEW = 'lectioManager.view.v1';
     const STORAGE_SORT_MODE = 'lectioManager.sortMode.v1';
@@ -694,6 +711,7 @@
     const ISSUES_URL = 'https://github.com/RktRobinhood/Lectio-Scripts/issues/new/choose';
 
     const AUDIENCE_VIEW_PREFIX = 'audience:';
+    const ACCOUNT_ROLES = ['student', 'teacher'];
     const CATEGORY_VIEW_PREFIX = 'category:';
 
     const LOG = '[Lectio Manager]';
@@ -708,6 +726,8 @@
     let lastRefresh = 0;
     let unstableLastRefresh = 0;
     let releaseChannel = 'stable';
+    // 'student', 'teacher', or null when no page has said which (issue #78).
+    let accountRole = null;
     let refreshing = false;
     let refreshQueued = false;
     let elements = null;
@@ -857,6 +877,7 @@
         lastRefresh = Number(GM_getValue(STORAGE_LAST_REFRESH, 0)) || 0;
         unstableLastRefresh = Number(GM_getValue(STORAGE_UNSTABLE_LAST_REFRESH, 0)) || 0;
         releaseChannel = normalizeReleaseChannel(GM_getValue(STORAGE_RELEASE_CHANNEL, 'stable'));
+        accountRole = detectAccountRole();
         language = normalizeLanguage(GM_getValue(STORAGE_LANGUAGE, DEFAULT_LANGUAGE));
         // Published before anything is built, so a module that loads alongside
         // the Manager sees the choice on its first read rather than starting in
@@ -4818,6 +4839,7 @@
                     </div>
                     <small id="lectio-manager-channel-help" class="lectio-manager-channel-help" hidden>A release channel decides which list of modules the Manager reads. <strong>Stable</strong> offers finished modules only. <strong>Experimental</strong> also offers modules that are still being built, so they can change or break without warning.</small>
                     <small class="lectio-manager-channel-note" hidden>Experimental also offers modules that are still being built and tested. Switching channel only changes what the Manager offers. It never installs, disables, or removes a userscript automatically.</small>
+                    <small class="lectio-manager-role-note" hidden></small>
                     <details class="lectio-manager-prefs-section lectio-manager-dock-section">
                         <summary>Dock</summary>
                         <label class="lectio-manager-prefs-field">
@@ -5236,6 +5258,106 @@
         });
     }
 
+    /*
+     * ============================================================
+     * ACCOUNT ROLE (issue #78)
+     * ============================================================
+     *
+     * Lectio writes the signed-in person's own front page into
+     * <meta name="msapplication-starturl">: forside.aspx?laererid=<n> for a
+     * teacher, ?elevid=<n> for a student. That is the only signal used. Links
+     * in the page are not: a teacher's pages are full of elevid= links to
+     * students, and a student's name teachers with laererid=.
+     *
+     * A page without the tag keeps the role last read at this school, so a
+     * teacher is not shown student modules on the one page that says nothing.
+     * Unknown stays unknown, and unknown filters nothing.
+     */
+    function readAccountRoleFromPage() {
+        const content = document
+            .querySelector('meta[name="msapplication-starturl"]')
+            ?.getAttribute('content');
+
+        if (!content) {
+            return null;
+        }
+
+        try {
+            const params = new URL(content, location.origin).searchParams;
+            if (params.get('laererid')) return 'teacher';
+            if (params.get('elevid')) return 'student';
+        } catch (_) {
+            // A malformed tag says nothing.
+        }
+
+        return null;
+    }
+
+    function detectAccountRole() {
+        const school = (location.pathname.match(/^\/lectio\/(\d+)(?:\/|$)/) || [])[1] || '';
+        let stored = {};
+
+        try {
+            const raw = GM_getValue(STORAGE_ACCOUNT_ROLE, {});
+            if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+                stored = raw;
+            }
+        } catch (_) {
+            // Unreadable storage is the same as nothing remembered.
+        }
+
+        const fromPage = readAccountRoleFromPage();
+
+        if (fromPage) {
+            if (school && stored[school] !== fromPage) {
+                try {
+                    GM_setValue(STORAGE_ACCOUNT_ROLE, { ...stored, [school]: fromPage });
+                } catch (_) {
+                    // Remembering it is a convenience; this page already knows.
+                }
+            }
+
+            return fromPage;
+        }
+
+        return ACCOUNT_ROLES.includes(stored[school]) ? stored[school] : null;
+    }
+
+    /*
+     * Stable shows a known account only what is meant for it. Experimental is
+     * for testing and shows every role's modules and settings, so the owner
+     * can try a student module from a teacher account.
+     */
+    function isRoleFilterActive() {
+        return !!accountRole && releaseChannel !== 'unstable';
+    }
+
+    // An empty or missing audience means everyone, for a catalogue entry and
+    // for a settings control alike.
+    function isForRole(audience, role) {
+        if (!Array.isArray(audience)) {
+            return true;
+        }
+
+        const roles = audience.filter((entry) => ACCOUNT_ROLES.includes(entry));
+        return !roles.length || roles.includes(role);
+    }
+
+    function isForAccount(audience) {
+        return !isRoleFilterActive() || isForRole(audience, accountRole);
+    }
+
+    /*
+     * A control may carry `audience: ['teacher']` to be shown only to that
+     * kind of account. This is presentation: the value is still exported,
+     * imported and set as before, and the module stays the authority on what
+     * it does for a role. A Manager that predates the key shows every control.
+     */
+    function getVisibleSettingsControls(schema) {
+        return (Array.isArray(schema) ? schema : [])
+            .filter((control) => !control || isForAccount(control.audience));
+    }
+
     function setReleaseChannel(value) {
         const next = normalizeReleaseChannel(value);
 
@@ -5281,6 +5403,16 @@
         if (note) note.hidden = releaseChannel !== 'unstable';
 
         elements.channelPanel.classList.toggle('is-unstable', releaseChannel === 'unstable');
+
+        // Says why the list is shorter than the catalogue on Stable, and why
+        // it is not on Experimental.
+        const roleNote = elements.channelPanel.querySelector('.lectio-manager-role-note');
+        if (roleNote) {
+            roleNote.hidden = !accountRole;
+            roleNote.textContent = accountRole
+                ? t(releaseChannel === 'unstable' ? 'accountRoleNoteUnstable' : 'accountRoleNote', accountRole)
+                : '';
+        }
         elements.channelBtn.classList.toggle('is-unstable', releaseChannel === 'unstable');
         elements.channelBtn.title = releaseChannel === 'unstable'
             ? t('settingsBtnChannel', t('unstable'))
@@ -5478,7 +5610,7 @@
 
         if (currentView === 'installed') {
             filtered = getInstalledDisplayModules();
-        } else if (currentView.startsWith(AUDIENCE_VIEW_PREFIX)) {
+        } else if (currentView.startsWith(AUDIENCE_VIEW_PREFIX) && !isRoleFilterActive()) {
             const audience = currentView.slice(AUDIENCE_VIEW_PREFIX.length);
             filtered = getAvailableModules().filter((module) => !module.audience.length || module.audience.includes(audience));
         } else if (currentView.startsWith(CATEGORY_VIEW_PREFIX)) {
@@ -5500,7 +5632,7 @@
     }
 
     function getAvailableModules() {
-        return catalogue.modules.filter((module) => !isInstalled(module.id));
+        return catalogue.modules.filter((module) => !isInstalled(module.id) && isForAccount(module.audience));
     }
 
     function getInstalledDisplayModules() {
@@ -5592,12 +5724,16 @@
         topGroup.appendChild(buildNavMenuItem('all', t('allModules')));
         navMenu.appendChild(topGroup);
 
-        const audienceGroup = document.createElement('div');
-        audienceGroup.className = 'lectio-manager-nav-group';
-        audienceGroup.appendChild(buildNavGroupLabel(t('audience')));
-        audienceGroup.appendChild(buildNavMenuItem(`${AUDIENCE_VIEW_PREFIX}student`, t('student')));
-        audienceGroup.appendChild(buildNavMenuItem(`${AUDIENCE_VIEW_PREFIX}teacher`, t('teacher')));
-        navMenu.appendChild(audienceGroup);
+        // Once the account says what it is, Stable's list is already filtered
+        // to it and a Student / Teacher choice would only offer an empty view.
+        if (!isRoleFilterActive()) {
+            const audienceGroup = document.createElement('div');
+            audienceGroup.className = 'lectio-manager-nav-group';
+            audienceGroup.appendChild(buildNavGroupLabel(t('audience')));
+            audienceGroup.appendChild(buildNavMenuItem(`${AUDIENCE_VIEW_PREFIX}student`, t('student')));
+            audienceGroup.appendChild(buildNavMenuItem(`${AUDIENCE_VIEW_PREFIX}teacher`, t('teacher')));
+            navMenu.appendChild(audienceGroup);
+        }
 
         if (categories.length) {
             const categoryGroup = document.createElement('div');
@@ -5661,6 +5797,13 @@
             experimental.className = 'lectio-manager-card-experimental';
             experimental.textContent = t('experimental');
             meta.appendChild(experimental);
+        }
+
+        if (!compact && accountRole && !isForRole(module.audience, accountRole)) {
+            const otherRole = document.createElement('span');
+            otherRole.className = 'lectio-manager-card-other-role';
+            otherRole.textContent = t('otherRole');
+            meta.appendChild(otherRole);
         }
 
         if (!compact && module.audience.length) {
@@ -5755,7 +5898,7 @@
             }
 
             // This is deliberately the original v1.13.4 settings route.
-            if (live && live.settingsSchema.length) {
+            if (live && getVisibleSettingsControls(live.settingsSchema).length) {
                 const settingsBtn = document.createElement('button');
                 settingsBtn.type = 'button';
                 settingsBtn.className = 'lectio-manager-settings-btn';
@@ -5988,7 +6131,7 @@
         const advancedSections =
             findAdvancedSections(registration.settingsSchema);
 
-        for (const control of registration.settingsSchema) {
+        for (const control of getVisibleSettingsControls(registration.settingsSchema)) {
             if (
                 !control ||
                 !isNonEmptyString(control.key) ||
@@ -7309,7 +7452,8 @@
                 font-weight: 700;
             }
 
-            .lectio-manager-channel-note {
+            .lectio-manager-channel-note,
+            .lectio-manager-role-note {
                 display: block;
                 margin: 0 0 8px;
                 color: var(--lectio-theme-muted, #68767b);
@@ -7317,7 +7461,8 @@
                 line-height: 1.3;
             }
 
-            .lectio-manager-channel-note[hidden] {
+            .lectio-manager-channel-note[hidden],
+            .lectio-manager-role-note[hidden] {
                 display: none !important;
             }
 
@@ -8227,6 +8372,14 @@
                 display: flex;
                 align-items: baseline;
                 gap: 6px;
+            }
+
+            .lectio-manager-card-other-role {
+                font-weight: 600;
+                font-size: 9px;
+                color: #9a5700;
+                text-transform: uppercase;
+                letter-spacing: .04em;
             }
 
             .lectio-manager-card-audience {
