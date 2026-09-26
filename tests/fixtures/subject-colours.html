@@ -131,11 +131,21 @@
             const phase = new URLSearchParams(location.search).get('phase') || 'first';
             const weeksBack = { first: 14, second: 7, dark: 7, foreign: 7, room: 21 }[phase] ?? 7;
             const secondWeek = weeksBack !== 14;
+            // The Monday of the week weeksBack days ago, so every lesson in a
+            // phase (dayOffset 1-4, Tuesday to Friday) falls in one ISO week.
+            // Counting back from today alone split a phase across a weekend
+            // from Thursday to Saturday, and on a Saturday the room phase
+            // then counted three weeks of evidence instead of two.
             const today = new Date();
-            const base = new Date(
+            const daysBack = new Date(
                 today.getFullYear(),
                 today.getMonth(),
                 today.getDate() - weeksBack
+            );
+            const base = new Date(
+                daysBack.getFullYear(),
+                daysBack.getMonth(),
+                daysBack.getDate() - (daysBack.getDay() + 6) % 7
             );
 
             const isoDate = (offset) => {
