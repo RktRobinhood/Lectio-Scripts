@@ -866,7 +866,10 @@ test('Chairs Up reads the 15 roomed lessons off the real week and marks the last
     /*
      * The saved week is 21-25 September 2026, ISO week 39. Chairs Up keys its
      * room-week cache on that, so the cache below is written for week 39 of
-     * 2026 whichever week the test runs in.
+     * 2026 - and the page's clock is stopped on Saturday 26 September, inside
+     * that week. Chairs Up prunes every room week older than the current one
+     * before it reads any (issue #29), so from week 40 on, a real clock had
+     * the seeded cache deleted on load and nothing marked at all.
      *
      * The module is given what it would otherwise go and harvest: a fresh room
      * map naming every room on the page, and one fresh, empty week per room.
@@ -880,6 +883,12 @@ test('Chairs Up reads the 15 roomed lessons off the real week and marks the last
         page: 'skemany.html',
         path: '/lectio/223/SkemaNy.aspx',
         prelude: `
+            const FROZEN_NOW = new Date(2026, 8, 26, 12, 0, 0).getTime();
+            window.Date = class extends Date {
+                constructor(...args) { super(...(args.length ? args : [FROZEN_NOW])); }
+                static now() { return FROZEN_NOW; }
+            };
+
             localStorage.clear();
             const rooms = {
                 '223A': 'RO9000001', '133': 'RO9000002', '205': 'RO9000003', '222': 'RO9000004',
