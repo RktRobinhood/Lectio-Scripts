@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>Chairs Up drift-report fixture</title>
+    <script>
+        /* Issue #79. Chairs Up reports `lesson-bricks` drift when blocks are
+           on a timetable and none of them is a lesson it can read. It used to
+           count any `.s2skemabrik` as such a block, and Lectio renders an
+           all-day entry ("Hele dagen") as a.s2skemabrik.s2normal with no
+           s2brik - the saved real week has seven - so a week showing only
+           all-day entries was reported as Lectio having changed.
+
+           The case comes from the query string, so one file serves all four;
+           the test runs each on its own page view. There is no Manager: this
+           listens for the report event in its place. */
+        window.reports = [];
+        window.pageErrors = [];
+
+        window.addEventListener('lectio-module:report', (event) => {
+            window.reports.push(event.detail);
+        });
+
+        window.addEventListener('error', (event) => {
+            window.pageErrors.push(String(event.message));
+        });
+
+        // Nothing here reaches Lectio: a case that did find a lesson would
+        // go looking for its room.
+        window.fetch = () => Promise.reject(new Error('offline fixture'));
+    </script>
+</head>
+<body>
+    <table id="s_m_Content_Content_SkemaNy_skematabel">
+        <tr class="s2dayHeader"><th>Uge 39</th></tr>
+        <tr><td data-date="2026-09-21" id="day"></td></tr>
+    </table>
+
+    <pre id="test-result" data-test-result="pending">PENDING</pre>
+
+    <script>
+        const CASES = {
+            // Should stay silent: a quiet week, not drift.
+            'all-day': {
+                expectReport: false,
+                html: '<a class="s2skemabrik s2normal" data-tooltip="Aktivitet 1\n21/9-2026 Hele dagen">Aktivitet 1</a>'
+                    + '<a class="s2skemabrik s2normal" data-tooltip="PR-møde\n23/9-2026 Hele dagen">PR-møde</a>'
+            },
+            'decoration': {
+                expectReport: false,
+                html: '<div class="prepend-fonticon-activity s2skemabrik"></div>'
+            },
+            // Should report: a timed lesson Chairs Up can no longer match.
+            'timed-without-s2brik': {
+                expectReport: true,
+                html: '<a class="s2skemabrik s2normal" data-tooltip="21/9-2026 08:15 til 09:45\nHold: 1a Fag1\nLokale: 1.01">1a Fag1</a>'
+            },
+            // And the drift module-problem-reports pins: the tooltip itself gone.
+            'no-tooltip': {
+                expectReport: true,
+                html: '<a class="s2skemabrik s2normal"><span>1a Fag1 HL</span></a>'
+            }
+        };
+
+        window.fixtureCase = new URLSearchParams(location.search).get('case');
+        document.getElementById('day').innerHTML = CASES[window.fixtureCase]?.html || '';
+    </script>
+    <script src="/chairs-up.user.js"></script>
+    <script>
+        window.addEventListener('load', async () => {
+            const result = document.getElementById('test-result');
+
+            try {
+                const expected = CASES[window.fixtureCase];
+                if (!expected) throw new Error(`unknown case: ${window.fixtureCase}`);
+
+                // The report is sent while the file evaluates; one turn is
+                // enough, and the virtual clock makes it free.
+                await new Promise((done) => setTimeout(done, 500));
+
+                const drift = window.reports.filter((report) =>
+                    report.moduleId === 'chairs-up' && report.code === 'lesson-bricks');
+
+                if (expected.expectReport) {
+                    if (drift.length !== 1) throw new Error(`expected one lesson-bricks report, got ${drift.length}`);
+                    if (drift[0].kind !== 'drift' || drift[0].found !== 0) {
+                        throw new Error(`wrong report: ${JSON.stringify(drift[0])}`);
+                    }
+                } else if (drift.length) {
+                    throw new Error(`reported drift on a page with nothing to read: ${JSON.stringify(drift)}`);
+                }
+
+                if (window.pageErrors.length) throw new Error(window.pageErrors.join(' | '));
+
+                result.dataset.testResult = 'pass';
+                result.textContent = 'PASS';
+            } catch (error) {
+                result.dataset.testResult = 'fail';
+                result.textContent = `FAIL: ${error.message}`;
+            }
+        });
+    </script>
+</body>
+</html>

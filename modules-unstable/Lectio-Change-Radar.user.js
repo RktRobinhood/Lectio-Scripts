@@ -1,10 +1,11 @@
 // ==UserScript==
 // @name         Lectio Change Radar
 // @namespace    https://github.com/RktRobinhood/Lectio-Scripts
-// @version      0.9.8
+// @version      0.9.9
 // @description  Watches Lectio for the changes you choose to track - timetable, assignments, absence, documents - and keeps a compact recent-change HUD.
 // @author       RktRobinhood
 // @match        https://www.lectio.dk/lectio/*
+// @noframes
 // @grant        none
 // @run-at       document-idle
 // @homepageURL  https://github.com/RktRobinhood/Lectio-Scripts
@@ -16,11 +17,36 @@
 (() => {
   'use strict';
 
+  /*
+   * TOP PAGE ONLY
+   * -------------
+   * Lectio opens some dialogs - "Vælg materiale" on an activity page is the
+   * one that was reported - as another Lectio page inside an iframe, and
+   * @match covers that frame too. There the radar found no Manager, waited
+   * out MANAGER_GRACE_MS and drew a second, floating radar over the dialog,
+   * with its own background checks behind it (issue #80). It stands aside
+   * in a frame exactly as the Manager does: @noframes says so to
+   * Tampermonkey, and this says it again at runtime, before any listener,
+   * storage read, fetch or DOM work.
+   *
+   * frameElement is null on the top page, and for a frame of another origin.
+   * Anything unexpected is read as "top page", so the worst this check can
+   * do is leave the old behaviour in place - never hide the radar from the
+   * page it belongs on.
+   */
+  let hostFrame = null;
+  try {
+    hostFrame = window.frameElement;
+  } catch (_) {
+    hostFrame = null;
+  }
+  if (hostFrame) return;
+
   const MODULE = Object.freeze({
     id: 'change-radar',
     aliases: ['schedule-change-radar', 'lectio-change-radar', 'change-log'],
     name: 'Lectio Change Radar',
-    version: '0.9.8',
+    version: '0.9.9',
     channel: 'unstable'
   });
 

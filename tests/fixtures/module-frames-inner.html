@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio module frames fixture: the frame</title>
+    <script>
+        /* The page inside the frame. module-frames.html explains the test;
+           everything here only records what the modules do. */
+        window.registrations = [];
+        window.reports = [];
+        window.pageErrors = [];
+        window.storageWrites = [];
+        window.fetchCalls = 0;
+        window.scriptsLoaded = 0;
+
+        window.addEventListener('lectio-module:register', (event) => {
+            window.registrations.push(event.detail.id);
+        });
+
+        window.addEventListener('lectio-module:report', (event) => {
+            window.reports.push(event.detail);
+        });
+
+        window.addEventListener('error', (event) => {
+            window.pageErrors.push(String(event.message));
+        });
+
+        // This realm's own Storage, so the top page's writes are not counted.
+        const setItem = Storage.prototype.setItem;
+        Storage.prototype.setItem = function (key, value) {
+            window.storageWrites.push(key);
+            return setItem.call(this, key, value);
+        };
+
+        window.fetch = () => {
+            window.fetchCalls += 1;
+            return Promise.reject(new Error('offline fixture'));
+        };
+    </script>
+</head>
+<body>
+    <table id="s_m_Content_Content_SkemaNy_skematabel">
+        <tr class="s2dayHeader"><th>Uge 39</th></tr>
+        <tr>
+            <td data-date="2026-09-21">
+                <!-- A timed lesson Chairs Up cannot match: drift, if it ran. -->
+                <a class="s2skemabrik s2normal" data-tooltip="21/9-2026 08:15 til 09:45&#10;Lokale: 1.01">1a Fag1</a>
+            </td>
+        </tr>
+    </table>
+
+    <script src="/chairs-up.user.js" onload="window.scriptsLoaded += 1"></script>
+    <script src="/change-radar.user.js" onload="window.scriptsLoaded += 1"></script>
+</body>
+</html>

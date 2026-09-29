@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio module frames fixture</title>
+    <script>
+        /*
+         * TOP PAGE ONLY
+         * =============
+         *
+         * Lectio opens some dialogs - "Vælg materiale" is the one that was
+         * reported - as another Lectio page inside an iframe, and every
+         * module's @match covers that frame too. There Change Radar found no
+         * Manager, waited out its grace window and drew a second, floating
+         * radar over the dialog (issue #80), and Chairs Up's problem report
+         * from a page nobody was on is the best lead for issue #81.
+         *
+         * @noframes keeps Tampermonkey out of the frame, but a browser cannot
+         * read a userscript header, so this exercises the runtime guard that
+         * says the same thing. The top page is an activity page and runs both
+         * modules as usual - the control, without which a guard that stopped
+         * them everywhere would pass too. The frame is a timetable shaped to
+         * make each of them act at once: a lesson block Chairs Up would
+         * report as drift, and no Manager for Change Radar to dock into. It
+         * must build nothing, announce nothing, report nothing, fetch
+         * nothing and write nothing, even after the grace window.
+         */
+        window.registrations = [];
+        window.fetchCalls = 0;
+
+        window.addEventListener('lectio-module:register', (event) => {
+            window.registrations.push(event.detail.id);
+        });
+
+        window.fetch = () => {
+            window.fetchCalls += 1;
+            return Promise.resolve(new Response('<!DOCTYPE html><html><body></body></html>', {
+                status: 200, headers: { 'content-type': 'text/html' }
+            }));
+        };
+    </script>
+</head>
+<body>
+    <main id="masterContent">Lectio activity page fixture</main>
+
+    <pre id="test-result" data-test-result="pending">PENDING</pre>
+
+    <script src="/chairs-up.user.js"></script>
+    <script src="/change-radar.user.js"></script>
+    <script>
+        function assert(condition, message) {
+            if (!condition) throw new Error(message);
+        }
+
+        window.addEventListener('load', () => {
+            const result = document.getElementById('test-result');
+            const frame = document.createElement('iframe');
+            frame.id = 'iframedocchooser';
+
+            frame.addEventListener('load', async () => {
+                try {
+                    // Past Change Radar's Manager grace window (2.5 s) and the
+                    // jitter on its first check (up to 4 s). Chrome runs this
+                    // on a virtual clock, so the wait costs nothing.
+                    await new Promise((done) => setTimeout(done, 9000));
+
+                    const child = frame.contentWindow;
+                    const childDocument = frame.contentDocument;
+
+                    for (const id of ['chairs-up', 'change-radar']) {
+                        assert(window.registrations.includes(id), `${id} did not register on the top page`);
+                    }
+                    assert(document.getElementById('lectio-change-radar'),
+                        'Change Radar drew no radar on the top page');
+
+                    assert(child.scriptsLoaded === 2,
+                        `the frame ran ${child.scriptsLoaded || 0} of 2 module files`);
+                    assert(child.registrations.length === 0,
+                        `a module registered inside the frame: ${child.registrations.join(', ')}`);
+                    assert(child.reports.length === 0,
+                        `a module reported from inside the frame: ${JSON.stringify(child.reports)}`);
+                    assert(!childDocument.getElementById('lectio-change-radar'),
+                        'Change Radar drew a second radar inside the frame');
+                    assert(childDocument.querySelectorAll('style').length === 0,
+                        'a module injected styles into the frame');
+                    assert(child.fetchCalls === 0, `a module fetched ${child.fetchCalls} times from the frame`);
+                    assert(child.storageWrites.length === 0,
+                        `a module wrote storage from the frame: ${child.storageWrites.join(', ')}`);
+                    assert(child.pageErrors.length === 0, child.pageErrors.join(' | '));
+
+                    result.dataset.testResult = 'pass';
+                    result.textContent = 'PASS';
+                } catch (error) {
+                    result.dataset.testResult = 'fail';
+                    result.textContent = `FAIL: ${error.message}`;
+                }
+            }, { once: true });
+
+            frame.src = '/lectio/223/SkemaNy.aspx';
+            document.body.appendChild(frame);
+        });
+    </script>
+</body>
+</html>

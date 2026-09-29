@@ -39,4 +39,13 @@ Both tests load the Unstable copy while it exists and the Stable one after promo
 
 `tests/change-radar-teacher-todo.browser.test.js` runs it over the real saved pages; like English Mode's tests it loads the Unstable copy while it exists.
 
+**Change Radar 0.9.9** adds one fix on top: it runs on the top page only (`@noframes` plus the Manager's `window.frameElement` guard). Lectio's *Vælg materiale* dialog is another Lectio page in an iframe, and inside it the radar found no Manager and drew a second, floating radar over the dialog (issue #80).
+
+**Chairs Up 1.4.8** (Stable ships 1.4.7):
+
+- The `lesson-bricks` drift report no longer fires on a week of all-day entries only. Lectio renders an all-day entry as `a.s2skemabrik.s2normal` with no `s2brik`; the saved real week has seven of them. A report now needs an anchor Chairs Up should have read: one with a timed tooltip, or with no tooltip at all (issue #79).
+- Top page only, like Change Radar above (issues #80, #81).
+
+`tests/module-frames.browser.test.js` and `tests/chairs-up-drift.browser.test.js` cover both; they load the Unstable copies while they exist and the Stable ones after promotion.
+
 `modules.json` must never be emptied. Every shipped Manager rejects an overlay with no modules in it, keeps the overlay it cached last, and reports the failure on every refresh; a Manager older than 1.22.1 also lets that cached overlay win outright, so it would keep offering installs from the `modules-unstable/` URLs a promotion deletes. So when the last module here is promoted, the overlay keeps one entry that is an exact copy of its entry in `catalogue/modules.json`, `installUrl` included. A current Manager resolves equal versions to Stable, and an old one installs the Stable file whichever entry it picks. `node scripts/check-versions.mjs` accepts an overlay entry with no file here only when it is that exact copy, and fails an overlay with no entries at all.
