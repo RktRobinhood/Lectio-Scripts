@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Change Radar
 // @namespace    https://github.com/RktRobinhood/Lectio-Scripts
-// @version      0.9.10
+// @version      0.9.11
 // @description  Watches Lectio for the changes you choose to track - timetable, assignments, absence, documents - and keeps a compact recent-change HUD.
 // @author       RktRobinhood
 // @match        https://www.lectio.dk/lectio/*
@@ -46,7 +46,7 @@
     id: 'change-radar',
     aliases: ['schedule-change-radar', 'lectio-change-radar', 'change-log'],
     name: 'Lectio Change Radar',
-    version: '0.9.10',
+    version: '0.9.11',
     channel: 'unstable'
   });
 
@@ -109,11 +109,13 @@
   const DISPLAY_MODES = Object.freeze(['auto', 'dock', 'floating']);
   // How the teacher to-do marks an unregistered lesson, and in what colour.
   // Values, not words: the words are in SETTING_TEXT.
-  const TODO_MARK_STYLES = Object.freeze(['tag', 'icon', 'outline']);
-  const TODO_MARK_COLOURS = Object.freeze(['amber', 'accent', 'blue', 'grey']);
+  const TODO_MARK_STYLES = Object.freeze(['icon', 'tag', 'outline']);
+  const TODO_MARK_COLOURS = Object.freeze(['none', 'accent', 'custom']);
+  const HEX_COLOUR = /^#[0-9a-f]{6}$/i;
   // Bumped when a stored setting needs rewriting rather than merely
-  // re-defaulting. Schema 2 introduced displayMode: 'auto'.
-  const SETTINGS_SCHEMA = 2;
+  // re-defaulting. Schema 2 introduced displayMode: 'auto'; schema 3 moved
+  // the to-do mark's default from the tag to the icon alone.
+  const SETTINGS_SCHEMA = 3;
 
   const DEFAULT_SETTINGS = Object.freeze({
     displayMode: 'auto',
@@ -158,8 +160,9 @@
     // SETTING_AUDIENCE below. It only ever counts and links.
     teacherTodo: true,
     teacherTodoMarks: true,
-    teacherTodoMarkStyle: 'tag',
-    teacherTodoMarkColour: 'amber'
+    teacherTodoMarkStyle: 'icon',
+    teacherTodoMarkColour: 'none',
+    teacherTodoMarkCustomColour: '#b45309'
   });
 
   /*
@@ -184,7 +187,8 @@
     teacherTodo: Object.freeze(['teacher']),
     teacherTodoMarks: Object.freeze(['teacher']),
     teacherTodoMarkStyle: Object.freeze(['teacher']),
-    teacherTodoMarkColour: Object.freeze(['teacher'])
+    teacherTodoMarkColour: Object.freeze(['teacher']),
+    teacherTodoMarkCustomColour: Object.freeze(['teacher'])
   });
 
   // The sources the teacher to-do reads. It rides the same capture as the
@@ -370,8 +374,9 @@
       trackDocumentUpdates: { label: 'Document updates', help: 'Report an existing document being replaced or renamed.' },
       teacherTodo: { label: 'Show my to-do', help: 'For teachers. A small card on the front page (Forside) counting lessons still waiting for absence registration, submissions waiting for you to mark, and assignments due this week, each linking to the Lectio page with the details. It reads your absence page and assignment list alongside the other checks, at most twice an hour. It only counts and links: it never registers or marks anything for you.' },
       teacherTodoMarks: { label: 'Mark lessons missing registration', help: 'Put a mark on a lesson in the timetable while its attendance is not taken. It goes away once you have registered the lesson, and clicking it opens that lesson\'s registration page.' },
-      teacherTodoMarkStyle: { label: 'Mark style', help: 'How the mark looks. Tag spells out "Attendance" beside the icon; Icon only takes the least room; Outline also rings the whole lesson. A lesson too small for the tag gets the icon.', tag: 'Tag: icon and "Attendance"', icon: 'Icon only', outline: 'Outline the lesson' },
-      teacherTodoMarkColour: { label: 'Mark colour', help: 'Amber stands apart from lesson colours and from Chairs Up\'s red. Theme accent follows Lectio Theming.', amber: 'Amber', accent: 'Theme accent', blue: 'Blue', grey: 'Grey' }
+      teacherTodoMarkStyle: { label: 'Mark style', help: 'How the mark looks. Icon only takes the least room; Tag spells out "Attendance" beside the icon; Outline also rings the whole lesson. A lesson too small for the tag gets the icon.', icon: 'Icon only', tag: 'Tag: icon and "Attendance"', outline: 'Outline the lesson' },
+      teacherTodoMarkColour: { label: 'Mark background', help: 'None draws the icon straight onto the lesson. The icon is black or white, whichever reads against what is behind it, so it stays clear on any lesson colour and any background you pick. Theme accent follows Lectio Theming; Custom uses the colour below.', none: 'None', accent: 'Theme accent', custom: 'Custom colour' },
+      teacherTodoMarkCustomColour: { label: 'Custom colour', help: 'The mark\'s background when Mark background is set to Custom colour.' }
     },
     // i18n:da
     da: {
@@ -415,8 +420,9 @@
       trackDocumentUpdates: { label: 'Opdaterede dokumenter', help: 'Meld, når et eksisterende dokument erstattes eller omdøbes.' },
       teacherTodo: { label: 'Vis min huskeliste', help: 'For lærere. Et lille kort på forsiden, der tæller lektioner, som stadig mangler fraværsregistrering, afleveringer, der venter på at blive rettet af dig, og opgaver med frist i denne uge - hver med et link til den Lectio-side, der viser detaljerne. Den læser din fraværsside og opgaveliste sammen med de øvrige tjek, højst to gange i timen. Den tæller og linker kun: den registrerer eller retter aldrig noget for dig.' },
       teacherTodoMarks: { label: 'Markér lektioner uden registrering', help: 'Sæt et mærke på en lektion i skemaet, så længe dens fravær ikke er registreret. Det forsvinder, når du har registreret lektionen, og et klik på det åbner lektionens registreringsside.' },
-      teacherTodoMarkStyle: { label: 'Mærkets udseende', help: 'Hvordan mærket ser ud. Etiket skriver "Fravær" ved siden af ikonet; Kun ikon fylder mindst; Omrids ringer også hele lektionen ind. En lektion, der er for lille til etiketten, får ikonet.', tag: 'Etiket: ikon og "Fravær"', icon: 'Kun ikon', outline: 'Omrids om lektionen' },
-      teacherTodoMarkColour: { label: 'Mærkets farve', help: 'Rav skiller sig ud fra lektionernes farver og fra Chairs Ups røde. Temaets accent følger Lectio Theming.', amber: 'Rav', accent: 'Temaets accent', blue: 'Blå', grey: 'Grå' }
+      teacherTodoMarkStyle: { label: 'Mærkets udseende', help: 'Hvordan mærket ser ud. Kun ikon fylder mindst; Etiket skriver "Fravær" ved siden af ikonet; Omrids ringer også hele lektionen ind. En lektion, der er for lille til etiketten, får ikonet.', icon: 'Kun ikon', tag: 'Etiket: ikon og "Fravær"', outline: 'Omrids om lektionen' },
+      teacherTodoMarkColour: { label: 'Mærkets baggrund', help: 'Ingen tegner ikonet direkte på lektionen. Ikonet er sort eller hvidt - det, der kan læses mod det bagved - så det står klart på enhver lektionsfarve og enhver baggrund, du vælger. Temaets accent følger Lectio Theming; Egen farve bruger farven nedenfor.', none: 'Ingen', accent: 'Temaets accent', custom: 'Egen farve' },
+      teacherTodoMarkCustomColour: { label: 'Egen farve', help: 'Mærkets baggrund, når Mærkets baggrund er sat til Egen farve.' }
     }
     // i18n:end
   });
@@ -452,6 +458,9 @@
     const toggle = (key, defaultValue, section) => finish(makeToggleSetting(
       key, text[key].label, text[key].help, defaultValue, text.sections[section]
     ), section);
+    const colour = (key, defaultValue, section) => finish(makeColourSetting(
+      key, text[key].label, text[key].help, defaultValue, text.sections[section]
+    ), section);
 
     return [
       select('weeksAhead', 1, [0, 1, 2], 'watch'),
@@ -461,8 +470,9 @@
 
       toggle('teacherTodo', true, 'todo'),
       toggle('teacherTodoMarks', true, 'todo'),
-      select('teacherTodoMarkStyle', 'tag', TODO_MARK_STYLES, 'todo'),
-      select('teacherTodoMarkColour', 'amber', TODO_MARK_COLOURS, 'todo'),
+      select('teacherTodoMarkStyle', 'icon', TODO_MARK_STYLES, 'todo'),
+      select('teacherTodoMarkColour', 'none', TODO_MARK_COLOURS, 'todo'),
+      colour('teacherTodoMarkCustomColour', DEFAULT_SETTINGS.teacherTodoMarkCustomColour, 'todo'),
 
       select('pollMinutes', 10, [5, 10, 15, 30], 'alerts'),
       select('urgentHours', 24, [6, 12, 24, 48], 'alerts'),
@@ -683,6 +693,22 @@
       control: 'toggle',
       kind: 'toggle',
       inputType: 'checkbox',
+      label,
+      description,
+      default: defaultValue,
+      defaultValue
+    };
+  }
+
+  // The Manager's native colour input; it reports back '#rrggbb'.
+  function makeColourSetting(key, label, description, defaultValue, section) {
+    return {
+      id: key,
+      key,
+      section,
+      type: 'color',
+      control: 'color',
+      kind: 'color',
       label,
       description,
       default: defaultValue,
@@ -2934,18 +2960,18 @@
       #${UI.todoCard} .lcr-todo-line:focus-visible .lcr-todo-text { text-decoration: underline; }
 
       /*
-       * The timetable mark: filled, with a white ring so it reads on any
-       * lesson colour. Amber by default - a semantic "still to do" colour,
-       * kept apart from Chairs Up's red and exempt from theming like it
-       * (ADR-0006); Theme accent is the one choice that follows the seam.
+       * The timetable mark. By default it has no background at all: the icon
+       * sits straight on the lesson. Theme accent follows the ADR-0006 seam;
+       * Custom sets --lcr-mark inline from the teacher's colour. Either way
+       * the ink is black or white, picked by markInk() against whatever is
+       * behind it - the mark's own fill, or the lesson's colour.
        */
-      .lcr-mark-amber { --lcr-mark: #b45309; }
       .lcr-mark-accent { --lcr-mark: var(--lectio-theme-accent, #0f6f6f); }
-      .lcr-mark-blue { --lcr-mark: #1d4ed8; }
-      .lcr-mark-grey { --lcr-mark: #52606d; }
+      .lcr-ink-light { --lcr-ink: #ffffff; }
+      .lcr-ink-dark { --lcr-ink: #000000; }
       .lcr-todo-anchor { position: relative; }
       .lcr-todo-outline {
-        outline: 2px dashed var(--lcr-mark, #b45309) !important;
+        outline: 2px dashed var(--lcr-mark, var(--lcr-ink, #000000)) !important;
         outline-offset: -2px;
       }
       .lcr-todo-mark {
@@ -2959,9 +2985,8 @@
         gap: 3px;
         box-sizing: border-box;
         height: 18px;
-        background: var(--lcr-mark, #b45309) !important;
-        color: #ffffff !important;
-        box-shadow: 0 0 0 1.5px #ffffff, 0 1px 3px rgba(0, 0, 0, .3);
+        background: var(--lcr-mark, transparent) !important;
+        color: var(--lcr-ink, #000000) !important;
         font: 700 10px/1 Roboto, Arial, sans-serif;
         letter-spacing: .01em;
         white-space: nowrap;
@@ -2972,8 +2997,11 @@
       .lcr-todo-mark-tag { padding: 0 6px 0 4px; border-radius: 9px; }
       .lcr-todo-mark svg { width: 12px; height: 12px; flex: none; display: block; }
       .lcr-todo-mark-icon svg { width: 11px; height: 11px; }
+      .lcr-todo-mark-filled { box-shadow: 0 1px 3px rgba(0, 0, 0, .3); }
+      /* With no disc around it, the icon can use the whole mark. */
+      .lcr-todo-mark-icon:not(.lcr-todo-mark-filled) svg { width: 15px; height: 15px; }
       .lcr-todo-mark:hover, .lcr-todo-mark:focus-visible {
-        box-shadow: 0 0 0 1.5px #ffffff, 0 0 0 3.5px var(--lcr-mark, #b45309);
+        box-shadow: 0 0 0 1.5px var(--lcr-ink, #000000);
         outline: none;
       }
 
@@ -3253,12 +3281,22 @@
     const language = radarLanguage();
     const marks = Boolean(summary?.absence) && settingOn('teacherTodoMarks') &&
       !runtime.absenceRechecking && !TODO_MARK_SKIP_PATH.test(location.pathname);
-    const look = [runtime.settings.teacherTodoMarkStyle, runtime.settings.teacherTodoMarkColour];
+    const look = [
+      runtime.settings.teacherTodoMarkStyle,
+      runtime.settings.teacherTodoMarkColour,
+      runtime.settings.teacherTodoMarkCustomColour
+    ];
     const drawn = summary ? JSON.stringify([language, marks, look, summary]) : '';
 
     const card = document.getElementById(UI.todoCard);
     const cardWanted = Boolean(summary) && isForside();
-    if (drawn === runtime.todoDrawn && Boolean(card) === cardWanted) return;
+    if (drawn === runtime.todoDrawn && Boolean(card) === cardWanted) {
+      // Nothing to redraw, but the lesson under a mark may have been painted
+      // since - by Subject Colours, Theming or Lectio Farver - so its ink is
+      // checked again. A handful of marks, one style read each.
+      refreshMarkInk();
+      return;
+    }
     runtime.todoDrawn = drawn;
 
     card?.remove();
@@ -3361,18 +3399,71 @@
   }
 
   function clearTodoMarks() {
-    const added = ['lcr-todo-anchor', 'lcr-todo-outline', ...TODO_MARK_COLOURS.map((colour) => `lcr-mark-${colour}`)];
+    const added = ['lcr-todo-anchor', 'lcr-todo-outline', 'lcr-mark-accent', 'lcr-ink-light', 'lcr-ink-dark'];
     for (const mark of document.querySelectorAll('.lcr-todo-mark')) mark.remove();
     for (const block of document.querySelectorAll('.lcr-todo-anchor, .lcr-todo-outline')) {
       block.classList.remove(...added);
+      // Only the property this module wrote; the block's own inline colour
+      // is whoever painted it (ADR-0011).
+      block.style.removeProperty('--lcr-mark');
     }
+  }
+
+  /*
+   * Black or white ink for a mark, whichever contrasts more with what sits
+   * behind it: the mark's own fill when it has one, else the lesson block's
+   * colour, else whatever that block sits on. A colour less than half opaque
+   * is looked through. 0.179 is the relative luminance at which black and
+   * white give the same WCAG contrast, so either side of it the pick is the
+   * better of the two - never under 4.5:1.
+   */
+  function markInk(element) {
+    for (let node = element; node && node.nodeType === 1; node = node.parentElement) {
+      const rgba = parseCssColour(getComputedStyle(node).backgroundColor);
+      if (rgba && rgba[3] >= 0.5) return relativeLuminance(rgba) > 0.179 ? 'dark' : 'light';
+    }
+    return 'dark';
+  }
+
+  function parseCssColour(value) {
+    const match = String(value || '').match(/^rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)(?:\s*[,/]\s*([\d.]+%?))?\s*\)$/i);
+    if (!match) return null;
+    const alpha = match[4] === undefined ? 1
+      : match[4].endsWith('%') ? parseFloat(match[4]) / 100 : parseFloat(match[4]);
+    return [Number(match[1]), Number(match[2]), Number(match[3]), alpha];
+  }
+
+  function relativeLuminance([r, g, b]) {
+    const channel = (value) => {
+      const c = value / 255;
+      return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    };
+    return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+  }
+
+  // The ink goes on the mark, and on an outlined block too: with no mark
+  // colour, the dashed ring is drawn in the same ink as the icon.
+  function applyMarkInk(mark) {
+    const ink = markInk(mark);
+    const targets = [mark];
+    const block = mark.parentElement;
+    if (block?.classList.contains('lcr-todo-outline')) targets.push(block);
+    for (const target of targets) {
+      if (target.classList.contains(`lcr-ink-${ink}`)) continue;
+      target.classList.remove('lcr-ink-light', 'lcr-ink-dark');
+      target.classList.add(`lcr-ink-${ink}`);
+    }
+  }
+
+  function refreshMarkInk() {
+    for (const mark of document.querySelectorAll('.lcr-todo-mark')) applyMarkInk(mark);
   }
 
   /*
    * A corner mark on each lesson block of this page whose absence is still
    * waiting for registration, linking to that lesson's registration page -
    * where the teacher registers it themselves, in Lectio's own form. It
-   * says what it is: a roll-call icon and, by default, the word itself.
+   * says what it is: a roll-call icon, and the word too in the tag style.
    * Matched on the block's activity id, and only on real lesson blocks
    * ([data-tooltip], AGENTS.md). Bottom right, inside the block: Chairs Up
    * owns the top-right corner, and the block's colour belongs to whoever
@@ -3383,7 +3474,12 @@
     if (!byActivity.size) return;
 
     const style = runtime.settings.teacherTodoMarkStyle;
-    const colour = `lcr-mark-${runtime.settings.teacherTodoMarkColour}`;
+    const fill = runtime.settings.teacherTodoMarkColour;
+    const custom = fill === 'custom' ? runtime.settings.teacherTodoMarkCustomColour : '';
+    const paint = (element) => {
+      if (fill === 'accent') element.classList.add('lcr-mark-accent');
+      if (custom) element.style.setProperty('--lcr-mark', custom);
+    };
 
     for (const block of document.querySelectorAll('.s2skemabrik[data-tooltip]')) {
       const url = byActivity.get(getActivityId(block));
@@ -3392,7 +3488,10 @@
       if (getComputedStyle(block).position === 'static') block.classList.add('lcr-todo-anchor');
       // An outline, not a border or a background: the block's frame is
       // Theming's and its colour whoever painted it (ADR-0011).
-      if (style === 'outline') block.classList.add('lcr-todo-outline', colour);
+      if (style === 'outline') {
+        block.classList.add('lcr-todo-outline');
+        paint(block);
+      }
 
       // A short lesson has no room for the word without covering its own
       // text, so it gets the icon whatever the style.
@@ -3400,7 +3499,9 @@
       const tag = style === 'tag' && roomy;
 
       const mark = document.createElement('a');
-      mark.className = `lcr-todo-mark ${colour} ${tag ? 'lcr-todo-mark-tag' : 'lcr-todo-mark-icon'}`;
+      mark.className = `lcr-todo-mark ${tag ? 'lcr-todo-mark-tag' : 'lcr-todo-mark-icon'}`;
+      if (fill !== 'none') mark.classList.add('lcr-todo-mark-filled');
+      paint(mark);
       mark.href = url;
       mark.title = text.markLabel;
       mark.setAttribute('aria-label', text.markLabel);
@@ -3415,6 +3516,7 @@
       // here keeps the block's handlers from also acting on the same click.
       mark.addEventListener('click', (event) => event.stopPropagation());
       block.appendChild(mark);
+      applyMarkInk(mark);
     }
   }
 
@@ -3958,10 +4060,22 @@
       // A stored value always beats a changed default, and 0.3.0 stored its own
       // default of 'floating'. Without rewriting it once, "prefer the dock"
       // would only ever reach installs that had never saved a setting.
-      if ((Number(parsed?.schema) || 0) < SETTINGS_SCHEMA && settings.displayMode === 'floating') {
+      const schema = Number(parsed?.schema) || 0;
+      let rewritten = false;
+      if (schema < 2 && settings.displayMode === 'floating') {
         settings.displayMode = 'auto';
-        saveSettings(settings);
+        rewritten = true;
       }
+      // 0.9.10 shipped the tag as the default and stored it with every other
+      // setting on the first save, so a stored 'tag' from then is the old
+      // default, not a choice. Its amber, blue and grey are gone and fall
+      // back to 'none' on their own.
+      if (schema < 3 && settings.teacherTodoMarkStyle === 'tag') {
+        settings.teacherTodoMarkStyle = 'icon';
+        rewritten = true;
+      }
+      // What is saved carries schema 3, so a tag chosen from here on stays.
+      if (rewritten) saveSettings(settings);
 
       return settings;
     } catch (_) {
@@ -3979,6 +4093,9 @@
     }
     if (TODO_MARK_COLOURS.includes(values?.teacherTodoMarkColour)) {
       out.teacherTodoMarkColour = values.teacherTodoMarkColour;
+    }
+    if (HEX_COLOUR.test(String(values?.teacherTodoMarkCustomColour || ''))) {
+      out.teacherTodoMarkCustomColour = values.teacherTodoMarkCustomColour.toLowerCase();
     }
     const allowed = {
       pollMinutes: [5, 10, 15, 30],

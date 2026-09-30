@@ -40,15 +40,15 @@
         "teacher"
       ],
       "status": "unstable",
-      "version": "0.9.10",
-      "changelog": "The attendance mark on the timetable now goes away once you have registered the lesson, and says what it is: an amber Attendance tag. Pick its style (tag, icon, outline) and colour under the to-do settings.",
+      "version": "0.9.11",
+      "changelog": "The attendance mark is now just the icon, drawn straight on the lesson in black or white - whichever stands out against the lesson's colour. Give it a background under the to-do settings: none, your theme's accent, or any colour you pick.",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Change-Radar.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
       "i18n": {
         "da": {
           "name": "Lectio Ændringsradar",
           "description": "Lectio-vagt med en kompakt radar-HUD i temaets farver. Du vælger selv, hvad den holder øje med - aflysninger, flytninger, lokaler, lærere og lektier i skemaet, plus valgfri overvågning af opgaver, fravær og dokumenter - plus kommende opgavefrister, der meldes, når de kommer inden for det valgte tidsrum - med hastestatus, styr på usete ændringer og en roterende lokal ændringslog.",
-          "changelog": "Fraværsmærket i skemaet forsvinder nu, når du har registreret lektionen, og siger, hvad det er: en ravfarvet Fravær-etiket. Vælg udseende (etiket, ikon, omrids) og farve under huskelisten."
+          "changelog": "Fraværsmærket er nu kun ikonet, tegnet direkte på lektionen i sort eller hvidt - det, der står tydeligst mod lektionens farve. Giv det en baggrund under huskelisten: ingen, temaets accent eller en hvilken som helst farve, du vælger."
         }
       }
     },
