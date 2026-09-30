@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Change Radar
 // @namespace    https://github.com/RktRobinhood/Lectio-Scripts
-// @version      0.9.11
+// @version      0.9.12
 // @description  Watches Lectio for the changes you choose to track - timetable, assignments, absence, documents - and keeps a compact recent-change HUD.
 // @author       RktRobinhood
 // @match        https://www.lectio.dk/lectio/*
@@ -46,7 +46,7 @@
     id: 'change-radar',
     aliases: ['schedule-change-radar', 'lectio-change-radar', 'change-log'],
     name: 'Lectio Change Radar',
-    version: '0.9.11',
+    version: '0.9.12',
     channel: 'unstable'
   });
 
@@ -593,6 +593,8 @@
     // of renderHud() redraw the card and the timetable marks only when what
     // they say has changed. Page-view state like the rest of this object.
     todoDrawn: '',
+    // A 1x1 canvas context that reads any CSS colour for the mark's ink.
+    colourProbe: null,
 
     // True while this page view re-reads the absence list after a visit to a
     // registration page. The marks wait for it, so a lesson just registered
@@ -3412,25 +3414,65 @@
   /*
    * Black or white ink for a mark, whichever contrasts more with what sits
    * behind it: the mark's own fill when it has one, else the lesson block's
-   * colour, else whatever that block sits on. A colour less than half opaque
-   * is looked through. 0.179 is the relative luminance at which black and
-   * white give the same WCAG contrast, so either side of it the pick is the
-   * better of the two - never under 4.5:1.
+   * colour, else whatever that block sits on. A see-through layer - Theming
+   * paints its surfaces at 68% - is blended over what is under it, down to
+   * the first opaque one, or to white, Lectio's page, if none is. 0.179 is
+   * the relative luminance at which black and white give the same WCAG
+   * contrast, so either side of it the pick is the better of the two - never
+   * under 4.5:1.
    */
   function markInk(element) {
+    const layers = [];
     for (let node = element; node && node.nodeType === 1; node = node.parentElement) {
-      const rgba = parseCssColour(getComputedStyle(node).backgroundColor);
-      if (rgba && rgba[3] >= 0.5) return relativeLuminance(rgba) > 0.179 ? 'dark' : 'light';
+      const rgba = cssColourToRgba(getComputedStyle(node).backgroundColor);
+      if (!rgba || rgba[3] === 0) continue;
+      layers.push(rgba);
+      if (rgba[3] >= 0.99) break;
     }
-    return 'dark';
+
+    let seen = [255, 255, 255];
+    for (const [r, g, b, a] of layers.reverse()) {
+      seen = [r * a + seen[0] * (1 - a), g * a + seen[1] * (1 - a), b * a + seen[2] * (1 - a)];
+    }
+    return relativeLuminance(seen) > 0.179 ? 'dark' : 'light';
   }
 
-  function parseCssColour(value) {
-    const match = String(value || '').match(/^rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)(?:\s*[,/]\s*([\d.]+%?))?\s*\)$/i);
-    if (!match) return null;
-    const alpha = match[4] === undefined ? 1
-      : match[4].endsWith('%') ? parseFloat(match[4]) / 100 : parseFloat(match[4]);
-    return [Number(match[1]), Number(match[2]), Number(match[3]), alpha];
+  /*
+   * Any colour the browser computes, as sRGB 0-255 and an alpha of 0-1, or
+   * null if it cannot be read. A computed colour is not always rgb():
+   * Lectio's own stylesheet is written in oklch(), and color-mix() - which
+   * Theming uses for every lesson surface - computes to color(srgb ...) or
+   * oklab(). 0.9.11 read rgb() alone, so on a real, themed timetable it saw
+   * no colour anywhere and drew black ink on a navy fill. A 1x1 canvas
+   * parses whatever CSS does and hands back the pixel.
+   */
+  function cssColourToRgba(value) {
+    const text = String(value || '').trim();
+    if (!text || text === 'transparent') return null;
+
+    try {
+      if (!runtime.colourProbe) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 1;
+        canvas.height = 1;
+        runtime.colourProbe = canvas.getContext('2d', { willReadFrequently: true });
+      }
+      const probe = runtime.colourProbe;
+      if (!probe) return null;
+
+      // A value the canvas cannot parse leaves fillStyle as it was.
+      const sentinel = '#010203';
+      probe.fillStyle = sentinel;
+      probe.fillStyle = text;
+      if (probe.fillStyle === sentinel) return null;
+
+      probe.clearRect(0, 0, 1, 1);
+      probe.fillRect(0, 0, 1, 1);
+      const [r, g, b, a] = probe.getImageData(0, 0, 1, 1).data;
+      return [r, g, b, a / 255];
+    } catch (_) {
+      return null;
+    }
   }
 
   function relativeLuminance([r, g, b]) {

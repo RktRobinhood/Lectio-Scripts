@@ -576,8 +576,9 @@ test('leaving a registration page asks the next page view to re-read the absence
 // The look, read off the one marked lesson: which classes the mark and its
 // block carry, the word on the mark, whether the icon is there, and the
 // colours the browser actually resolved. `lesson` repaints the marked block,
-// the way Subject Colours or Lectio Farver would, to test the ink against it.
-async function markLook(settings, expect, lesson = '') {
+// the way Subject Colours or Lectio Farver would, to test the ink against it;
+// `pageCss` is any further stylesheet, such as a theme's accent.
+async function markLook(settings, expect, lesson = '', pageCss = '') {
     return runAgainstPage({
         page: 'skemany.html',
         path: '/lectio/223/SkemaNy.aspx',
@@ -587,7 +588,8 @@ async function markLook(settings, expect, lesson = '') {
             // Room for the tag, whatever size the headless window lays out.
             const roomy = document.createElement('style');
             roomy.textContent = '[data-brikid="ABS70000025"] { min-width: 140px !important; min-height: 50px !important;' +
-                ${JSON.stringify(lesson ? ` background: ${lesson} !important;` : '')} + ' }';
+                ${JSON.stringify(lesson ? ` background: ${lesson} !important;` : '')} + ' }' +
+                ${JSON.stringify(pageCss)};
             document.head.appendChild(roomy);
             window.__expect = (look) => settle(() => checked() && document.querySelector('.lcr-todo-mark'), () => {
                 const mark = document.querySelector('.lcr-todo-mark');
@@ -671,6 +673,39 @@ test('the outline style rings the lesson in the theme accent, and the icon reads
                 'mark and ring are not the accent: ' + look.fill + ' / ' + look.ring);
             check(look.ink === '${WHITE}', 'the icon on the dark accent is ' + look.ink);
         });`, '#fde68a');
+
+    assert.equal(result, 'pass', detail || result || 'no result reported');
+});
+
+// Real timetables are not written in hex. Lectio's own stylesheet uses
+// oklch(), and Theming mixes every lesson surface with color-mix(), which
+// computes to color(srgb ...) - 0.9.11 read rgb() alone, saw no colour at all
+// and drew black ink on a navy fill.
+test('the ink reads an oklch() lesson colour, as Lectio writes them', async () => {
+    const { result, detail } = await markLook({}, `window.__expect((look) => {
+            check(look.ink === '${WHITE}', 'the icon on a dark oklch() lesson is ' + look.ink);
+        });`, 'oklch(0.3 0.08 260)');
+
+    assert.equal(result, 'pass', detail || result || 'no result reported');
+});
+
+test('a see-through lesson surface is blended with what is under it before the ink is picked', async () => {
+    // A dark colour at 30% over the white page reads light: black ink. Taken
+    // at face value it is dark, which is the wrong answer.
+    const { result, detail } = await markLook({}, `window.__expect((look) => {
+            check(look.ink === '${BLACK}', 'the icon on a pale see-through lesson is ' + look.ink);
+        });`, 'color-mix(in srgb, #1e293b 30%, transparent)');
+
+    assert.equal(result, 'pass', detail || result || 'no result reported');
+});
+
+test('a navy theme accent gets white ink on a themed, pale lesson', async () => {
+    const { result, detail } = await markLook({
+        teacherTodoMarkColour: 'accent'
+    }, `window.__expect((look) => {
+            check(look.mark.includes('lcr-todo-mark-filled'), 'the mark has no fill: ' + look.mark.join(' '));
+            check(look.ink === '${WHITE}', 'the icon on a navy accent is ' + look.ink + ' (fill ' + look.fill + ')');
+        });`, 'color-mix(in srgb, #f0abfc 68%, transparent)', ':root { --lectio-theme-accent: oklch(0.32 0.09 262); }');
 
     assert.equal(result, 'pass', detail || result || 'no result reported');
 });
