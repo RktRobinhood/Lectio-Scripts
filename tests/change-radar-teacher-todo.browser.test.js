@@ -620,8 +620,7 @@ test('by default the mark is the icon alone, with no background, and says what i
     const { result, detail } = await markLook({}, `window.__expect((look) => {
             check(look.mark.includes('lcr-todo-mark-icon') && look.icon && !look.word,
                 'not the icon alone: ' + look.mark.join(' ') + ' ' + JSON.stringify(look.word));
-            check(!look.mark.includes('lcr-todo-mark-filled') && look.fill === '${NO_FILL}',
-                'the default mark has a background: ' + look.fill);
+            check(look.fill === '${NO_FILL}', 'the default mark has a background: ' + look.fill);
             check(/registreret/.test(look.label), 'the mark\\'s label does not say what it is: ' + look.label);
             check(!look.block.includes('lcr-todo-outline'), 'the default outlined the lesson');
         });`);
@@ -629,7 +628,7 @@ test('by default the mark is the icon alone, with no background, and says what i
     assert.equal(result, 'pass', detail || result || 'no result reported');
 });
 
-test('with no background the icon is white on a dark lesson', async () => {
+test('by default the icon is white on a dark lesson', async () => {
     const { result, detail } = await markLook({}, `window.__expect((look) => {
             check(look.ink === '${WHITE}', 'the icon on a dark lesson is ' + look.ink);
         });`, '#1e293b');
@@ -637,41 +636,9 @@ test('with no background the icon is white on a dark lesson', async () => {
     assert.equal(result, 'pass', detail || result || 'no result reported');
 });
 
-test('with no background the icon is black on a light lesson', async () => {
+test('by default the icon is black on a light lesson', async () => {
     const { result, detail } = await markLook({}, `window.__expect((look) => {
             check(look.ink === '${BLACK}', 'the icon on a light lesson is ' + look.ink);
-        });`, '#fde68a');
-
-    assert.equal(result, 'pass', detail || result || 'no result reported');
-});
-
-test('a custom colour fills the tag, and its ink is read against that colour, not the lesson', async () => {
-    const { result, detail } = await markLook({
-        ...SCHEMA_3,
-        teacherTodoMarkStyle: 'tag',
-        teacherTodoMarkColour: 'custom',
-        teacherTodoMarkCustomColour: '#facc15'
-    }, `window.__expect((look) => {
-            check(look.mark.includes('lcr-todo-mark-tag') && look.word === 'Fravær',
-                'not the tag: ' + look.mark.join(' ') + ' ' + JSON.stringify(look.word));
-            check(look.fill === 'rgb(250, 204, 21)', 'the tag is not the chosen colour: ' + look.fill);
-            check(look.ink === '${BLACK}', 'a light fill on a dark lesson got ' + look.ink + ' ink');
-        });`, '#1e293b');
-
-    assert.equal(result, 'pass', detail || result || 'no result reported');
-});
-
-test('the outline style rings the lesson in the theme accent, and the icon reads on it', async () => {
-    const { result, detail } = await markLook({
-        teacherTodoMarkStyle: 'outline',
-        teacherTodoMarkColour: 'accent'
-    }, `window.__expect((look) => {
-            check(look.mark.includes('lcr-todo-mark-icon') && look.icon && !look.word,
-                'the outline style should carry the icon alone: ' + look.mark.join(' ') + ' ' + look.word);
-            check(look.block.includes('lcr-todo-outline'), 'the lesson is not ringed: ' + look.block.join(' '));
-            check(look.fill === 'rgb(15, 111, 111)' && look.ring === 'rgb(15, 111, 111)',
-                'mark and ring are not the accent: ' + look.fill + ' / ' + look.ring);
-            check(look.ink === '${WHITE}', 'the icon on the dark accent is ' + look.ink);
         });`, '#fde68a');
 
     assert.equal(result, 'pass', detail || result || 'no result reported');
@@ -680,7 +647,7 @@ test('the outline style rings the lesson in the theme accent, and the icon reads
 // Real timetables are not written in hex. Lectio's own stylesheet uses
 // oklch(), and Theming mixes every lesson surface with color-mix(), which
 // computes to color(srgb ...) - 0.9.11 read rgb() alone, saw no colour at all
-// and drew black ink on a navy fill.
+// and fell back to black.
 test('the ink reads an oklch() lesson colour, as Lectio writes them', async () => {
     const { result, detail } = await markLook({}, `window.__expect((look) => {
             check(look.ink === '${WHITE}', 'the icon on a dark oklch() lesson is ' + look.ink);
@@ -699,13 +666,45 @@ test('a see-through lesson surface is blended with what is under it before the i
     assert.equal(result, 'pass', detail || result || 'no result reported');
 });
 
-test('a navy theme accent gets white ink on a themed, pale lesson', async () => {
+test('a custom colour colours the icon and the word of the tag, never a background', async () => {
     const { result, detail } = await markLook({
+        ...SCHEMA_3,
+        teacherTodoMarkStyle: 'tag',
+        teacherTodoMarkColour: 'custom',
+        teacherTodoMarkCustomColour: '#facc15'
+    }, `window.__expect((look) => {
+            check(look.mark.includes('lcr-todo-mark-tag') && look.word === 'Fravær',
+                'not the tag: ' + look.mark.join(' ') + ' ' + JSON.stringify(look.word));
+            check(look.fill === '${NO_FILL}', 'the tag has a background: ' + look.fill);
+            check(look.ink === 'rgb(250, 204, 21)', 'the icon is not the chosen colour: ' + look.ink);
+        });`, '#1e293b');
+
+    assert.equal(result, 'pass', detail || result || 'no result reported');
+});
+
+test('the theme accent colours the icon and the outline ring, as Theming sets it', async () => {
+    const { result, detail } = await markLook({
+        teacherTodoMarkStyle: 'outline',
         teacherTodoMarkColour: 'accent'
     }, `window.__expect((look) => {
-            check(look.mark.includes('lcr-todo-mark-filled'), 'the mark has no fill: ' + look.mark.join(' '));
-            check(look.ink === '${WHITE}', 'the icon on a navy accent is ' + look.ink + ' (fill ' + look.fill + ')');
+            check(look.mark.includes('lcr-todo-mark-icon') && look.icon && !look.word,
+                'the outline style should carry the icon alone: ' + look.mark.join(' ') + ' ' + look.word);
+            check(look.block.includes('lcr-todo-outline'), 'the lesson is not ringed: ' + look.block.join(' '));
+            check(look.fill === '${NO_FILL}', 'the mark has a background: ' + look.fill);
+            check(look.ink === 'oklch(0.32 0.09 262)' && look.ring === 'oklch(0.32 0.09 262)',
+                'icon and ring are not the accent: ' + look.ink + ' / ' + look.ring);
         });`, 'color-mix(in srgb, #f0abfc 68%, transparent)', ':root { --lectio-theme-accent: oklch(0.32 0.09 262); }');
+
+    assert.equal(result, 'pass', detail || result || 'no result reported');
+});
+
+test('with no colour picked, the outline ring takes the icon\'s black or white', async () => {
+    const { result, detail } = await markLook({
+        teacherTodoMarkStyle: 'outline'
+    }, `window.__expect((look) => {
+            check(look.ink === '${WHITE}' && look.ring === '${WHITE}',
+                'icon and ring on a dark lesson are ' + look.ink + ' / ' + look.ring);
+        });`, '#1e293b');
 
     assert.equal(result, 'pass', detail || result || 'no result reported');
 });
@@ -718,7 +717,20 @@ test("0.9.10's stored default, the amber tag, becomes the plain icon", async () 
             check(look.mark.includes('lcr-todo-mark-icon') && !look.word,
                 'the old default tag survived: ' + look.mark.join(' ') + ' ' + JSON.stringify(look.word));
             check(look.fill === '${NO_FILL}', 'the old amber survived: ' + look.fill);
+            check(look.ink === '${BLACK}', 'the icon did not go back to automatic: ' + look.ink);
         });`);
+
+    assert.equal(result, 'pass', detail || result || 'no result reported');
+});
+
+test("0.9.11's stored 'none' reads as automatic black or white", async () => {
+    const { result, detail } = await markLook({
+        ...SCHEMA_3,
+        teacherTodoMarkColour: 'none'
+    }, `window.__expect((look) => {
+            check(look.fill === '${NO_FILL}' && look.ink === '${WHITE}',
+                'a stored none on a dark lesson drew ' + look.ink + ' on ' + look.fill);
+        });`, '#1e293b');
 
     assert.equal(result, 'pass', detail || result || 'no result reported');
 });
