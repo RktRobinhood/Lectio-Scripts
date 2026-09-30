@@ -361,8 +361,9 @@ test("on a teacher's timetable the unregistered lesson is marked, and the studen
                 const schema = window.__schemas[window.__schemas.length - 1] || [];
                 check(schema.length > 0 && schema.every((control) => control.section), 'a control has no section');
                 const audience = (key) => ((schema.find((control) => control.key === key) || {}).audience || []).join(',');
-                check(audience('teacherTodo') === 'teacher' && audience('teacherTodoMarks') === 'teacher',
-                    'the to-do controls are not tagged for teachers');
+                for (const key of ['teacherTodo', 'teacherTodoMarks', 'teacherTodoMarkStyle', 'teacherTodoMarkColour']) {
+                    check(audience(key) === 'teacher', key + ' is not tagged for teachers: ' + audience(key));
+                }
                 for (const key of ['trackAbsence', 'trackAbsenceRegistrations', 'trackAbsencePercent', 'trackAssignmentStatus']) {
                     check(audience(key) === 'student', key + ' is not tagged for students: ' + audience(key));
                 }
@@ -400,6 +401,231 @@ test('a student account never runs the teacher to-do, whatever is stored for it'
             });
         `
     });
+
+    assert.equal(result, 'pass', detail || result || 'no result reported');
+});
+
+// ---------------------------------------------------------------------------
+// The mark follows the registration (0.9.10). Before it, a lesson registered
+// since the last read kept its mark for up to half an hour, and registering
+// the last lessons on the list kept every mark for good: an emptied list was
+// taken for a parser gone blind, and the old one was kept.
+// ---------------------------------------------------------------------------
+
+// The saved absence page with lessons registered: their rows are gone from
+// Manglende registrering, and the island and its header row stay.
+function withoutRegistrations(html, keep = () => false) {
+    return html.replace(/<tr>[\s\S]*?<\/tr>/g, (row) =>
+        /ActivityAbsenceRegistration\.aspx/.test(row) && !keep(row) ? '' : row);
+}
+
+// Epoch milliseconds for a local time on the page's fixed day. Node and the
+// Chrome it launches share the machine's time zone.
+const at = (hours, minutes) => new Date(2026, 8, 23, hours, minutes, 0).getTime();
+
+function seedWithAbsence(ids, capturedAt, extra = {}) {
+    const records = {};
+    for (const id of ids) {
+        records[`ABSENCE${id}`] = {
+            id: `ABSENCE${id}`,
+            type: 'registration',
+            title: 'Lesson',
+            activity: `ABS${id}`,
+            dateIso: '2026-09-23',
+            url: `/lectio/223/ActivityAbsenceRegistration.aspx?id=${id}&prevurl=subnav%2ffravaerlaerer.aspx`
+        };
+    }
+    return {
+        version: 1, initializedAt: 1, checkedAt: capturedAt, history: [],
+        snapshot: {
+            capturedAt, rangeStart: '', rangeEnd: '', events: {},
+            sources: { absence: { capturedAt, records, meta: { island: true, listSeen: true } } }
+        },
+        ...extra
+    };
+}
+
+const TODO_ONLY = {
+    pollMinutes: 15, weeksAhead: 0,
+    trackAssignments: false, trackAbsence: false, trackDocuments: false,
+    teacherTodo: true, teacherTodoMarks: true
+};
+
+const absenceOf = `(state) => (state && state.snapshot && state.snapshot.sources && state.snapshot.sources.absence) || {}`;
+
+test('a lesson registered since the last read loses its mark on the next page view, and never flashes it first', async () => {
+    // Read five minutes ago - well inside the half-hour cadence - with
+    // ABS70000025 still on it, and a registration page left two minutes ago.
+    const seedState = seedWithAbsence(['70000025', '70000182'], at(9, 55), { absenceRecheckAfter: at(9, 58) });
+
+    const { result, detail } = await runAgainstPage({
+        page: 'skemany.html',
+        path: '/lectio/223/SkemaNy.aspx',
+        rawPages: {
+            ...TEACHER_PAGES,
+            '/lectio/223/subnav/fravaerlaerer.aspx': {
+                file: 'fravaersangivelse.html',
+                edit: (html) => withoutRegistrations(html, (row) => !/id=70000025\b/.test(row))
+            }
+        },
+        prelude: preludeFor(TODO_ONLY, seedState),
+        postlude: `${REPORTER}
+            // Every mark drawn on this page view, including one removed again.
+            window.__marksSeen = 0;
+            new MutationObserver((records) => {
+                for (const record of records) {
+                    for (const node of record.addedNodes) {
+                        if (node.nodeType === 1 && node.classList.contains('lcr-todo-mark')) window.__marksSeen += 1;
+                    }
+                }
+            }).observe(document.documentElement, { childList: true, subtree: true });
+            const absenceOf = ${absenceOf};
+
+            settle(() => checked() && Number(absenceOf(readState()).capturedAt) > ${at(9, 58)}, () => {
+                const state = readState() || {};
+                const records = absenceOf(state).records || {};
+                check(!records.ABSENCE70000025, 'the registered lesson is still on the stored list');
+                check(Object.keys(records).length === 5, 'expected the 5 lessons still waiting, got ' + Object.keys(records).length);
+                check(!('absenceRecheckAfter' in state), 'the re-read request was not cleared');
+                check(window.__marksSeen === 0, 'a mark was drawn for the registered lesson (' + window.__marksSeen + ')');
+                const reads = window.__fetched.filter((url) => /fravaerlaerer\\.aspx/.test(url)).length;
+                check(reads === 1, 'expected the absence list to be read once, got ' + reads);
+            });
+        `
+    });
+
+    assert.equal(result, 'pass', detail || result || 'no result reported');
+});
+
+test('registering the last lessons empties the list, and the empty list replaces the stored one', async () => {
+    const seedState = seedWithAbsence(['70000025', '70000182', '70000183', '70000184'], 1);
+
+    const { result, detail } = await runAgainstPage({
+        page: 'skemany.html',
+        path: '/lectio/223/SkemaNy.aspx',
+        rawPages: {
+            ...TEACHER_PAGES,
+            '/lectio/223/subnav/fravaerlaerer.aspx': { file: 'fravaersangivelse.html', edit: (html) => withoutRegistrations(html) }
+        },
+        prelude: preludeFor(TODO_ONLY, seedState),
+        postlude: `${REPORTER}
+            const absenceOf = ${absenceOf};
+            settle(() => checked(), () => {
+                const absence = absenceOf(readState());
+                check(Object.keys(absence.records || {}).length === 0,
+                    'the old list was kept: ' + Object.keys(absence.records || {}).join(','));
+                check(absence.meta && absence.meta.listSeen === true, 'the empty island was not recognised');
+                check(document.querySelectorAll('.lcr-todo-mark').length === 0, 'a lesson is still marked');
+            });
+        `
+    });
+
+    assert.equal(result, 'pass', detail || result || 'no result reported');
+});
+
+test("the teacher's absence page, open on screen, is stored as it stands without being fetched", async () => {
+    const seedState = seedWithAbsence(['70000999'], at(9, 55));
+
+    const { result, detail } = await runAgainstPage({
+        page: 'fravaersangivelse.html',
+        path: '/lectio/223/subnav/fravaerlaerer.aspx',
+        rawPages: TEACHER_PAGES,
+        prelude: preludeFor(TODO_ONLY, seedState),
+        postlude: `${REPORTER}
+            const absenceOf = ${absenceOf};
+            settle(() => checked(), () => {
+                const records = absenceOf(readState()).records || {};
+                check(!records.ABSENCE70000999, 'the stored list was not replaced by the page on screen');
+                check(Object.keys(records).length === 6, 'expected the 6 lessons on the page, got ' + Object.keys(records).length);
+                check(!window.__fetched.some((url) => /fravaerlaerer\\.aspx/.test(url)),
+                    'the page on screen was fetched again: ' + window.__fetched.join(' '));
+                check(document.querySelectorAll('.lcr-todo-mark').length === 0, 'the registration list itself got marks');
+            });
+        `
+    });
+
+    assert.equal(result, 'pass', detail || result || 'no result reported');
+});
+
+test('leaving a registration page asks the next page view to re-read the absence list', async () => {
+    const seedState = seedWithAbsence(['70000025'], at(9, 55));
+
+    const { result, detail } = await runAgainstPage({
+        // Any teacher page will do for the markup; the path is what counts.
+        page: 'forside.html',
+        path: '/lectio/223/ActivityAbsenceRegistration.aspx',
+        rawPages: TEACHER_PAGES,
+        prelude: preludeFor(TODO_ONLY, seedState),
+        postlude: `${REPORTER}
+            const absenceOf = ${absenceOf};
+            settle(() => checked(), () => {
+                check(!('absenceRecheckAfter' in (readState() || {})), 'a re-read was asked for before the page was left');
+                check(document.querySelectorAll('.lcr-todo-mark').length === 0, 'the registration page got marks');
+                window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: false }));
+                const state = readState() || {};
+                const captured = Number(absenceOf(state).capturedAt);
+                check(Number(state.absenceRecheckAfter) >= captured,
+                    'leaving did not ask for a re-read: ' + state.absenceRecheckAfter + ' vs ' + captured);
+            });
+        `
+    });
+
+    assert.equal(result, 'pass', detail || result || 'no result reported');
+});
+
+// The look, read off the one marked lesson: which classes the mark and its
+// block carry, the word on the mark, and whether the icon is there.
+async function markLook(settings, expect) {
+    return runAgainstPage({
+        page: 'skemany.html',
+        path: '/lectio/223/SkemaNy.aspx',
+        rawPages: TEACHER_PAGES,
+        prelude: preludeFor({ ...TODO_ONLY, ...settings }),
+        postlude: `${REPORTER}
+            // Room for the tag, whatever size the headless window lays out.
+            const roomy = document.createElement('style');
+            roomy.textContent = '[data-brikid="ABS70000025"] { min-width: 140px !important; min-height: 50px !important; }';
+            document.head.appendChild(roomy);
+            window.__expect = (look) => settle(() => checked() && document.querySelector('.lcr-todo-mark'), () => {
+                const mark = document.querySelector('.lcr-todo-mark');
+                const block = mark.closest('.s2skemabrik[data-tooltip]');
+                look({
+                    mark: mark.className.split(/\\s+/),
+                    block: [...block.classList],
+                    word: (mark.querySelector('span') || {}).textContent || '',
+                    icon: Boolean(mark.querySelector('svg')),
+                    label: mark.getAttribute('aria-label') || ''
+                });
+            });
+            ${expect}
+        `
+    });
+}
+
+test('the mark spells out what it is: an amber tag with the roll-call icon and the word Fravær', async () => {
+    const { result, detail } = await markLook({}, `window.__expect((look) => {
+            check(look.mark.includes('lcr-todo-mark-tag'), 'not the tag style: ' + look.mark.join(' '));
+            check(look.mark.includes('lcr-mark-amber'), 'not amber: ' + look.mark.join(' '));
+            check(look.icon, 'the mark has no icon');
+            check(look.word === 'Fravær', 'the tag says ' + JSON.stringify(look.word));
+            check(/registreret/.test(look.label), 'the mark\\'s label does not say what it is: ' + look.label);
+            check(!look.block.includes('lcr-todo-outline'), 'the tag style outlined the lesson');
+        });`);
+
+    assert.equal(result, 'pass', detail || result || 'no result reported');
+});
+
+test('the outline style rings the lesson and the chosen colour reaches mark and ring', async () => {
+    const { result, detail } = await markLook({
+        teacherTodoMarkStyle: 'outline',
+        teacherTodoMarkColour: 'blue'
+    }, `window.__expect((look) => {
+            check(look.mark.includes('lcr-todo-mark-icon') && look.icon && !look.word,
+                'the outline style should carry the icon alone: ' + look.mark.join(' ') + ' ' + look.word);
+            check(look.mark.includes('lcr-mark-blue'), 'the mark is not blue: ' + look.mark.join(' '));
+            check(look.block.includes('lcr-todo-outline') && look.block.includes('lcr-mark-blue'),
+                'the lesson is not ringed in blue: ' + look.block.join(' '));
+        });`);
 
     assert.equal(result, 'pass', detail || result || 'no result reported');
 });

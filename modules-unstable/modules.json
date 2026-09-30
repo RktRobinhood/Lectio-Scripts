@@ -40,15 +40,15 @@
         "teacher"
       ],
       "status": "unstable",
-      "version": "0.9.9",
-      "changelog": "No second radar inside Lectio's dialogs: opening Vælg materiale drew a floating radar over it. For teachers: a to-do card on the front page and a mark on unregistered lessons. Settings are now in a few clear groups.",
+      "version": "0.9.10",
+      "changelog": "The attendance mark on the timetable now goes away once you have registered the lesson, and says what it is: an amber Attendance tag. Pick its style (tag, icon, outline) and colour under the to-do settings.",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Change-Radar.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
       "i18n": {
         "da": {
           "name": "Lectio Ændringsradar",
           "description": "Lectio-vagt med en kompakt radar-HUD i temaets farver. Du vælger selv, hvad den holder øje med - aflysninger, flytninger, lokaler, lærere og lektier i skemaet, plus valgfri overvågning af opgaver, fravær og dokumenter - plus kommende opgavefrister, der meldes, når de kommer inden for det valgte tidsrum - med hastestatus, styr på usete ændringer og en roterende lokal ændringslog.",
-          "changelog": "Ingen ekstra radar i Lectios dialoger: Vælg materiale fik en svævende radar oven på sig. For lærere: et huskekort på forsiden og et mærke på uregistrerede lektioner. Indstillingerne er samlet i få, tydelige grupper."
+          "changelog": "Fraværsmærket i skemaet forsvinder nu, når du har registreret lektionen, og siger, hvad det er: en ravfarvet Fravær-etiket. Vælg udseende (etiket, ikon, omrids) og farve under huskelisten."
         }
       }
     },

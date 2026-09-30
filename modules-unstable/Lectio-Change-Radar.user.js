@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Change Radar
 // @namespace    https://github.com/RktRobinhood/Lectio-Scripts
-// @version      0.9.9
+// @version      0.9.10
 // @description  Watches Lectio for the changes you choose to track - timetable, assignments, absence, documents - and keeps a compact recent-change HUD.
 // @author       RktRobinhood
 // @match        https://www.lectio.dk/lectio/*
@@ -46,7 +46,7 @@
     id: 'change-radar',
     aliases: ['schedule-change-radar', 'lectio-change-radar', 'change-log'],
     name: 'Lectio Change Radar',
-    version: '0.9.9',
+    version: '0.9.10',
     channel: 'unstable'
   });
 
@@ -107,6 +107,10 @@
   const SLOT_MAX_WAIT_MS = 8000;
 
   const DISPLAY_MODES = Object.freeze(['auto', 'dock', 'floating']);
+  // How the teacher to-do marks an unregistered lesson, and in what colour.
+  // Values, not words: the words are in SETTING_TEXT.
+  const TODO_MARK_STYLES = Object.freeze(['tag', 'icon', 'outline']);
+  const TODO_MARK_COLOURS = Object.freeze(['amber', 'accent', 'blue', 'grey']);
   // Bumped when a stored setting needs rewriting rather than merely
   // re-defaulting. Schema 2 introduced displayMode: 'auto'.
   const SETTINGS_SCHEMA = 2;
@@ -153,7 +157,9 @@
     // week. On by default, and inert for anyone who is not a teacher - see
     // SETTING_AUDIENCE below. It only ever counts and links.
     teacherTodo: true,
-    teacherTodoMarks: true
+    teacherTodoMarks: true,
+    teacherTodoMarkStyle: 'tag',
+    teacherTodoMarkColour: 'amber'
   });
 
   /*
@@ -176,7 +182,9 @@
     trackAbsenceRegistrations: Object.freeze(['student']),
     trackAbsencePercent: Object.freeze(['student']),
     teacherTodo: Object.freeze(['teacher']),
-    teacherTodoMarks: Object.freeze(['teacher'])
+    teacherTodoMarks: Object.freeze(['teacher']),
+    teacherTodoMarkStyle: Object.freeze(['teacher']),
+    teacherTodoMarkColour: Object.freeze(['teacher'])
   });
 
   // The sources the teacher to-do reads. It rides the same capture as the
@@ -231,6 +239,16 @@
   // Pages on which a lesson block is already the registration list itself,
   // so a mark would only repeat the row it sits in.
   const TODO_MARK_SKIP_PATH = /(?:fravaerlaerer|ActivityAbsenceRegistration)\.aspx$/i;
+  const REGISTRATION_PAGE_PATH = /\/ActivityAbsenceRegistration\.aspx$/i;
+  const TEACHER_ABSENCE_PAGE_PATH = /\/subnav\/fravaerlaerer\.aspx$/i;
+
+  // Lucide's clipboard-list (ISC), a roll-call list: the mark's icon in every
+  // style. Drawn in currentColor, so the mark's own colour decides.
+  const TODO_MARK_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" ' +
+    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">' +
+    '<rect width="8" height="4" x="8" y="2" rx="1" ry="1"/>' +
+    '<path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>' +
+    '<path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/></svg>';
 
   /*
    * The teacher to-do's own words (issue #76), in both languages (ADR-0013).
@@ -263,7 +281,8 @@
       dueLink: 'Open the assignment list',
       oldest: 'oldest {date}',
       oldestDeadline: 'oldest deadline {date}',
-      markLabel: 'Absence not registered for this lesson. Opens its registration page - nothing is registered for you.'
+      markTag: 'Attendance',
+      markLabel: 'Attendance not taken yet for this lesson. Click to open its absence registration - nothing is registered for you.'
     },
     // i18n:da
     da: {
@@ -290,7 +309,8 @@
       dueLink: 'Åbn opgavelisten',
       oldest: 'ældste {date}',
       oldestDeadline: 'ældste frist {date}',
-      markLabel: 'Fraværet er ikke registreret for denne lektion. Åbner lektionens registreringsside - der registreres ikke noget for dig.'
+      markTag: 'Fravær',
+      markLabel: 'Fraværet er ikke registreret for denne lektion endnu. Klik for at åbne lektionens fraværsregistrering - der registreres ikke noget for dig.'
     }
     // i18n:end
   });
@@ -349,7 +369,9 @@
       trackNewDocuments: { label: 'New documents', help: 'Report a document appearing in your overview.' },
       trackDocumentUpdates: { label: 'Document updates', help: 'Report an existing document being replaced or renamed.' },
       teacherTodo: { label: 'Show my to-do', help: 'For teachers. A small card on the front page (Forside) counting lessons still waiting for absence registration, submissions waiting for you to mark, and assignments due this week, each linking to the Lectio page with the details. It reads your absence page and assignment list alongside the other checks, at most twice an hour. It only counts and links: it never registers or marks anything for you.' },
-      teacherTodoMarks: { label: 'Mark lessons missing registration', help: 'Put a small mark in the corner of a lesson on the timetable while its absence is not registered. The mark opens that lesson\'s registration page.' }
+      teacherTodoMarks: { label: 'Mark lessons missing registration', help: 'Put a mark on a lesson in the timetable while its attendance is not taken. It goes away once you have registered the lesson, and clicking it opens that lesson\'s registration page.' },
+      teacherTodoMarkStyle: { label: 'Mark style', help: 'How the mark looks. Tag spells out "Attendance" beside the icon; Icon only takes the least room; Outline also rings the whole lesson. A lesson too small for the tag gets the icon.', tag: 'Tag: icon and "Attendance"', icon: 'Icon only', outline: 'Outline the lesson' },
+      teacherTodoMarkColour: { label: 'Mark colour', help: 'Amber stands apart from lesson colours and from Chairs Up\'s red. Theme accent follows Lectio Theming.', amber: 'Amber', accent: 'Theme accent', blue: 'Blue', grey: 'Grey' }
     },
     // i18n:da
     da: {
@@ -392,7 +414,9 @@
       trackNewDocuments: { label: 'Nye dokumenter', help: 'Meld, når et dokument dukker op i din oversigt.' },
       trackDocumentUpdates: { label: 'Opdaterede dokumenter', help: 'Meld, når et eksisterende dokument erstattes eller omdøbes.' },
       teacherTodo: { label: 'Vis min huskeliste', help: 'For lærere. Et lille kort på forsiden, der tæller lektioner, som stadig mangler fraværsregistrering, afleveringer, der venter på at blive rettet af dig, og opgaver med frist i denne uge - hver med et link til den Lectio-side, der viser detaljerne. Den læser din fraværsside og opgaveliste sammen med de øvrige tjek, højst to gange i timen. Den tæller og linker kun: den registrerer eller retter aldrig noget for dig.' },
-      teacherTodoMarks: { label: 'Markér lektioner uden registrering', help: 'Sæt et lille mærke i hjørnet af en lektion i skemaet, så længe dens fravær ikke er registreret. Mærket åbner lektionens registreringsside.' }
+      teacherTodoMarks: { label: 'Markér lektioner uden registrering', help: 'Sæt et mærke på en lektion i skemaet, så længe dens fravær ikke er registreret. Det forsvinder, når du har registreret lektionen, og et klik på det åbner lektionens registreringsside.' },
+      teacherTodoMarkStyle: { label: 'Mærkets udseende', help: 'Hvordan mærket ser ud. Etiket skriver "Fravær" ved siden af ikonet; Kun ikon fylder mindst; Omrids ringer også hele lektionen ind. En lektion, der er for lille til etiketten, får ikonet.', tag: 'Etiket: ikon og "Fravær"', icon: 'Kun ikon', outline: 'Omrids om lektionen' },
+      teacherTodoMarkColour: { label: 'Mærkets farve', help: 'Rav skiller sig ud fra lektionernes farver og fra Chairs Ups røde. Temaets accent følger Lectio Theming.', amber: 'Rav', accent: 'Temaets accent', blue: 'Blå', grey: 'Grå' }
     }
     // i18n:end
   });
@@ -437,6 +461,8 @@
 
       toggle('teacherTodo', true, 'todo'),
       toggle('teacherTodoMarks', true, 'todo'),
+      select('teacherTodoMarkStyle', 'tag', TODO_MARK_STYLES, 'todo'),
+      select('teacherTodoMarkColour', 'amber', TODO_MARK_COLOURS, 'todo'),
 
       select('pollMinutes', 10, [5, 10, 15, 30], 'alerts'),
       select('urgentHours', 24, [6, 12, 24, 48], 'alerts'),
@@ -556,7 +582,12 @@
     // What the teacher to-do last drew, as one string, so the many callers
     // of renderHud() redraw the card and the timetable marks only when what
     // they say has changed. Page-view state like the rest of this object.
-    todoDrawn: ''
+    todoDrawn: '',
+
+    // True while this page view re-reads the absence list after a visit to a
+    // registration page. The marks wait for it, so a lesson just registered
+    // does not flash its mark from the stored list and then lose it.
+    absenceRechecking: false
   };
 
   // The Manager announces itself by asking every module to register, and that
@@ -594,6 +625,10 @@
   // that is genuinely going away is torn down exactly as before. One
   // registration each, at module scope, so neither can accumulate.
   window.addEventListener('pagehide', (event) => {
+    // Leaving a registration page - after saving it, or Lectio's own reload
+    // on save - is when the stored absence list may have gone out of date.
+    if (REGISTRATION_PAGE_PATH.test(location.pathname)) noteRegistrationVisit();
+
     suspendPolling();
 
     if (event && event.persisted) return;
@@ -742,16 +777,27 @@
     installStyles();
     syncTheme();
     installThemeObserver();
+
+    // The teacher's own absence list, open on screen, is read where it lies;
+    // a page view after a registration re-reads it before drawing any mark.
+    harvestAbsencePage();
+    const recheck = absenceRecheckDue() && !TODO_MARK_SKIP_PATH.test(location.pathname);
+    runtime.absenceRechecking = recheck;
+
     renderHud();
 
     // The first check of a page view is offset by a random fraction of a few
     // seconds. Re-armable and single-shot: the previous timer is always
     // cleared first, so no two can be outstanding, and pagehide clears it.
+    // A re-read after a registration goes first and without the offset: it
+    // answers something the teacher has just done, and is a single request.
     if (runtime.startTimer) window.clearTimeout(runtime.startTimer);
-    runtime.startTimer = window.setTimeout(() => {
+    runtime.startTimer = window.setTimeout(async () => {
       runtime.startTimer = null;
+      if (runtime.suspended) return;
+      if (recheck) await recheckAbsence();
       if (!runtime.suspended) void refresh({ reason: 'startup' });
-    }, Math.floor(Math.random() * FIRST_POLL_JITTER_MS));
+    }, recheck ? 0 : Math.floor(Math.random() * FIRST_POLL_JITTER_MS));
 
     restartPollTimer();
 
@@ -956,6 +1002,7 @@
     try {
       const previous = runtime.state?.snapshot || null;
       const snapshot = await buildSnapshot(previous);
+      const recheckAfter = Number(runtime.state?.absenceRecheckAfter) || 0;
 
       if (!previous) {
         runtime.state = {
@@ -980,6 +1027,12 @@
           snapshot,
           history
         };
+      }
+
+      // A registration noted while this check ran, or one this check could
+      // not re-read the list for, still wants its re-read.
+      if (recheckAfter && !(Number(snapshot.sources?.absence?.capturedAt) > recheckAfter)) {
+        runtime.state.absenceRecheckAfter = recheckAfter;
       }
 
       saveState(runtime.state);
@@ -1063,33 +1116,125 @@
       // A capture made before the to-do existed has none of what it counts,
       // so the to-do's first check reads the page again rather than drawing
       // nothing for half an hour. Once per upgrade, and still one request.
+      // A registration since the last read is the same: the list is stale.
       const lacksTodo = forTodo && reader.meta && !existing?.meta;
-      if (existing && !lacksTodo && now - Number(existing.capturedAt || 0) < EXTRA_SOURCE_MIN_GAP_MS) {
+      const registered = source.key === 'absence' && absenceRecheckDue();
+      if (existing && !lacksTodo && !registered && now - Number(existing.capturedAt || 0) < EXTRA_SOURCE_MIN_GAP_MS) {
         sources[source.key] = existing;
         continue;
       }
 
-      try {
-        const doc = await fetchLectioDocument(reader.url());
-        const records = reader.parse(doc);
-
-        // A Lectio layout change can empty a parser that used to see rows. Keep
-        // the last good capture rather than announcing that everything the user
-        // had has just disappeared.
-        if (existing && looksLikeParseFailure(existing.records, records)) {
-          sources[source.key] = existing;
-          continue;
-        }
-
-        const capture = { capturedAt: now, records };
-        if (reader.meta) capture.meta = reader.meta(doc, records);
-        sources[source.key] = capture;
-      } catch (_) {
-        if (existing) sources[source.key] = existing;
-      }
+      const capture = await captureSource(source, existing, now);
+      if (capture) sources[source.key] = capture;
     }
 
     return sources;
+  }
+
+  // One source read and parsed - or, when the read fails, the capture it
+  // would have replaced.
+  async function captureSource(source, existing, now) {
+    const reader = getSourceReader(source.key);
+    try {
+      return makeCapture(source, reader, await fetchLectioDocument(reader.url()), existing, now);
+    } catch (_) {
+      return existing;
+    }
+  }
+
+  function makeCapture(source, reader, doc, existing, now) {
+    const records = reader.parse(doc);
+
+    // A Lectio layout change can empty a parser that used to see rows. Keep
+    // the last good capture rather than announcing that everything the user
+    // had has just disappeared. That danger is a watch's only: a source read
+    // for the to-do alone is never compared, and the to-do already refuses
+    // to count a list it cannot vouch for. Holding on to the old capture
+    // there is worse than useless - registering the last lessons empties the
+    // teacher's absence list, and the kept copy left every one of them marked.
+    if (existing && sourceWatched(source) && looksLikeParseFailure(existing.records, records)) {
+      return existing;
+    }
+
+    const capture = { capturedAt: now, records };
+    if (reader.meta) capture.meta = reader.meta(doc, records);
+    return capture;
+  }
+
+  /*
+   * Registering is done on Lectio's own page, and the stored absence list
+   * only learned of it at its next read - up to half an hour later, with the
+   * lesson still marked meanwhile. So leaving a registration page asks the
+   * next page view for one read of the list ahead of the usual cadence, and
+   * the teacher's absence page, when it is open, is read where it lies.
+   * Nothing here writes to Lectio (ADR-0009): it only reads sooner.
+   */
+  function noteRegistrationVisit() {
+    if (!runtime.state?.snapshot || !todoActive()) return;
+    runtime.state = { ...runtime.state, absenceRecheckAfter: Date.now() };
+    saveState(runtime.state);
+  }
+
+  function absenceRecheckDue() {
+    const after = Number(runtime.state?.absenceRecheckAfter) || 0;
+    if (!after || !todoActive()) return false;
+    return !(Number(runtime.state?.snapshot?.sources?.absence?.capturedAt) > after);
+  }
+
+  // One attempt per registration: whatever the read brings back, the flag
+  // goes, and the regular cadence takes over. A Lectio that keeps failing
+  // must not cost a request on every page view.
+  async function recheckAbsence() {
+    const startedAt = Date.now();
+    const source = EXTRA_SOURCES.find((entry) => entry.key === 'absence');
+
+    if (runtime.inFlight || runtime.suspended || startedAt < runtime.backoffUntil || !runtime.state?.snapshot) {
+      runtime.absenceRechecking = false;
+      renderHud();
+      return;
+    }
+
+    runtime.inFlight = true;
+    try {
+      const existing = runtime.state.snapshot.sources?.absence;
+      const capture = await captureSource(source, existing, startedAt);
+      storeAbsenceCapture(capture && capture !== existing ? capture : null, startedAt);
+    } finally {
+      runtime.inFlight = false;
+      runtime.absenceRechecking = false;
+      renderHud();
+    }
+  }
+
+  function harvestAbsencePage() {
+    if (!TEACHER_ABSENCE_PAGE_PATH.test(location.pathname) || !todoActive() || !runtime.state?.snapshot) return;
+
+    const source = EXTRA_SOURCES.find((entry) => entry.key === 'absence');
+    const existing = runtime.state.snapshot.sources?.absence;
+    const now = Date.now();
+    try {
+      const capture = makeCapture(source, getSourceReader('absence'), document, existing, now);
+      if (capture !== existing) storeAbsenceCapture(capture, now);
+    } catch (_) {
+      // A page the parser cannot read leaves the stored list as it was.
+    }
+  }
+
+  // Puts a fresh absence capture into the stored snapshot, and clears a
+  // pending re-read that is no newer than the attempt. Other tabs follow
+  // through the storage event.
+  function storeAbsenceCapture(capture, attemptedAt) {
+    const state = runtime.state;
+    if (!state?.snapshot) return;
+
+    const next = { ...state };
+    if (capture) {
+      next.snapshot = { ...state.snapshot, sources: { ...(state.snapshot.sources || {}), absence: capture } };
+    }
+    if ((Number(next.absenceRecheckAfter) || 0) <= attemptedAt) delete next.absenceRecheckAfter;
+
+    runtime.state = next;
+    saveState(next);
   }
 
   function looksLikeParseFailure(before, after) {
@@ -2788,27 +2933,47 @@
       #${UI.todoCard} .lcr-todo-line:hover .lcr-todo-text,
       #${UI.todoCard} .lcr-todo-line:focus-visible .lcr-todo-text { text-decoration: underline; }
 
+      /*
+       * The timetable mark: filled, with a white ring so it reads on any
+       * lesson colour. Amber by default - a semantic "still to do" colour,
+       * kept apart from Chairs Up's red and exempt from theming like it
+       * (ADR-0006); Theme accent is the one choice that follows the seam.
+       */
+      .lcr-mark-amber { --lcr-mark: #b45309; }
+      .lcr-mark-accent { --lcr-mark: var(--lectio-theme-accent, #0f6f6f); }
+      .lcr-mark-blue { --lcr-mark: #1d4ed8; }
+      .lcr-mark-grey { --lcr-mark: #52606d; }
       .lcr-todo-anchor { position: relative; }
+      .lcr-todo-outline {
+        outline: 2px dashed var(--lcr-mark, #b45309) !important;
+        outline-offset: -2px;
+      }
       .lcr-todo-mark {
         position: absolute;
-        right: 2px;
-        bottom: 2px;
+        right: 3px;
+        bottom: 3px;
         z-index: 2;
-        width: 14px;
-        height: 14px;
         display: inline-flex;
         align-items: center;
         justify-content: center;
+        gap: 3px;
         box-sizing: border-box;
-        border-radius: 50%;
-        background: var(--lectio-theme-surface, #ffffff) !important;
-        color: var(--lectio-theme-accent, #0f6f6f) !important;
-        box-shadow: 0 0 0 1px var(--lectio-theme-muted, #c8d4dc);
+        height: 18px;
+        background: var(--lcr-mark, #b45309) !important;
+        color: #ffffff !important;
+        box-shadow: 0 0 0 1.5px #ffffff, 0 1px 3px rgba(0, 0, 0, .3);
+        font: 700 10px/1 Roboto, Arial, sans-serif;
+        letter-spacing: .01em;
+        white-space: nowrap;
         text-decoration: none !important;
+        cursor: pointer;
       }
-      .lcr-todo-mark svg { width: 10px; height: 10px; display: block; }
+      .lcr-todo-mark-icon { width: 18px; border-radius: 50%; }
+      .lcr-todo-mark-tag { padding: 0 6px 0 4px; border-radius: 9px; }
+      .lcr-todo-mark svg { width: 12px; height: 12px; flex: none; display: block; }
+      .lcr-todo-mark-icon svg { width: 11px; height: 11px; }
       .lcr-todo-mark:hover, .lcr-todo-mark:focus-visible {
-        box-shadow: 0 0 0 2px var(--lectio-theme-accent, #0f6f6f);
+        box-shadow: 0 0 0 1.5px #ffffff, 0 0 0 3.5px var(--lcr-mark, #b45309);
         outline: none;
       }
 
@@ -3087,8 +3252,9 @@
     const summary = teacherTodoSummary();
     const language = radarLanguage();
     const marks = Boolean(summary?.absence) && settingOn('teacherTodoMarks') &&
-      !TODO_MARK_SKIP_PATH.test(location.pathname);
-    const drawn = summary ? JSON.stringify([language, marks, summary]) : '';
+      !runtime.absenceRechecking && !TODO_MARK_SKIP_PATH.test(location.pathname);
+    const look = [runtime.settings.teacherTodoMarkStyle, runtime.settings.teacherTodoMarkColour];
+    const drawn = summary ? JSON.stringify([language, marks, look, summary]) : '';
 
     const card = document.getElementById(UI.todoCard);
     const cardWanted = Boolean(summary) && isForside();
@@ -3195,14 +3361,18 @@
   }
 
   function clearTodoMarks() {
+    const added = ['lcr-todo-anchor', 'lcr-todo-outline', ...TODO_MARK_COLOURS.map((colour) => `lcr-mark-${colour}`)];
     for (const mark of document.querySelectorAll('.lcr-todo-mark')) mark.remove();
-    for (const block of document.querySelectorAll('.lcr-todo-anchor')) block.classList.remove('lcr-todo-anchor');
+    for (const block of document.querySelectorAll('.lcr-todo-anchor, .lcr-todo-outline')) {
+      block.classList.remove(...added);
+    }
   }
 
   /*
-   * A small corner mark on each lesson block of this page whose absence is
-   * still waiting for registration, linking to that lesson's registration
-   * page - where the teacher registers it themselves, in Lectio's own form.
+   * A corner mark on each lesson block of this page whose absence is still
+   * waiting for registration, linking to that lesson's registration page -
+   * where the teacher registers it themselves, in Lectio's own form. It
+   * says what it is: a roll-call icon and, by default, the word itself.
    * Matched on the block's activity id, and only on real lesson blocks
    * ([data-tooltip], AGENTS.md). Bottom right, inside the block: Chairs Up
    * owns the top-right corner, and the block's colour belongs to whoever
@@ -3212,19 +3382,34 @@
     const byActivity = new Map((lessons || []).map((lesson) => [lesson.activity, lesson.url]));
     if (!byActivity.size) return;
 
+    const style = runtime.settings.teacherTodoMarkStyle;
+    const colour = `lcr-mark-${runtime.settings.teacherTodoMarkColour}`;
+
     for (const block of document.querySelectorAll('.s2skemabrik[data-tooltip]')) {
       const url = byActivity.get(getActivityId(block));
       if (!url || block.classList.contains('s2cancelled')) continue;
 
       if (getComputedStyle(block).position === 'static') block.classList.add('lcr-todo-anchor');
+      // An outline, not a border or a background: the block's frame is
+      // Theming's and its colour whoever painted it (ADR-0011).
+      if (style === 'outline') block.classList.add('lcr-todo-outline', colour);
+
+      // A short lesson has no room for the word without covering its own
+      // text, so it gets the icon whatever the style.
+      const roomy = block.offsetHeight >= 34 && block.offsetWidth >= 96;
+      const tag = style === 'tag' && roomy;
 
       const mark = document.createElement('a');
-      mark.className = 'lcr-todo-mark';
+      mark.className = `lcr-todo-mark ${colour} ${tag ? 'lcr-todo-mark-tag' : 'lcr-todo-mark-icon'}`;
       mark.href = url;
       mark.title = text.markLabel;
       mark.setAttribute('aria-label', text.markLabel);
-      mark.innerHTML = '<svg viewBox="0 0 12 12" aria-hidden="true" focusable="false">' +
-        '<rect x="2" y="2" width="8" height="8" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>';
+      mark.innerHTML = TODO_MARK_ICON;
+      if (tag) {
+        const word = document.createElement('span');
+        word.textContent = text.markTag;
+        mark.appendChild(word);
+      }
       // The block is itself a link with Lectio's own handlers on it. The mark
       // is the nearer link, so the browser follows it; stopping the event
       // here keeps the block's handlers from also acting on the same click.
@@ -3789,6 +3974,12 @@
     if (DISPLAY_MODES.includes(values?.displayMode)) {
       out.displayMode = values.displayMode;
     }
+    if (TODO_MARK_STYLES.includes(values?.teacherTodoMarkStyle)) {
+      out.teacherTodoMarkStyle = values.teacherTodoMarkStyle;
+    }
+    if (TODO_MARK_COLOURS.includes(values?.teacherTodoMarkColour)) {
+      out.teacherTodoMarkColour = values.teacherTodoMarkColour;
+    }
     const allowed = {
       pollMinutes: [5, 10, 15, 30],
       weeksAhead: [0, 1, 2],
@@ -3811,7 +4002,7 @@
 
   function coerceSettingValue(key, value) {
     if (BOOLEAN_SETTING_KEYS.includes(key)) return Boolean(value);
-    if (key === 'displayMode') return value;
+    if (typeof DEFAULT_SETTINGS[key] === 'string') return String(value);
     return Number(value);
   }
 
