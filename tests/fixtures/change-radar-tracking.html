@@ -315,9 +315,19 @@
                 'a moved deadline should be reported'
             );
 
+            // The radar writes dates in the browser's own locale, so the same
+            // deadline reads "Tue, Oct 1" on an en-US runner, "Tue 1 Oct" on
+            // en-GB and "tirs. 1. okt." on da-DK. Spell both deadlines the
+            // way this browser does rather than assuming one locale's order.
+            const shortDate = (year, month, day) => new Intl.DateTimeFormat(undefined, {
+                weekday: 'short',
+                day: 'numeric',
+                month: 'short'
+            }).format(new Date(year, month - 1, day));
             const deadlineEntry = readHistory().find((item) => item.kind === 'deadline');
             assert(
-                /Oct 1\b/.test(deadlineEntry?.detail || '') && /Oct 5\b/.test(deadlineEntry?.detail || ''),
+                (deadlineEntry?.detail || '').includes(shortDate(2030, 10, 1) + ' 23:59') &&
+                    (deadlineEntry?.detail || '').includes(shortDate(2030, 10, 5) + ' 23:59'),
                 'a deadline entry should name both deadlines, got: ' + deadlineEntry?.detail
             );
 
