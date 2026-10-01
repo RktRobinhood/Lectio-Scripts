@@ -40,15 +40,15 @@
         "teacher"
       ],
       "status": "unstable",
-      "version": "0.9.13",
-      "changelog": "The attendance mark no longer sits on a coloured circle. Its icon is black or white by default, whichever stands out on the lesson, or pick your theme's accent or any colour under the to-do settings.",
+      "version": "0.9.14",
+      "changelog": "The attendance mark now waits until 15 minutes before a lesson instead of showing all day, and pulses once the lesson is over if attendance still isn't taken.",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Change-Radar.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
       "i18n": {
         "da": {
           "name": "Lectio Ændringsradar",
           "description": "Lectio-vagt med en kompakt radar-HUD i temaets farver. Du vælger selv, hvad den holder øje med - aflysninger, flytninger, lokaler, lærere og lektier i skemaet, plus valgfri overvågning af opgaver, fravær og dokumenter - plus kommende opgavefrister, der meldes, når de kommer inden for det valgte tidsrum - med hastestatus, styr på usete ændringer og en roterende lokal ændringslog.",
-          "changelog": "Fraværsmærket sidder ikke længere på en farvet cirkel. Ikonet er som standard sort eller hvidt - det, der står tydeligst på lektionen - eller vælg temaets accent eller en hvilken som helst farve under huskelisten."
+          "changelog": "Fraværsmærket venter nu til 15 minutter før lektionen i stedet for at stå der hele dagen, og det pulserer, når lektionen er slut, hvis fraværet stadig ikke er registreret."
         }
       }
     },

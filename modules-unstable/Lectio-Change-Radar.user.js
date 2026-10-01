@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Change Radar
 // @namespace    https://github.com/RktRobinhood/Lectio-Scripts
-// @version      0.9.13
+// @version      0.9.14
 // @description  Watches Lectio for the changes you choose to track - timetable, assignments, absence, documents - and keeps a compact recent-change HUD.
 // @author       RktRobinhood
 // @match        https://www.lectio.dk/lectio/*
@@ -46,7 +46,7 @@
     id: 'change-radar',
     aliases: ['schedule-change-radar', 'lectio-change-radar', 'change-log'],
     name: 'Lectio Change Radar',
-    version: '0.9.13',
+    version: '0.9.14',
     channel: 'unstable'
   });
 
@@ -248,6 +248,18 @@
   const REGISTRATION_PAGE_PATH = /\/ActivityAbsenceRegistration\.aspx$/i;
   const TEACHER_ABSENCE_PAGE_PATH = /\/subnav\/fravaerlaerer\.aspx$/i;
 
+  // When a lesson's mark shows (issue #82). Lectio lists today's lessons as
+  // missing registration from the morning, so the list alone says nothing
+  // about when attendance is due: the mark waits until shortly before the
+  // lesson, and pulses once the lesson is over and still unregistered.
+  const TODO_MARK_LEAD_MS = 15 * 60 * 1000;
+  // The longest the marks go without a fresh look at the clock. A timer aimed
+  // at the next start or end can come back late from a sleeping laptop.
+  const TODO_MARK_RECHECK_CEILING_MS = 5 * 60 * 1000;
+  // A lesson block's tooltip: "1/10-2026 12:35 til 13:45", or "to" where
+  // English Mode has translated it.
+  const LESSON_TIME_PATTERN = /\b(\d{1,2})\/(\d{1,2})-(\d{4})\s+(\d{1,2}):(\d{2})\s+(?:til|to)\s+(\d{1,2}):(\d{2})\b/;
+
   // Lucide's clipboard-list (ISC), a roll-call list: the mark's icon in every
   // style. Drawn in currentColor, so the mark's own colour decides.
   const TODO_MARK_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" ' +
@@ -288,7 +300,8 @@
       oldest: 'oldest {date}',
       oldestDeadline: 'oldest deadline {date}',
       markTag: 'Attendance',
-      markLabel: 'Attendance not taken yet for this lesson. Click to open its absence registration - nothing is registered for you.'
+      markLabel: 'Attendance not taken yet for this lesson. Click to open its absence registration - nothing is registered for you.',
+      markOverdueLabel: 'This lesson is over and attendance is still not taken. Click to open its absence registration - nothing is registered for you.'
     },
     // i18n:da
     da: {
@@ -316,7 +329,8 @@
       oldest: 'ældste {date}',
       oldestDeadline: 'ældste frist {date}',
       markTag: 'Fravær',
-      markLabel: 'Fraværet er ikke registreret for denne lektion endnu. Klik for at åbne lektionens fraværsregistrering - der registreres ikke noget for dig.'
+      markLabel: 'Fraværet er ikke registreret for denne lektion endnu. Klik for at åbne lektionens fraværsregistrering - der registreres ikke noget for dig.',
+      markOverdueLabel: 'Lektionen er slut, og fraværet er stadig ikke registreret. Klik for at åbne lektionens fraværsregistrering - der registreres ikke noget for dig.'
     }
     // i18n:end
   });
@@ -595,6 +609,10 @@
     // of renderHud() redraw the card and the timetable marks only when what
     // they say has changed. Page-view state like the rest of this object.
     todoDrawn: '',
+    // The one timeout that redraws the marks when a lesson on the page next
+    // comes due or ends (issue #82). Re-armed on every redraw, never more
+    // than one, and cleared when the page goes away.
+    todoMarkTimer: null,
     // A 1x1 canvas context that reads any CSS colour for the mark's ink.
     colourProbe: null,
 
@@ -651,6 +669,7 @@
     window.clearTimeout(runtime.viewTimer);
     window.clearTimeout(runtime.graceTimer);
     window.clearTimeout(runtime.settingsRefreshTimer);
+    window.clearTimeout(runtime.todoMarkTimer);
   });
   window.addEventListener('pageshow', resumePolling);
 
@@ -3004,6 +3023,30 @@
         box-shadow: 0 0 0 1.5px var(--lcr-mark, var(--lcr-ink, #000000));
         outline: none;
       }
+      /*
+       * Over and still unregistered (issue #82): the icon beats and a ring
+       * in its own colour ripples out of it. With reduced motion the ring
+       * stays put instead, so overdue still reads differently from due.
+       */
+      .lcr-todo-mark-overdue::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        border: 2px solid currentColor;
+        border-radius: inherit;
+        pointer-events: none;
+        animation: lcr-mark-ripple 1.8s ease-out infinite;
+      }
+      .lcr-todo-mark-overdue svg { animation: lcr-mark-beat 1.8s ease-in-out infinite; }
+      @keyframes lcr-mark-ripple {
+        0% { opacity: .85; transform: scale(.9); }
+        70%, 100% { opacity: 0; transform: scale(1.7); }
+      }
+      @keyframes lcr-mark-beat {
+        0%, 100% { transform: scale(1); }
+        20% { transform: scale(1.22); }
+        40% { transform: scale(1); }
+      }
 
       @media (max-width: 600px) {
         #${UI.root} { top: 82px; right: 8px; }
@@ -3015,6 +3058,8 @@
           animation: none !important;
           transition: none !important;
         }
+        .lcr-todo-mark-overdue::after, .lcr-todo-mark-overdue svg { animation: none !important; }
+        .lcr-todo-mark-overdue::after { opacity: 1; transform: none; }
       }
     `;
     (document.head || document.documentElement).appendChild(style);
@@ -3301,11 +3346,46 @@
 
     card?.remove();
     clearTodoMarks();
+    window.clearTimeout(runtime.todoMarkTimer);
+    runtime.todoMarkTimer = null;
     if (!summary) return;
 
     const text = TODO_TEXT[language];
     if (cardWanted) placeTodoCard(buildTodoCard(summary, text));
-    if (marks) markUnregisteredLessons(summary.absence.lessons, text);
+    if (marks) scheduleTodoMarkRedraw(markUnregisteredLessons(summary.absence.lessons, text));
+  }
+
+  // Redraws the marks when the next lesson on the page comes due or ends.
+  // Forgetting what was drawn is what makes renderTeacherTodo() redraw.
+  function scheduleTodoMarkRedraw(nextChangeAt) {
+    if (!nextChangeAt) return;
+    const wait = Math.min(Math.max(nextChangeAt - Date.now(), 0) + 250, TODO_MARK_RECHECK_CEILING_MS);
+    runtime.todoMarkTimer = window.setTimeout(() => {
+      runtime.todoMarkTimer = null;
+      runtime.todoDrawn = '';
+      renderTeacherTodo();
+    }, wait);
+  }
+
+  /*
+   * Where a lesson stands for its mark (issue #82): 'early' more than
+   * TODO_MARK_LEAD_MS before it starts, 'due' from then until it ends,
+   * 'overdue' after. `changesAt` is when that next changes, or 0 once over.
+   * A block whose time cannot be read is 'due' and never changes, so a
+   * tooltip the pattern misses keeps its mark rather than losing a real to-do.
+   */
+  function lessonMarkPhase(block, now) {
+    const match = String(block.getAttribute('data-tooltip') || '').match(LESSON_TIME_PATTERN);
+    if (!match) return { phase: 'due', changesAt: 0 };
+
+    const [, day, month, year, startHour, startMinute, endHour, endMinute] = match.map(Number);
+    const start = new Date(year, month - 1, day, startHour, startMinute).getTime();
+    const end = new Date(year, month - 1, day, endHour, endMinute).getTime();
+    const showFrom = start - TODO_MARK_LEAD_MS;
+
+    if (now < showFrom) return { phase: 'early', changesAt: showFrom };
+    if (now < end) return { phase: 'due', changesAt: end };
+    return { phase: 'overdue', changesAt: 0 };
   }
 
   function buildTodoCard(summary, text) {
@@ -3508,10 +3588,17 @@
    * ([data-tooltip], AGENTS.md). Bottom right, inside the block: Chairs Up
    * owns the top-right corner, and the block's colour belongs to whoever
    * painted it (ADR-0011) - the mark only sits on top.
+   *
+   * Only from shortly before the lesson, and pulsing once it is over
+   * (lessonMarkPhase). Returns when the next lesson here changes phase, or
+   * 0 when none will.
    */
   function markUnregisteredLessons(lessons, text) {
     const byActivity = new Map((lessons || []).map((lesson) => [lesson.activity, lesson.url]));
-    if (!byActivity.size) return;
+    if (!byActivity.size) return 0;
+
+    const now = Date.now();
+    let nextChangeAt = 0;
 
     const style = runtime.settings.teacherTodoMarkStyle;
     const colour = runtime.settings.teacherTodoMarkColour;
@@ -3524,6 +3611,11 @@
     for (const block of document.querySelectorAll('.s2skemabrik[data-tooltip]')) {
       const url = byActivity.get(getActivityId(block));
       if (!url || block.classList.contains('s2cancelled')) continue;
+
+      const { phase, changesAt } = lessonMarkPhase(block, now);
+      if (changesAt && (!nextChangeAt || changesAt < nextChangeAt)) nextChangeAt = changesAt;
+      if (phase === 'early') continue;
+      const overdue = phase === 'overdue';
 
       if (getComputedStyle(block).position === 'static') block.classList.add('lcr-todo-anchor');
       // An outline, not a border or a background: the block's frame is
@@ -3539,11 +3631,12 @@
       const tag = style === 'tag' && roomy;
 
       const mark = document.createElement('a');
-      mark.className = `lcr-todo-mark ${tag ? 'lcr-todo-mark-tag' : 'lcr-todo-mark-icon'}`;
+      mark.className = `lcr-todo-mark ${tag ? 'lcr-todo-mark-tag' : 'lcr-todo-mark-icon'}${overdue ? ' lcr-todo-mark-overdue' : ''}`;
       paint(mark);
       mark.href = url;
-      mark.title = text.markLabel;
-      mark.setAttribute('aria-label', text.markLabel);
+      const label = overdue ? text.markOverdueLabel : text.markLabel;
+      mark.title = label;
+      mark.setAttribute('aria-label', label);
       mark.innerHTML = TODO_MARK_ICON;
       if (tag) {
         const word = document.createElement('span');
@@ -3557,6 +3650,8 @@
       block.appendChild(mark);
       applyMarkInk(mark);
     }
+
+    return nextChangeAt;
   }
 
   function registerDockItem(status) {

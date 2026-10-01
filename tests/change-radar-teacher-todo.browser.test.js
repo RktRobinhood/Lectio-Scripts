@@ -38,7 +38,7 @@ const SETTLE_LIMIT_MS = 45000;
 // edit(html) returns the markup to serve instead - how a test hands the module
 // a table it cannot read. `html` replaces the landing page with markup of the
 // test's own, for the case no saved page covers (a student account).
-async function runAgainstPage({ page, html, path, prelude = '', postlude, rawPages = {} }) {
+async function runAgainstPage({ page, html, path, prelude = '', postlude, rawPages = {}, chromeFlags = [] }) {
     const profileDirectory = await createProfile('lectio-change-radar-todo-');
     const source = html || await readFile(resolve(pagesDirectory, page), 'utf8');
 
@@ -95,6 +95,7 @@ async function runAgainstPage({ page, html, path, prelude = '', postlude, rawPag
             '--disable-gpu',
             `--user-data-dir=${profileDirectory}`,
             `--virtual-time-budget=${VIRTUAL_TIME_MS}`,
+            ...chromeFlags,
             '--dump-dom',
             `http://127.0.0.1:${port}${path}`
         ], { maxBuffer: 64 * 1024 * 1024, env: chromeEnvironment(profileDirectory) });
@@ -113,13 +114,14 @@ async function runAgainstPage({ page, html, path, prelude = '', postlude, rawPag
 // Settings are answered for whatever key the module asks for, because the key
 // carries the account it detects off the page. `seedState`, when given, is
 // handed back the first time the module reads its state, so a test can start
-// it from a known previous check; every later read is the real one.
-function preludeFor(settings, seedState = null) {
+// it from a known previous check; every later read is the real one. `clock`
+// is the page's local time as Date constructor arguments.
+function preludeFor(settings, seedState = null, clock = [2026, 8, 23, 10, 0, 0]) {
     return `
         localStorage.clear();
         (() => {
             const RealDate = Date;
-            const offset = new RealDate(2026, 8, 23, 10, 0, 0).getTime() - RealDate.now();
+            const offset = new RealDate(...${JSON.stringify(clock)}).getTime() - RealDate.now();
             class FixedDate extends RealDate {
                 constructor(...args) { if (args.length) super(...args); else super(RealDate.now() + offset); }
                 static now() { return RealDate.now() + offset; }
@@ -578,8 +580,9 @@ test('leaving a registration page asks the next page view to re-read the absence
 // colours the browser actually resolved. `lesson` repaints the marked block,
 // the way Subject Colours or Lectio Farver would, to test the ink against it;
 // `pageCss` is any further stylesheet, such as a theme's accent.
-async function markLook(settings, expect, lesson = '', pageCss = '') {
+async function markLook(settings, expect, lesson = '', pageCss = '', chromeFlags = []) {
     return runAgainstPage({
+        chromeFlags,
         page: 'skemany.html',
         path: '/lectio/223/SkemaNy.aspx',
         rawPages: TEACHER_PAGES,
@@ -731,6 +734,114 @@ test("0.9.11's stored 'none' reads as automatic black or white", async () => {
             check(look.fill === '${NO_FILL}' && look.ink === '${WHITE}',
                 'a stored none on a dark lesson drew ' + look.ink + ' on ' + look.fill);
         });`, '#1e293b');
+
+    assert.equal(result, 'pass', detail || result || 'no result reported');
+});
+
+// ---------------------------------------------------------------------------
+// When the mark shows (issue #82). Lectio lists today's lessons as missing
+// registration from the morning, so the mark waits until 15 minutes before
+// the lesson, and pulses once the lesson is over and still unregistered.
+// The marked lesson, ABS70000025, is Monday 21/9-2026 10:55 til 12:05.
+// ---------------------------------------------------------------------------
+
+const monday = (hours, minutes, seconds = 0) => [2026, 8, 21, hours, minutes, seconds];
+const mondayAt = (hours, minutes, seconds = 0) => new Date(...monday(hours, minutes, seconds)).getTime();
+
+// Every mark as it is added: the page's clock at that moment and whether it
+// was the overdue one.
+const MARK_RECORDER = `
+    window.__marks = [];
+    new MutationObserver((records) => {
+        for (const record of records) {
+            for (const node of record.addedNodes) {
+                if (node.nodeType === 1 && node.classList.contains('lcr-todo-mark')) {
+                    window.__marks.push({ at: Date.now(), overdue: node.classList.contains('lcr-todo-mark-overdue') });
+                }
+            }
+        }
+    }).observe(document.documentElement, { childList: true, subtree: true });
+`;
+
+// The timetable at `clock`, with a list read a minute earlier holding the
+// lesson, so the marks are drawn from what is stored rather than waiting on
+// a read.
+function atClock(clock, postlude) {
+    const capturedAt = new Date(...clock).getTime() - 60000;
+    return runAgainstPage({
+        page: 'skemany.html',
+        path: '/lectio/223/SkemaNy.aspx',
+        rawPages: TEACHER_PAGES,
+        prelude: preludeFor(TODO_ONLY, seedWithAbsence(['70000025'], capturedAt), clock),
+        postlude: `${REPORTER}${MARK_RECORDER}${postlude}`
+    });
+}
+
+test('a lesson Lectio already lists gets no mark until 15 minutes before it starts, then gets one by itself', async () => {
+    // 20 seconds short of 10:40, with the page left open.
+    const { result, detail } = await atClock(monday(10, 39, 40), `
+        settle(() => document.querySelector('.lcr-todo-mark'), () => {
+            const first = window.__marks[0] || {};
+            check(first.at >= ${mondayAt(10, 40)},
+                'the mark was drawn before 10:40: ' + new Date(first.at).toTimeString());
+            check(first.overdue === false, 'the mark pulsed before the lesson had started');
+            const label = document.querySelector('.lcr-todo-mark').getAttribute('aria-label') || '';
+            check(!/slut/.test(label), 'a due mark is labelled overdue: ' + label);
+        });
+    `);
+
+    assert.equal(result, 'pass', detail || result || 'no result reported');
+});
+
+test('the mark starts pulsing by itself when the lesson ends and it is still unregistered', async () => {
+    const { result, detail } = await atClock(monday(12, 4, 40), `
+        settle(() => document.querySelector('.lcr-todo-mark-overdue'), () => {
+            const first = window.__marks[0] || {};
+            const overdue = window.__marks.find((mark) => mark.overdue) || {};
+            check(first.overdue === false, 'the mark during the lesson was already overdue');
+            check(overdue.at >= ${mondayAt(12, 5)},
+                'the mark pulsed before 12:05: ' + new Date(overdue.at).toTimeString());
+            check(document.querySelectorAll('.lcr-todo-mark').length === 1, 'the redraw left a second mark behind');
+            const label = document.querySelector('.lcr-todo-mark').getAttribute('aria-label') || '';
+            check(/slut/.test(label), 'the overdue mark does not say the lesson is over: ' + label);
+        });
+    `);
+
+    assert.equal(result, 'pass', detail || result || 'no result reported');
+});
+
+test('a lesson from an earlier day that is still unregistered pulses', async () => {
+    // markLook's clock is Wednesday 23/9; the lesson was Monday. Motion is
+    // pinned on, because a machine with animations off reports reduced motion.
+    const { result, detail } = await markLook({}, `window.__expect((look) => {
+            const mark = document.querySelector('.lcr-todo-mark');
+            check(look.mark.includes('lcr-todo-mark-overdue'), 'not marked overdue: ' + look.mark.join(' '));
+            const ring = getComputedStyle(mark, '::after').animationName;
+            check(ring === 'lcr-mark-ripple', 'the ring does not ripple: ' + ring);
+        });`, '', '', ['--force-prefers-no-reduced-motion']);
+
+    assert.equal(result, 'pass', detail || result || 'no result reported');
+});
+
+test('with reduced motion the overdue ring holds still and stays visible', async () => {
+    const { result, detail } = await runAgainstPage({
+        page: 'skemany.html',
+        path: '/lectio/223/SkemaNy.aspx',
+        rawPages: TEACHER_PAGES,
+        chromeFlags: ['--force-prefers-reduced-motion'],
+        prelude: preludeFor(TODO_ONLY),
+        postlude: `${REPORTER}
+            settle(() => checked() && document.querySelector('.lcr-todo-mark-overdue'), () => {
+                const mark = document.querySelector('.lcr-todo-mark-overdue');
+                const ring = getComputedStyle(mark, '::after');
+                const icon = getComputedStyle(mark.querySelector('svg'));
+                check(matchMedia('(prefers-reduced-motion: reduce)').matches, 'reduced motion was not in force');
+                check(ring.animationName === 'none' && icon.animationName === 'none',
+                    'something still moves: ' + ring.animationName + ' / ' + icon.animationName);
+                check(ring.opacity === '1', 'the still ring is not visible: ' + ring.opacity);
+            });
+        `
+    });
 
     assert.equal(result, 'pass', detail || result || 'no result reported');
 });
