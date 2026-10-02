@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Chairs Up
 // @namespace    https://www.lectio.dk/
-// @version      1.4.9
+// @version      1.4.10
 // @description  Shows when a lesson is the final active booking of the day in its room, and when a much smaller class has the room last. Universal Lectio version.
 // @match        https://www.lectio.dk/lectio/*
 // @noframes
@@ -109,7 +109,7 @@
    * banner runs at module scope and could not see a const scoped to that
    * function. Keep it above the boot block (scripts/check-boot-order.mjs).
    */
-  const MODULE_VERSION = '1.4.9';
+  const MODULE_VERSION = '1.4.10';
 
   /*
    * Lets the Manager show this module as installed without
@@ -1457,6 +1457,9 @@
   const NOTICE_EDGE_GAP =
     12;
 
+  const NOTICE_MAX_WIDTH =
+    300;
+
 
   /*
    * Overlays the notice must never cover: Lectio's jQuery UI
@@ -2031,22 +2034,24 @@
         .map(
           describeCourtesy
         )
-        .join('; '),
+        .join(' '),
       true
     );
   }
 
 
   /*
-   * "The class after you in 205 has 5 students; you have 30". Shared by the
-   * activity notice and the timetable marker's tooltip.
+   * "You're the second-to-last class in 205. The last class has 5
+   * students; you have 30." Shared by the activity notice and the
+   * timetable marker's tooltip.
    */
   function describeCourtesy(
     item
   ) {
     return (
-      `The class after you in ${item.room} has ` +
-      `${item.nextSize} students; you have ${item.ourSize}`
+      `You're the second-to-last class in ${item.room}. ` +
+      `The last class has ${item.nextSize} students; ` +
+      `you have ${item.ourSize}.`
     );
   }
 
@@ -4485,8 +4490,7 @@
     unknownRooms
   ) {
     let text =
-      'COURTESY CHAIRS UP - Not the last class in the room, ' +
-      'but the class after you is much smaller.\n' +
+      'COURTESY CHAIRS UP - please put the chairs up anyway.\n' +
       courtesy
         .map(
           describeCourtesy
@@ -5763,8 +5767,16 @@
         width:
           max-content;
 
+        /*
+         * Capped, so a long message (the courtesy one names both class
+         * sizes) wraps onto a second line instead of stretching the
+         * notice towards the window edge.
+         */
         max-width:
-          100%;
+          min(
+            ${NOTICE_MAX_WIDTH}px,
+            100%
+          );
 
         margin:
           0 0 16px auto;
@@ -5974,6 +5986,13 @@
       .lectio-chairs-up-lesson-copy span {
         margin-top:
           4px;
+
+        /* The heading stays on one line; the message wraps. */
+        white-space:
+          normal;
+
+        line-height:
+          1.25;
 
         color:
           rgba(

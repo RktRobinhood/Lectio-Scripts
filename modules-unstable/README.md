@@ -57,4 +57,9 @@ Both tests load the Unstable copy while it exists and the Stable one after promo
 
 `tests/chairs-up-courtesy.browser.test.js` covers seven rooms on the timetable and the activity-page notice. It loads the Unstable copy while it exists and the Stable one after promotion.
 
+**Chairs Up 1.4.10** follows the owner's first test of 1.4.9:
+
+- The wording now says you are the second-to-last class: "You're the second-to-last class in 213. The last class has 12 students; you have 30." The tooltip and the notice use the same sentence.
+- The lesson-page notice is capped at 300px wide. Its message wraps onto a second line instead of stretching towards the window edge. The heading stays on one line, and the red notice's short message is unaffected.
+
 `modules.json` must never be emptied. Every shipped Manager rejects an overlay with no modules in it, keeps the overlay it cached last, and reports the failure on every refresh; a Manager older than 1.22.1 also lets that cached overlay win outright, so it would keep offering installs from the `modules-unstable/` URLs a promotion deletes. So when the last module here is promoted, the overlay keeps one entry that is an exact copy of its entry in `catalogue/modules.json`, `installUrl` included. A current Manager resolves equal versions to Stable, and an old one installs the Stable file whichever entry it picks. `node scripts/check-versions.mjs` accepts an overlay entry with no file here only when it is that exact copy, and fails an overlay with no entries at all.

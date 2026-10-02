@@ -211,7 +211,7 @@
 
             /* The tooltip says why. */
             const tip = document.querySelector('#lesson-RO102 .lectio-chairs-up-icon').getAttribute('title');
-            assert(/COURTESY CHAIRS UP/.test(tip) && /has 19 students; you have 30/.test(tip),
+            assert(/COURTESY CHAIRS UP/.test(tip) && /second-to-last class in 1\.06\. The last class has 19 students; you have 30\./.test(tip),
                 'courtesy tooltip reads: ' + tip);
 
             /* The ratio is a setting. At 1.25, 30 > 25 marks 1.05 too. */
@@ -247,8 +247,19 @@
             assert(notice.classList.contains('lectio-chairs-up-lesson-notice-courtesy'),
                 'the activity notice is not the courtesy variant');
             assert(/COURTESY CHAIRS UP/.test(notice.textContent) &&
-                /The class after you in 1\.06 has 19 students; you have 30/.test(notice.textContent),
+                /second-to-last class in 1\.06\. The last class has 19 students; you have 30\./.test(notice.textContent),
                 'activity notice reads: ' + notice.textContent.replace(/\s+/g, ' ').trim());
+
+            /* The longer courtesy message wraps inside a capped box rather
+               than stretching the notice towards the window edge. */
+            const box = notice.getBoundingClientRect();
+            const message = notice.querySelector('.lectio-chairs-up-lesson-copy span');
+            assert(box.width <= 300, 'the notice is ' + Math.round(box.width) + 'px wide, over its 300px cap');
+            assert(box.right <= document.documentElement.clientWidth,
+                'the notice runs past the window edge (right ' + Math.round(box.right) + ')');
+            assert(message && message.getClientRects().length && message.offsetHeight > 20,
+                'the courtesy message did not wrap onto a second line (height ' +
+                    (message && message.offsetHeight) + 'px)');
 
             setRatio('off');
             assert(!document.querySelector('.lectio-chairs-up-lesson-notice'),
