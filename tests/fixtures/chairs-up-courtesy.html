@@ -19,6 +19,14 @@
                    after a long gap ................. still one class: yellow
              1.11  a later booking with no hold ..... unknown: no yellow
 
+           Room 1.09 also had one of our lessons yesterday, with nothing after
+           it. That day has passed, so it gets no marker at all. (When
+           yesterday falls in the previous ISO week its room week is never
+           read, and that case holds trivially.)
+
+           The page is lang="da" with no Manager, so the words are Danish
+           until the test publishes English the way the Manager does.
+
            The fixture serves both pages the module runs on, picked by path,
            so the activity page is checked against the same rooms. */
         const SIZES = {
@@ -38,24 +46,27 @@
             RO107: { name: '1.11', ours: 'HE106', later: [['12:00', '13:10', null, '908']] }
         };
 
-        const lessonDate = new Date();
-        lessonDate.setDate(lessonDate.getDate() + 1);
+        const dayFromToday = (offset) => {
+            const date = new Date();
+            date.setDate(date.getDate() + offset);
+            return {
+                iso: date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' +
+                    String(date.getDate()).padStart(2, '0'),
+                lectio: date.getDate() + '/' + (date.getMonth() + 1) + '-' + date.getFullYear()
+            };
+        };
 
-        const iso = lessonDate.getFullYear() + '-' +
-            String(lessonDate.getMonth() + 1).padStart(2, '0') + '-' +
-            String(lessonDate.getDate()).padStart(2, '0');
-
-        const lectioDate = lessonDate.getDate() + '/' + (lessonDate.getMonth() + 1) +
-            '-' + lessonDate.getFullYear();
+        const tomorrow = dayFromToday(1);
+        window.yesterday = dayFromToday(-1);
 
         window.ourAbsid = (roomId) => '8' + roomId.slice(2);
 
         /* A lesson block as Lectio renders one, hold cards twice over
            (desktop and mobile copies), as the real pages do. */
-        window.lessonBlockHtml = (absid, start, end, hold, room) =>
+        window.lessonBlockHtml = (absid, start, end, hold, room, day = tomorrow) =>
             '<a class="s2skemabrik s2brik" ' +
             'href="/lectio/223/aktivitet/aktivitetforside2.aspx?absid=' + absid + '" ' +
-            'data-tooltip="' + lectioDate + ' ' + start + ' til ' + end + '\n' +
+            'data-tooltip="' + day.lectio + ' ' + start + ' til ' + end + '\n' +
             (hold ? 'Hold: ' + hold + '\n' : '') + 'Lokale: ' + room + '">' +
             '<div class="s2skemabrikcontent OnlyDesktop">' +
             (hold ? '<span data-lectiocontextcard="' + hold + '">' + hold + '</span>' : 'Møde') +
@@ -69,7 +80,12 @@
                 .concat(room.later.map(([start, end, hold, absid]) =>
                     lessonBlockHtml(absid, start, end, hold, room.name)));
 
-            return '<html><body><table><tr><td data-date="' + iso + '">' +
+            const past = roomId === 'RO105'
+                ? '<td data-date="' + yesterday.iso + '">' +
+                    lessonBlockHtml('8999', '09:40', '10:50', room.ours, room.name, yesterday) + '</td>'
+                : '';
+
+            return '<html><body><table><tr>' + past + '<td data-date="' + tomorrow.iso + '">' +
                 blocks.join('') + '</td></tr></table></body></html>';
         };
 
@@ -125,6 +141,8 @@
             host.innerHTML = '<table><tr>' + Object.entries(ROOMS).map(([roomId, room]) =>
                 '<td>' + lessonBlockHtml(ourAbsid(roomId), '09:40', '10:50', room.ours, room.name)
                     .replace('<a ', '<a id="lesson-' + roomId + '" ') + '</td>').join('') +
+                '<td>' + lessonBlockHtml('8999', '09:40', '10:50', 'HE104', '1.09', yesterday)
+                    .replace('<a ', '<a id="lesson-past" ') + '</td>' +
                 '</tr></table>';
         }
     </script>
@@ -157,6 +175,11 @@
         };
 
         const memberFetches = () => window.fetchLog.filter((url) => url.includes('/members.aspx'));
+
+        const setLanguage = (language) => {
+            document.documentElement.dataset.lectioLanguage = language;
+            window.dispatchEvent(new CustomEvent('lectio-manager:language', { detail: { language } }));
+        };
 
         const marker = (roomId) => {
             const lesson = document.getElementById('lesson-' + roomId);
@@ -209,10 +232,24 @@
             assert(Object.values(stored).every((entry) =>
                 Object.keys(entry).sort().join(',') === 'at,n'), 'a stored size holds more than a count');
 
-            /* The tooltip says why. */
-            const tip = document.querySelector('#lesson-RO102 .lectio-chairs-up-icon').getAttribute('title');
-            assert(/COURTESY CHAIRS UP/.test(tip) && /second-to-last class in 1\.06\. The last class has 19 students; you have 30\./.test(tip),
-                'courtesy tooltip reads: ' + tip);
+            /* A day that has passed is not marked, even when it was last. */
+            assert(marker('past') === 'none', 'yesterday\'s lesson was marked: ' + marker('past'));
+
+            /* Both tooltips say why - in Danish, the page's language, until
+               the Manager publishes English. */
+            const tipOf = (roomId) => document.querySelector('#lesson-' + roomId + ' .lectio-chairs-up-icon').getAttribute('title');
+            assert(/^STOLE OP AF HENSYN/.test(tipOf('RO102')) &&
+                /I er næstsidste hold i 1\.06\. Det sidste hold har 19 elever; I har 30\./.test(tipOf('RO102')),
+                'Danish courtesy tooltip reads: ' + tipOf('RO102'));
+            assert(/^STOLE OP - Sidste aktive booking i 1\.09/.test(tipOf('RO105')),
+                'Danish red tooltip reads: ' + tipOf('RO105'));
+
+            setLanguage('en');
+            assert(/^COURTESY CHAIRS UP/.test(tipOf('RO102')) &&
+                /second-to-last class in 1\.06\. The last class has 19 students; you have 30\./.test(tipOf('RO102')),
+                'English courtesy tooltip reads: ' + tipOf('RO102'));
+            assert(/^CHAIRS UP - Last active booking in 1\.09/.test(tipOf('RO105')),
+                'English red tooltip reads: ' + tipOf('RO105'));
 
             /* The ratio is a setting. At 1.25, 30 > 25 marks 1.05 too. */
             const before = window.fetchLog.length;
@@ -246,9 +283,9 @@
 
             assert(notice.classList.contains('lectio-chairs-up-lesson-notice-courtesy'),
                 'the activity notice is not the courtesy variant');
-            assert(/COURTESY CHAIRS UP/.test(notice.textContent) &&
-                /second-to-last class in 1\.06\. The last class has 19 students; you have 30\./.test(notice.textContent),
-                'activity notice reads: ' + notice.textContent.replace(/\s+/g, ' ').trim());
+            assert(/STOLE OP AF HENSYN/.test(notice.textContent) &&
+                /I er næstsidste hold i 1\.06\. Det sidste hold har 19 elever; I har 30\./.test(notice.textContent),
+                'Danish activity notice reads: ' + notice.textContent.replace(/\s+/g, ' ').trim());
 
             /* The longer courtesy message wraps inside a capped box rather
                than stretching the notice towards the window edge. */
@@ -260,6 +297,13 @@
             assert(message && message.getClientRects().length && message.offsetHeight > 20,
                 'the courtesy message did not wrap onto a second line (height ' +
                     (message && message.offsetHeight) + 'px)');
+
+            /* The Manager switching to English rewrites the notice in place. */
+            setLanguage('en');
+            const english = document.querySelector('.lectio-chairs-up-lesson-notice');
+            assert(english && /COURTESY CHAIRS UP/.test(english.textContent) &&
+                /second-to-last class in 1.06. The last class has 19 students; you have 30./.test(english.textContent),
+                'English activity notice reads: ' + (english && english.textContent.replace(/s+/g, ' ').trim()));
 
             setRatio('off');
             assert(!document.querySelector('.lectio-chairs-up-lesson-notice'),

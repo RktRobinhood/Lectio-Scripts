@@ -1,4 +1,5 @@
 const { createServer } = require('node:http');
+const { existsSync } = require('node:fs');
 const { readFile } = require('node:fs/promises');
 const { join, resolve } = require('node:path');
 const test = require('node:test');
@@ -11,13 +12,18 @@ const { chromeEnvironment, createProfile, releaseProfile, runChrome } = require(
 const ACTIVITY_PATH = '/lectio/223/aktivitet/aktivitetforside2.aspx';
 const MODULE_PATH = '/modules/Lectio-Chairs-Up.user.js';
 
+/* The copy under test: Unstable while one exists, Stable once promoted. */
+const MODULE_FILE = ['modules-unstable', 'modules']
+    .map((folder) => resolve(__dirname, '..', folder, 'Lectio-Chairs-Up.user.js'))
+    .find((file) => existsSync(file));
+
 const ROUTES = new Map([
     [ACTIVITY_PATH, {
         file: resolve(__dirname, 'fixtures', 'chairs-up-notice.html'),
         type: 'text/html; charset=utf-8'
     }],
     [MODULE_PATH, {
-        file: resolve(__dirname, '..', 'modules', 'Lectio-Chairs-Up.user.js'),
+        file: MODULE_FILE,
         type: 'text/javascript; charset=utf-8'
     }]
 ]);

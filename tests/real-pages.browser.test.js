@@ -12,6 +12,7 @@
  */
 
 const { createServer } = require('node:http');
+const { existsSync } = require('node:fs');
 const { readFile } = require('node:fs/promises');
 const { extname, join, resolve } = require('node:path');
 const test = require('node:test');
@@ -866,10 +867,16 @@ test('Chairs Up reads the 15 roomed lessons off the real week and marks the last
     /*
      * The saved week is 21-25 September 2026, ISO week 39. Chairs Up keys its
      * room-week cache on that, so the cache below is written for week 39 of
-     * 2026 - and the page's clock is stopped on Saturday 26 September, inside
-     * that week. Chairs Up prunes every room week older than the current one
-     * before it reads any (issue #29), so from week 40 on, a real clock had
-     * the seeded cache deleted on load and nothing marked at all.
+     * 2026 - and the page's clock is stopped early on Monday 21 September, the
+     * first day of that week. Chairs Up prunes every room week older than the
+     * current one before it reads any (issue #29), so from week 40 on, a real
+     * clock had the seeded cache deleted on load and nothing marked at all.
+     * And from 1.4.11 it marks nothing on a day that has passed, so the clock
+     * has to stand before every lesson on the page, not after them; at 06:00
+     * no lesson is near enough to start for a same-day recheck either.
+     *
+     * The seeded weeks carry `format: 2`, the room-week shape 1.4.9 began
+     * writing; an older shape is refetched, and this test fetches nothing.
      *
      * The module is given what it would otherwise go and harvest: a fresh room
      * map naming every room on the page, and one fresh, empty week per room.
@@ -883,7 +890,7 @@ test('Chairs Up reads the 15 roomed lessons off the real week and marks the last
         page: 'skemany.html',
         path: '/lectio/223/SkemaNy.aspx',
         prelude: `
-            const FROZEN_NOW = new Date(2026, 8, 26, 12, 0, 0).getTime();
+            const FROZEN_NOW = new Date(2026, 8, 21, 6, 0, 0).getTime();
             window.Date = class extends Date {
                 constructor(...args) { super(...(args.length ? args : [FROZEN_NOW])); }
                 static now() { return FROZEN_NOW; }
@@ -902,7 +909,7 @@ test('Chairs Up reads the 15 roomed lessons off the real week and marks the last
                     : {};
                 localStorage.setItem(
                     'lectioChairsUp.v104.223.roomWeek.' + roomId + '.2026.39',
-                    JSON.stringify({ fetchedAt: Date.now(), days })
+                    JSON.stringify({ format: 2, fetchedAt: Date.now(), days })
                 );
             }
 
@@ -928,7 +935,10 @@ test('Chairs Up reads the 15 roomed lessons off the real week and marks the last
                 realInfo.apply(console, args);
             };
         `,
-        modules: ['/modules/Lectio-Chairs-Up.user.js'],
+        // The copy under test: Unstable while one exists, Stable once promoted.
+        modules: [existsSync(resolve(repositoryRoot, 'modules-unstable', 'Lectio-Chairs-Up.user.js'))
+            ? '/modules-unstable/Lectio-Chairs-Up.user.js'
+            : '/modules/Lectio-Chairs-Up.user.js'],
         postlude: `${REPORTER}
             setTimeout(() => {
                 const lessons = [...document.querySelectorAll('a.s2skemabrik.s2brik[data-tooltip]')];

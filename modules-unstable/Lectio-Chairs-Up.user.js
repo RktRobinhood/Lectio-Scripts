@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Chairs Up
 // @namespace    https://www.lectio.dk/
-// @version      1.4.10
+// @version      1.4.11
 // @description  Shows when a lesson is the final active booking of the day in its room, and when a much smaller class has the room last. Universal Lectio version.
 // @match        https://www.lectio.dk/lectio/*
 // @noframes
@@ -109,7 +109,7 @@
    * banner runs at module scope and could not see a const scoped to that
    * function. Keep it above the boot block (scripts/check-boot-order.mjs).
    */
-  const MODULE_VERSION = '1.4.10';
+  const MODULE_VERSION = '1.4.11';
 
   /*
    * Lets the Manager show this module as installed without
@@ -317,6 +317,8 @@
     // The schema was worded in whichever language was current when it was
     // announced, so a language chosen later is answered with a fresh one.
     window.addEventListener('lectio-manager:language', announce);
+    // The notice and tooltips are worded in that language too.
+    window.addEventListener('lectio-manager:language', repaintCurrentView);
     announce();
   })();
 
@@ -2001,10 +2003,17 @@
         );
 
 
+    const text =
+      pageText();
+
+
     if (lastRooms.length) {
       createActivityNotice(
-        'CHAIRS UP',
-        `Last active booking in room ${lastRooms.join(', ')}`,
+        text.lastHeading,
+        fillText(
+          text.lastNotice,
+          { rooms: lastRooms.join(', ') }
+        ),
         false
       );
 
@@ -2029,7 +2038,7 @@
 
 
     createActivityNotice(
-      'COURTESY CHAIRS UP',
+      text.courtesyHeading,
       courtesy
         .map(
           describeCourtesy
@@ -2048,10 +2057,67 @@
   function describeCourtesy(
     item
   ) {
-    return (
-      `You're the second-to-last class in ${item.room}. ` +
-      `The last class has ${item.nextSize} students; ` +
-      `you have ${item.ourSize}.`
+    return fillText(
+      pageText().courtesyDetail,
+      {
+        room: item.room,
+        next: item.nextSize,
+        ours: item.ourSize
+      }
+    );
+  }
+
+
+  /*
+   * The words Chairs Up puts on the page itself - the lesson-page notice
+   * and the marker tooltips - in the same language as its settings panel,
+   * by the same order of authority (ADR-0013): the Manager's published
+   * choice, then <html lang>, then Danish. Read each time something is
+   * painted, and a lectio-manager:language event repaints, so a language
+   * chosen in the Manager takes effect without a reload.
+   *
+   * {name} placeholders are filled by fillText(); they are part of the
+   * sentence, so each language places them where its grammar wants them.
+   */
+  function pageText() {
+    const preferred = document.documentElement?.dataset?.lectioLanguage;
+    const language = (preferred || document.documentElement.lang || 'da').toLowerCase();
+
+    return language.startsWith('en')
+      // i18n:en
+      ? {
+        lastHeading: 'CHAIRS UP',
+        lastNotice: 'Last active booking in room {rooms}',
+        lastTooltip: 'CHAIRS UP - Last active booking in {rooms}',
+        courtesyHeading: 'COURTESY CHAIRS UP',
+        courtesyTooltip: 'COURTESY CHAIRS UP - please put the chairs up anyway.',
+        courtesyDetail: 'You\'re the second-to-last class in {room}. The last class has {next} students; you have {ours}.',
+        unverified: 'Could not verify: {rooms}'
+      }
+      // i18n:da
+      : {
+        lastHeading: 'STOLE OP',
+        lastNotice: 'Sidste aktive booking i lokale {rooms}',
+        lastTooltip: 'STOLE OP - Sidste aktive booking i {rooms}',
+        courtesyHeading: 'STOLE OP AF HENSYN',
+        courtesyTooltip: 'STOLE OP AF HENSYN - sæt venligst stolene op alligevel.',
+        courtesyDetail: 'I er næstsidste hold i {room}. Det sidste hold har {next} elever; I har {ours}.',
+        unverified: 'Kunne ikke kontrollere: {rooms}'
+      };
+      // i18n:end
+  }
+
+
+  function fillText(
+    template,
+    values
+  ) {
+    return String(template).replace(
+      /\{(\w+)\}/g,
+      (whole, name) =>
+        name in values
+          ? String(values[name])
+          : whole
     );
   }
 
@@ -3593,6 +3659,21 @@
     const statuses = [];
 
 
+    /*
+     * A day that has been and gone gets no marker at all: its chairs are
+     * already up or down, and a red or yellow chair on last Monday only
+     * makes this week's harder to see. Today counts, all day long.
+     */
+    if (
+      differenceInCalendarDays(
+        lesson.dateObj,
+        new Date()
+      ) < 0
+    ) {
+      return statuses;
+    }
+
+
     for (
       const room of lesson.rooms
     ) {
@@ -4469,15 +4550,26 @@
     lastRooms,
     unknownRooms
   ) {
+    const words =
+      pageText();
+
+
     let text =
-      `CHAIRS UP - Last active booking in ${lastRooms.join(', ')}`;
+      fillText(
+        words.lastTooltip,
+        { rooms: lastRooms.join(', ') }
+      );
 
 
     if (
       unknownRooms.length
     ) {
       text +=
-        `\nCould not verify: ${unknownRooms.join(', ')}`;
+        '\n' +
+        fillText(
+          words.unverified,
+          { rooms: unknownRooms.join(', ') }
+        );
     }
 
 
@@ -4489,8 +4581,13 @@
     courtesy,
     unknownRooms
   ) {
+    const words =
+      pageText();
+
+
     let text =
-      'COURTESY CHAIRS UP - please put the chairs up anyway.\n' +
+      words.courtesyTooltip +
+      '\n' +
       courtesy
         .map(
           describeCourtesy
@@ -4502,7 +4599,11 @@
       unknownRooms.length
     ) {
       text +=
-        `\nCould not verify: ${unknownRooms.join(', ')}`;
+        '\n' +
+        fillText(
+          words.unverified,
+          { rooms: unknownRooms.join(', ') }
+        );
     }
 
 
