@@ -38,21 +38,21 @@
     {
       "id": "chairs-up",
       "name": "Chairs Up",
-      "description": "Marks a lesson when it is the last active booking of the day in that room.",
+      "description": "Marks a lesson when it is the last active booking of the day in that room, and in yellow when only a much smaller class comes after it.",
       "category": "Timetable",
       "audience": [
         "teacher"
       ],
       "status": "stable",
-      "version": "1.4.7",
-      "changelog": "Text in short lessons stays inside its box again. Chairs Up had switched off Lectio's own clipping on every lesson so its badge could hang over the corner, so a short lesson's text spilled out over the next one.",
+      "version": "1.4.12",
+      "changelog": "New yellow \"courtesy chairs up\" marker for when only a much smaller class comes after yours in the room; set the chairs per student in settings. The text now follows the Manager's language, and past days are not marked.",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Chairs-Up.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
       "i18n": {
         "da": {
           "name": "Stole Op",
-          "description": "Markerer en lektion, når den er dagens sidste aktive booking i det lokale.",
-          "changelog": "Teksten i korte lektioner bliver igen inden for sin boks. Stole Op havde slået Lectios egen beskæring fra på alle lektioner, så mærket kunne hænge ud over hjørnet, og derfor løb teksten i en kort lektion ud over den næste."
+          "description": "Markerer en lektion, når den er dagens sidste aktive booking i det lokale, og med gult, når kun et meget mindre hold kommer efter den.",
+          "changelog": "Ny gul markering, \"stole op af hensyn\", når kun et meget mindre hold kommer efter jer i lokalet; vælg stole pr. elev i indstillingerne. Teksten følger nu sproget i Lectio Manager, og dage, der er gået, markeres ikke."
         }
       }
     },

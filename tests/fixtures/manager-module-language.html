@@ -190,7 +190,7 @@
                 const englishValues = englishFile.modules['chairs-up']?.values;
                 assert(englishValues, 'the export carries nothing for Chairs Up');
                 assert(
-                    Object.keys(englishValues).sort().join(',') === 'markerStyle,showLessonNotice',
+                    Object.keys(englishValues).sort().join(',') === 'courtesyRatio,markerStyle,showLessonNotice',
                     `the export carries the wrong keys for Chairs Up: ${Object.keys(englishValues).join(',')}`
                 );
 
