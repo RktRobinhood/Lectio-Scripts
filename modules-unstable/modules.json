@@ -61,15 +61,15 @@
         "teacher"
       ],
       "status": "unstable",
-      "version": "1.4.8",
-      "changelog": "No false problem report on a week of all-day entries only, and nothing runs inside Lectio's dialogs any more.",
+      "version": "1.4.9",
+      "changelog": "New yellow \"courtesy chairs up\" marker: when only one class comes after yours in the room and it is much smaller, your class puts the chairs up. Set how many chairs per student is fair in settings (1.5 by default).",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Chairs-Up.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
       "i18n": {
         "da": {
           "name": "Stole Op",
           "description": "Markerer en lektion, når den er dagens sidste aktive booking i det lokale.",
-          "changelog": "Ingen falsk problemrapport i en uge med kun heldagsaktiviteter, og intet kører længere inde i Lectios dialoger."
+          "changelog": "Ny gul markering, \"stole op af hensyn\": når kun ét hold kommer efter jer i lokalet, og det er meget mindre, sætter jeres hold stolene op. Vælg i indstillingerne, hvor mange stole pr. elev der er rimeligt (1,5 som standard)."
         }
       }
     }

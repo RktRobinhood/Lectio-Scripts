@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>Chairs Up courtesy fixture</title>
+    <script>
+        /* Issue #83: a yellow "courtesy chairs up" marker when exactly one
+           class has the room after this lesson and it is much smaller.
+
+           Every room below holds one of our lessons tomorrow, 09:40-10:50,
+           in a class of 30 (holds HE100-HE106), and a different afternoon:
+
+             1.05  one later class of 20 ............ 30 = 1.5 x 20: no yellow
+             1.06  one later class of 19 ............ 30 > 28.5: yellow
+             1.07  one later class, size unreadable . unknown: no yellow
+             1.08  two different later classes ...... not second-to-last: none
+             1.09  nothing later .................... red, as before
+             1.10  one class of 5, a double lesson
+                   after a long gap ................. still one class: yellow
+             1.11  a later booking with no hold ..... unknown: no yellow
+
+           The fixture serves both pages the module runs on, picked by path,
+           so the activity page is checked against the same rooms. */
+        const SIZES = {
+            HE100: 30, HE101: 30, HE102: 30, HE103: 30, HE104: 30, HE105: 30, HE106: 30,
+            HE200: 20, HE201: 19, HE203: 5, HE204: 5, HE205: 5
+            /* HE202 is missing on purpose: its page answers like Lectio's
+               "Fejl" page does, with no "Antal elever" on it. */
+        };
+
+        const ROOMS = {
+            RO101: { name: '1.05', ours: 'HE100', later: [['12:00', '13:10', 'HE200', '901']] },
+            RO102: { name: '1.06', ours: 'HE101', later: [['12:00', '13:10', 'HE201', '902']] },
+            RO103: { name: '1.07', ours: 'HE102', later: [['12:00', '13:10', 'HE202', '903']] },
+            RO104: { name: '1.08', ours: 'HE103', later: [['11:00', '11:50', 'HE203', '904'], ['12:00', '13:10', 'HE204', '905']] },
+            RO105: { name: '1.09', ours: 'HE104', later: [] },
+            RO106: { name: '1.10', ours: 'HE105', later: [['13:20', '14:30', 'HE205', '906'], ['14:40', '15:50', 'HE205', '907']] },
+            RO107: { name: '1.11', ours: 'HE106', later: [['12:00', '13:10', null, '908']] }
+        };
+
+        const lessonDate = new Date();
+        lessonDate.setDate(lessonDate.getDate() + 1);
+
+        const iso = lessonDate.getFullYear() + '-' +
+            String(lessonDate.getMonth() + 1).padStart(2, '0') + '-' +
+            String(lessonDate.getDate()).padStart(2, '0');
+
+        const lectioDate = lessonDate.getDate() + '/' + (lessonDate.getMonth() + 1) +
+            '-' + lessonDate.getFullYear();
+
+        window.ourAbsid = (roomId) => '8' + roomId.slice(2);
+
+        /* A lesson block as Lectio renders one, hold cards twice over
+           (desktop and mobile copies), as the real pages do. */
+        window.lessonBlockHtml = (absid, start, end, hold, room) =>
+            '<a class="s2skemabrik s2brik" ' +
+            'href="/lectio/223/aktivitet/aktivitetforside2.aspx?absid=' + absid + '" ' +
+            'data-tooltip="' + lectioDate + ' ' + start + ' til ' + end + '\n' +
+            (hold ? 'Hold: ' + hold + '\n' : '') + 'Lokale: ' + room + '">' +
+            '<div class="s2skemabrikcontent OnlyDesktop">' +
+            (hold ? '<span data-lectiocontextcard="' + hold + '">' + hold + '</span>' : 'Møde') +
+            '</div><div class="s2skemabrikcontent OnlyMobile">' +
+            (hold ? '<span data-lectiocontextcard="' + hold + '">' + hold + '</span>' : 'Møde') +
+            '</div></a>';
+
+        const roomWeekHtml = (roomId) => {
+            const room = ROOMS[roomId];
+            const blocks = [lessonBlockHtml(ourAbsid(roomId), '09:40', '10:50', room.ours, room.name)]
+                .concat(room.later.map(([start, end, hold, absid]) =>
+                    lessonBlockHtml(absid, start, end, hold, room.name)));
+
+            return '<html><body><table><tr><td data-date="' + iso + '">' +
+                blocks.join('') + '</td></tr></table></body></html>';
+        };
+
+        const membersHtml = (holdId) => holdId in SIZES
+            ? '<html><body><h1>Holdet x - Lærere og elever</h1><div>Antal elever: ' +
+                SIZES[holdId] + ', Antal lærere: 1, </div></body></html>'
+            : '<html><body><h1>Fejl</h1><p>Der opstod en ukendt fejl</p></body></html>';
+
+        window.fetchLog = [];
+
+        window.fetch = (url) => {
+            const parsed = new URL(String(url), location.href);
+            window.fetchLog.push(parsed.pathname + parsed.search);
+
+            let html = null;
+
+            if (parsed.pathname.endsWith('/SkemaNy.aspx') && parsed.searchParams.get('type') === 'lokale') {
+                html = roomWeekHtml(parsed.searchParams.get('id'));
+            } else if (parsed.pathname.endsWith('/subnav/members.aspx')) {
+                /* Lectio only prints the count with showstudents=1. */
+                html = parsed.searchParams.get('showstudents') === '1'
+                    ? membersHtml('HE' + parsed.searchParams.get('holdelementid'))
+                    : membersHtml('none');
+            }
+
+            return html === null
+                ? Promise.reject(new TypeError('unexpected request ' + url))
+                : Promise.resolve(new Response(html, { status: 200, headers: { 'content-type': 'text/html' } }));
+        };
+
+        localStorage.clear();
+        localStorage.setItem('lectioChairsUp.v102.223.roomMap', JSON.stringify(
+            Object.fromEntries(Object.entries(ROOMS).map(([id, room]) => [room.name, id]))));
+        localStorage.setItem('lectioChairsUp.v102.223.roomMapTime', String(Date.now()));
+
+        window.ROOMS = ROOMS;
+        window.IS_ACTIVITY_PAGE = location.pathname.endsWith('/aktivitetforside2.aspx');
+    </script>
+</head>
+<body>
+    <div id="masterContent"></div>
+
+    <script>
+        const host = document.getElementById('masterContent');
+
+        if (window.IS_ACTIVITY_PAGE) {
+            /* The activity page for our lesson in 1.06. */
+            host.innerHTML =
+                '<div id="homeworkContentContainer"><div id="s_m_Content_Content_tocAndToolbar_actHeader">' +
+                lessonBlockHtml(ourAbsid('RO102'), '09:40', '10:50', 'HE101', '1.06') +
+                '</div></div>';
+        } else {
+            host.innerHTML = '<table><tr>' + Object.entries(ROOMS).map(([roomId, room]) =>
+                '<td>' + lessonBlockHtml(ourAbsid(roomId), '09:40', '10:50', room.ours, room.name)
+                    .replace('<a ', '<a id="lesson-' + roomId + '" ') + '</td>').join('') +
+                '</tr></table>';
+        }
+    </script>
+
+    <script src="/chairs-up.user.js"></script>
+
+    <script>
+        const failures = [];
+        const assert = (condition, message) => {
+            if (!condition) failures.push(message);
+        };
+
+        const report = () => {
+            const output = document.createElement('pre');
+            output.id = 'test-result';
+            output.textContent = failures.length ? failures.join(' | ') : 'pass';
+            document.body.dataset.testResult = failures.length ? 'fail' : 'pass';
+            document.body.appendChild(output);
+        };
+
+        const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+        const waitFor = async (predicate, label) => {
+            for (let attempt = 0; attempt < 400; attempt += 1) {
+                if (predicate()) return true;
+                await wait(50);
+            }
+            failures.push('timed out waiting for ' + label);
+            return false;
+        };
+
+        const memberFetches = () => window.fetchLog.filter((url) => url.includes('/members.aspx'));
+
+        const marker = (roomId) => {
+            const lesson = document.getElementById('lesson-' + roomId);
+            const icon = lesson.querySelector('.lectio-chairs-up-icon');
+
+            if (lesson.classList.contains('lectio-chairs-up-last')) return 'red';
+            if (lesson.classList.contains('lectio-chairs-up-courtesy')) {
+                return icon && icon.classList.contains('lectio-chairs-up-icon-courtesy') ? 'yellow' : 'yellow-without-icon';
+            }
+            return icon ? 'stray-icon' : 'none';
+        };
+
+        const setRatio = (value) => window.dispatchEvent(new CustomEvent('lectio-manager:set-setting', {
+            detail: { id: 'chairs-up', key: 'courtesyRatio', value }
+        }));
+
+        const runTimetable = async () => {
+            /* Seven room weeks, then the eight sizes the rule needs. */
+            await waitFor(
+                () => window.fetchLog.length >= 15 && marker('RO106') === 'yellow',
+                'room weeks and class sizes to be fetched and painted'
+            );
+
+            const expected = {
+                RO101: 'none', RO102: 'yellow', RO103: 'none', RO104: 'none',
+                RO105: 'red', RO106: 'yellow', RO107: 'none'
+            };
+
+            for (const [roomId, want] of Object.entries(expected)) {
+                assert(marker(roomId) === want,
+                    ROOMS[roomId].name + ': expected ' + want + ', got ' + marker(roomId));
+            }
+
+            /* Only the sizes the rule needs: the four rooms with exactly one
+               class after ours, both sides. Never the two-class room, the
+               last-in-room lesson or the hold-less booking's room. */
+            const asked = memberFetches()
+                .map((url) => 'HE' + new URL(url, location.href).searchParams.get('holdelementid'))
+                .sort();
+            const wanted = ['HE100', 'HE101', 'HE102', 'HE105', 'HE200', 'HE201', 'HE202', 'HE205'];
+            assert(JSON.stringify(asked) === JSON.stringify(wanted),
+                'class sizes asked for: ' + asked.join(',') + ', expected ' + wanted.join(','));
+            assert(memberFetches().every((url) => url.includes('showstudents=1')),
+                'a members page was asked for without showstudents=1');
+
+            /* Only counts are kept, and an unreadable size is unknown, not 0. */
+            const stored = JSON.parse(localStorage.getItem('lectioChairsUp.holdSizes.223') || '{}');
+            assert(stored.HE201 && stored.HE201.n === 19, 'HE201 not stored as 19: ' + JSON.stringify(stored.HE201));
+            assert(stored.HE202 && stored.HE202.n === null, 'unreadable HE202 not stored as null: ' + JSON.stringify(stored.HE202));
+            assert(Object.values(stored).every((entry) =>
+                Object.keys(entry).sort().join(',') === 'at,n'), 'a stored size holds more than a count');
+
+            /* The tooltip says why. */
+            const tip = document.querySelector('#lesson-RO102 .lectio-chairs-up-icon').getAttribute('title');
+            assert(/COURTESY CHAIRS UP/.test(tip) && /has 19 students; you have 30/.test(tip),
+                'courtesy tooltip reads: ' + tip);
+
+            /* The ratio is a setting. At 1.25, 30 > 25 marks 1.05 too. */
+            const before = window.fetchLog.length;
+            setRatio('1.25');
+            assert(marker('RO101') === 'yellow', 'at 1.25 chairs per student 1.05 should be yellow, got ' + marker('RO101'));
+
+            /* Off leaves the red marker alone and removes every yellow one. */
+            setRatio('off');
+            assert(marker('RO102') === 'none' && marker('RO106') === 'none',
+                'courtesy markers survived the setting being switched off');
+            assert(marker('RO105') === 'red', 'switching courtesy off removed the red marker');
+
+            setRatio('1.5');
+            assert(marker('RO102') === 'yellow' && marker('RO101') === 'none',
+                'back at 1.5 the markers did not come back as before');
+
+            await wait(500);
+            assert(window.fetchLog.length === before,
+                'changing the ratio refetched something already cached: ' +
+                    window.fetchLog.slice(before).join(','));
+        };
+
+        const runActivity = async () => {
+            await waitFor(
+                () => document.querySelector('.lectio-chairs-up-lesson-notice'),
+                'the activity notice'
+            );
+
+            const notice = document.querySelector('.lectio-chairs-up-lesson-notice');
+            if (!notice) return;
+
+            assert(notice.classList.contains('lectio-chairs-up-lesson-notice-courtesy'),
+                'the activity notice is not the courtesy variant');
+            assert(/COURTESY CHAIRS UP/.test(notice.textContent) &&
+                /The class after you in 1\.06 has 19 students; you have 30/.test(notice.textContent),
+                'activity notice reads: ' + notice.textContent.replace(/\s+/g, ' ').trim());
+
+            setRatio('off');
+            assert(!document.querySelector('.lectio-chairs-up-lesson-notice'),
+                'the courtesy notice survived the setting being switched off');
+        };
+
+        (window.IS_ACTIVITY_PAGE ? runActivity() : runTimetable())
+            .catch((error) => failures.push('threw: ' + (error && error.stack || error)))
+            .finally(report);
+    </script>
+</body>
+</html>

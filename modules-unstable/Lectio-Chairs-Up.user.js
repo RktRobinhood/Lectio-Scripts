@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Lectio - Chairs Up
 // @namespace    https://www.lectio.dk/
-// @version      1.4.8
-// @description  Shows when a lesson is the final active booking of the day in its room. Universal Lectio version.
+// @version      1.4.9
+// @description  Shows when a lesson is the final active booking of the day in its room, and when a much smaller class has the room last. Universal Lectio version.
 // @match        https://www.lectio.dk/lectio/*
 // @noframes
 // @grant        none
@@ -67,9 +67,27 @@
   const ROOM_WEEK_KEY_PREFIX =
     'lectioChairsUp.v104.';
 
+  /*
+   * Class sizes, one number per hold (issue #83). Deliberately not
+   * `lectioChairsUp.v<digits>.`, which is the shape pruneLegacyStorage()
+   * treats as an abandoned cache and deletes.
+   */
+  const HOLD_SIZE_KEY_PREFIX =
+    'lectioChairsUp.holdSizes.';
+
+  /*
+   * How many chairs each student in the room's last class is expected to
+   * put up. "Courtesy chairs up" shows when the class before them is bigger
+   * than this many times their size. 'off' switches the courtesy marker off
+   * and leaves the red one alone.
+   */
+  const COURTESY_RATIOS =
+    ['off', '1.25', '1.5', '2'];
+
   const DEFAULT_SETTINGS = {
     markerStyle: 'badge',
-    showLessonNotice: true
+    showLessonNotice: true,
+    courtesyRatio: '1.5'
   };
 
   let settings =
@@ -91,7 +109,7 @@
    * banner runs at module scope and could not see a const scoped to that
    * function. Keep it above the boot block (scripts/check-boot-order.mjs).
    */
-  const MODULE_VERSION = '1.4.8';
+  const MODULE_VERSION = '1.4.9';
 
   /*
    * Lets the Manager show this module as installed without
@@ -127,7 +145,13 @@
           markerOutline: 'Outline',
           markerQuiet: 'Quiet dot',
           lessonNoticeLabel: 'Lesson-page notice',
-          lessonNoticeHelp: 'Show the large Chairs Up notice on activity pages.'
+          lessonNoticeHelp: 'Show the large Chairs Up notice on activity pages.',
+          courtesyLabel: 'Courtesy chairs up',
+          courtesyHelp: 'Mark a lesson in yellow when only one class comes after it in the room and that class is much smaller. Choose how many chairs each student in the last class should put up.',
+          courtesyOff: 'Off',
+          courtesy125: '1.25 chairs per student',
+          courtesy15: '1.5 chairs per student',
+          courtesy2: '2 chairs per student'
         }
         // i18n:da
         : {
@@ -137,7 +161,13 @@
           markerOutline: 'Ramme',
           markerQuiet: 'Diskret prik',
           lessonNoticeLabel: 'Besked på aktivitetssiden',
-          lessonNoticeHelp: 'Vis den store Chairs Up-besked på aktivitetssider.'
+          lessonNoticeHelp: 'Vis den store Chairs Up-besked på aktivitetssider.',
+          courtesyLabel: 'Stole op af hensyn',
+          courtesyHelp: 'Markér en lektion med gult, når kun ét hold kommer efter den i lokalet, og det hold er meget mindre. Vælg, hvor mange stole hver elev på det sidste hold skal sætte op.',
+          courtesyOff: 'Fra',
+          courtesy125: '1,25 stol pr. elev',
+          courtesy15: '1,5 stol pr. elev',
+          courtesy2: '2 stole pr. elev'
         };
         // i18n:end
     }
@@ -167,6 +197,18 @@
               type: 'toggle',
               label: text.lessonNoticeLabel,
               description: text.lessonNoticeHelp
+            },
+            {
+              key: 'courtesyRatio',
+              type: 'select',
+              label: text.courtesyLabel,
+              description: text.courtesyHelp,
+              options: [
+                { value: 'off', label: text.courtesyOff },
+                { value: '1.25', label: text.courtesy125 },
+                { value: '1.5', label: text.courtesy15 },
+                { value: '2', label: text.courtesy2 }
+              ]
             }
           ],
           currentValues: { ...settings },
@@ -201,6 +243,15 @@
                 en: 'Cached room timetables',
                 da: 'Gemte lokaleskemaer'
               }
+            },
+            {
+              prefix: HOLD_SIZE_KEY_PREFIX,
+              kind: 'cache',
+              prunable: true,
+              label: {
+                en: 'Cached class sizes',
+                da: 'Gemte holdstørrelser'
+              }
             }
           ]
         }
@@ -221,7 +272,8 @@
 
       if (
         detail.prefix === ROOM_MAP_KEY_PREFIX ||
-        detail.prefix === ROOM_WEEK_KEY_PREFIX
+        detail.prefix === ROOM_WEEK_KEY_PREFIX ||
+        detail.prefix === HOLD_SIZE_KEY_PREFIX
       ) {
         dropKeysWithPrefix(detail.prefix);
       }
@@ -241,6 +293,11 @@
         settings.markerStyle = detail.value;
       } else if (detail.key === 'showLessonNotice') {
         settings.showLessonNotice = Boolean(detail.value);
+      } else if (
+        detail.key === 'courtesyRatio' &&
+        COURTESY_RATIOS.includes(String(detail.value))
+      ) {
+        settings.courtesyRatio = String(detail.value);
       } else {
         return;
       }
@@ -248,6 +305,10 @@
       saveSettings();
       applySettingsToPage();
       announce();
+
+      // The ratio decides which lessons are marked, not just how they look,
+      // so the page is worked out again.
+      repaintCurrentView();
     }
 
     window.addEventListener('lectio-manager:discover', announce);
@@ -372,7 +433,94 @@
 
 
     pruneStaleRoomWeeks();
+    pruneStaleHoldSizes();
     pruneLegacyStorage();
+  }
+
+
+  /*
+   * Class sizes keep for HOLD_SIZE_TTL_MS; a hold whose size could not be
+   * read (a student account may not be allowed to see another class's
+   * members page) is remembered as unknown for HOLD_SIZE_RETRY_MS, so it is
+   * not asked for again on every page load. Every school's key is swept,
+   * not only this one's.
+   */
+  function pruneStaleHoldSizes() {
+    try {
+      const keys = [];
+
+      for (
+        let index = 0;
+        index < localStorage.length;
+        index += 1
+      ) {
+        const key =
+          localStorage.key(index);
+
+        if (
+          typeof key === 'string' &&
+          key.startsWith(HOLD_SIZE_KEY_PREFIX)
+        ) {
+          keys.push(key);
+        }
+      }
+
+
+      for (const key of keys) {
+        let sizes;
+
+        try {
+          sizes =
+            JSON.parse(
+              localStorage.getItem(key) || '{}'
+            );
+        }
+
+        catch (_) {
+          sizes = null;
+        }
+
+
+        if (
+          !sizes ||
+          typeof sizes !== 'object'
+        ) {
+          localStorage.removeItem(key);
+
+          continue;
+        }
+
+
+        const kept = {};
+
+        for (
+          const [holdId, entry] of Object.entries(sizes)
+        ) {
+          if (isFreshHoldSize(entry)) {
+            kept[holdId] = entry;
+          }
+        }
+
+
+        if (!Object.keys(kept).length) {
+          localStorage.removeItem(key);
+        }
+
+        else if (
+          Object.keys(kept).length !==
+          Object.keys(sizes).length
+        ) {
+          localStorage.setItem(
+            key,
+            JSON.stringify(kept)
+          );
+        }
+      }
+    }
+
+    catch (_) {
+      // Storage unavailable; there is nothing to prune and nothing to say.
+    }
   }
 
 
@@ -484,7 +632,8 @@
           typeof key !== 'string' ||
           key === SETTINGS_KEY ||
           key.startsWith(ROOM_MAP_KEY_PREFIX) ||
-          key.startsWith(ROOM_WEEK_KEY_PREFIX)
+          key.startsWith(ROOM_WEEK_KEY_PREFIX) ||
+          key.startsWith(HOLD_SIZE_KEY_PREFIX)
         ) {
           continue;
         }
@@ -507,6 +656,32 @@
   }
 
 
+  /*
+   * Works out the current page's markers again after a setting changed.
+   * runTimetablePage() and runActivityPage() hang their own repaint on
+   * `.run` once they have something to paint; before that this does
+   * nothing. A property on a hoisted function rather than a module-scope
+   * `let`, so a setting arriving during this file's own evaluation cannot
+   * reach a binding still in its temporal dead zone.
+   */
+  function repaintCurrentView() {
+    if (typeof repaintCurrentView.run !== 'function') {
+      return;
+    }
+
+    try {
+      repaintCurrentView.run();
+    }
+
+    catch (error) {
+      console.warn(
+        '[Lectio Chairs Up] Repaint failed:',
+        error
+      );
+    }
+  }
+
+
   function loadSettings() {
     try {
       const parsed = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
@@ -516,7 +691,10 @@
           : DEFAULT_SETTINGS.markerStyle,
         showLessonNotice: typeof parsed.showLessonNotice === 'boolean'
           ? parsed.showLessonNotice
-          : DEFAULT_SETTINGS.showLessonNotice
+          : DEFAULT_SETTINGS.showLessonNotice,
+        courtesyRatio: COURTESY_RATIOS.includes(parsed.courtesyRatio)
+          ? parsed.courtesyRatio
+          : DEFAULT_SETTINGS.courtesyRatio
       };
     } catch (_) {
       return { ...DEFAULT_SETTINGS };
@@ -578,6 +756,31 @@
 
   const LOOKAHEAD_DAYS =
     7;
+
+
+  /*
+   * Courtesy chairs up (issue #83).
+   *
+   * A room-week written before 1.4.9 has no hold ids on its bookings, so
+   * it cannot say who comes next. It still paints the red marker, but the
+   * refresh plan treats it as missing and replaces it.
+   *
+   * Hold membership hardly changes during a term, so a class size keeps
+   * for two weeks. A size that could not be read keeps for a day. A page
+   * view asks for at most MAX_HOLD_SIZE_FETCHES sizes; a week with more
+   * than that left to learn finishes on the next page load.
+   */
+  const ROOM_WEEK_FORMAT =
+    2;
+
+  const HOLD_SIZE_TTL_MS =
+    14 * 24 * 60 * 60 * 1000;
+
+  const HOLD_SIZE_RETRY_MS =
+    24 * 60 * 60 * 1000;
+
+  const MAX_HOLD_SIZE_FETCHES =
+    12;
 
 
   /*
@@ -1203,6 +1406,14 @@
     `${ROOM_WEEK_KEY_PREFIX}${SCHOOL}.roomWeek`;
 
 
+  /*
+   * One key per school: { "HE<digits>": { n: <students> | null, at: <ms> } }.
+   * Only the count is kept - never a name from the members page.
+   */
+  const HOLD_SIZE_KEY =
+    `${HOLD_SIZE_KEY_PREFIX}${SCHOOL}`;
+
+
   // =========================================================
   // CSS CLASSES
   // =========================================================
@@ -1215,6 +1426,20 @@
 
   const LESSON_NOTICE_CLASS =
     'lectio-chairs-up-lesson-notice';
+
+  /*
+   * The yellow "courtesy chairs up" marker (issue #83). It goes on the same
+   * kind of element as the red one, with this class beside or instead of
+   * LAST_CLASS, so every rule written for the red marker can be reused.
+   */
+  const COURTESY_CLASS =
+    'lectio-chairs-up-courtesy';
+
+  const ICON_COURTESY_CLASS =
+    'lectio-chairs-up-icon-courtesy';
+
+  const NOTICE_COURTESY_CLASS =
+    'lectio-chairs-up-lesson-notice-courtesy';
 
 
   // =========================================================
@@ -1419,13 +1644,35 @@
     );
 
 
+    const paint = () =>
+      paintTimetableFromCache(
+        lessons,
+        roomMap
+      );
+
+
+    repaintCurrentView.run = () => {
+      paint();
+
+      refreshHoldSizes(
+        lessons,
+        roomMap
+      )
+        .then(
+          changed => {
+            if (changed) {
+              paint();
+            }
+          }
+        )
+        .catch(() => {});
+    };
+
+
     /*
      * Paint immediately if we already have schedule cache.
      */
-    paintTimetableFromCache(
-      lessons,
-      roomMap
-    );
+    paint();
 
 
     const jobs =
@@ -1439,23 +1686,33 @@
       console.info(
         '[Lectio Chairs Up] Room schedule cache is fresh.'
       );
+    }
 
-      return;
+    else {
+      await refreshRoomWeeks(
+        jobs
+      );
+
+
+      /*
+       * Repaint after fresh room data arrives.
+       */
+      paint();
     }
 
 
-    await refreshRoomWeeks(
-      jobs
-    );
-
-
     /*
-     * Repaint after fresh room data arrives.
+     * Only now is it known which lessons have exactly one class after
+     * them, and so which class sizes are worth asking for.
      */
-    paintTimetableFromCache(
-      lessons,
-      roomMap
-    );
+    if (
+      await refreshHoldSizes(
+        lessons,
+        roomMap
+      )
+    ) {
+      paint();
+    }
   }
 
 
@@ -1659,10 +1916,32 @@
       );
 
 
-    renderActivityStatusFromCache(
-      lesson,
-      roomMap
-    );
+    const paint = () =>
+      renderActivityStatusFromCache(
+        lesson,
+        roomMap
+      );
+
+
+    repaintCurrentView.run = () => {
+      paint();
+
+      refreshHoldSizes(
+        [lesson],
+        roomMap
+      )
+        .then(
+          changed => {
+            if (changed) {
+              paint();
+            }
+          }
+        )
+        .catch(() => {});
+    };
+
+
+    paint();
 
 
     const jobs =
@@ -1672,20 +1951,24 @@
       );
 
 
-    if (!jobs.length) {
-      return;
+    if (jobs.length) {
+      await refreshRoomWeeks(
+        jobs
+      );
+
+
+      paint();
     }
 
 
-    await refreshRoomWeeks(
-      jobs
-    );
-
-
-    renderActivityStatusFromCache(
-      lesson,
-      roomMap
-    );
+    if (
+      await refreshHoldSizes(
+        [lesson],
+        roomMap
+      )
+    ) {
+      paint();
+    }
   }
 
 
@@ -1715,19 +1998,63 @@
         );
 
 
-    if (!lastRooms.length) {
+    if (lastRooms.length) {
+      createActivityNotice(
+        'CHAIRS UP',
+        `Last active booking in room ${lastRooms.join(', ')}`,
+        false
+      );
+
+      return;
+    }
+
+
+    /*
+     * Red wins: a lesson that is last in any of its rooms puts its chairs
+     * up anyway, so a courtesy notice would only add noise.
+     */
+    const courtesy =
+      statuses.filter(
+        item =>
+          item.status === 'courtesy'
+      );
+
+
+    if (!courtesy.length) {
       return;
     }
 
 
     createActivityNotice(
-      lastRooms
+      'COURTESY CHAIRS UP',
+      courtesy
+        .map(
+          describeCourtesy
+        )
+        .join('; '),
+      true
+    );
+  }
+
+
+  /*
+   * "The class after you in 205 has 5 students; you have 30". Shared by the
+   * activity notice and the timetable marker's tooltip.
+   */
+  function describeCourtesy(
+    item
+  ) {
+    return (
+      `The class after you in ${item.room} has ` +
+      `${item.nextSize} students; you have ${item.ourSize}`
     );
   }
 
 
   function createActivityNotice(
-    lastRooms
+    heading,
+    detail,
+    isCourtesy
   ) {
     const card =
       document.querySelector(
@@ -1758,8 +2085,11 @@
       LESSON_NOTICE_CLASS;
 
 
-    const roomText =
-      lastRooms.join(', ');
+    if (isCourtesy) {
+      notice.classList.add(
+        NOTICE_COURTESY_CLASS
+      );
+    }
 
 
     notice.innerHTML = `
@@ -1768,8 +2098,8 @@
       </div>
 
       <div class="lectio-chairs-up-lesson-copy">
-        <strong>CHAIRS UP</strong>
-        <span>Last active booking in room ${escapeHtml(roomText)}</span>
+        <strong>${escapeHtml(heading)}</strong>
+        <span>${escapeHtml(detail)}</span>
       </div>
     `;
 
@@ -2204,6 +2534,11 @@
 
       absid:
         getAbsId(
+          element
+        ),
+
+      holds:
+        getHoldIds(
           element
         ),
 
@@ -3315,63 +3650,605 @@
         ] || [];
 
 
-      const laterOccupancyExists =
-        bookings.some(
-          booking => {
-
-            /*
-             * Same Lectio activity.
-             */
-            if (
-              lesson.absid &&
-              booking.absid &&
-              lesson.absid ===
-                booking.absid
-            ) {
-              return false;
-            }
-
-
-            /*
-             * Defensive self-match if Lectio exposes the same
-             * occupancy under slightly different activity IDs.
-             */
-            const sameTime =
-              booking.startMinutes ===
-                lesson.startMinutes &&
-              booking.endMinutes ===
-                lesson.endMinutes;
-
-
-            if (sameTime) {
-              return false;
-            }
-
-
-            /*
-             * If another LIVE booking continues beyond this
-             * lesson, this is not the final active occupancy.
-             */
-            return (
-              booking.endMinutes >
-              lesson.endMinutes
-            );
-          }
+      const laterBookings =
+        bookings.filter(
+          booking =>
+            isLaterOccupancy(
+              lesson,
+              booking
+            )
         );
 
 
-      statuses.push({
-        room,
+      if (!laterBookings.length) {
+        statuses.push({
+          room,
+          status:
+            'last'
+        });
 
-        status:
-          laterOccupancyExists
-            ? 'later'
-            : 'last'
-      });
+        continue;
+      }
+
+
+      const courtesy =
+        findCourtesy(
+          lesson,
+          laterBookings
+        );
+
+
+      statuses.push(
+        courtesy
+          ? {
+            room,
+            status:
+              'courtesy',
+            ...courtesy
+          }
+          : {
+            room,
+            status:
+              'later'
+          }
+      );
     }
 
 
     return statuses;
+  }
+
+
+  function isLaterOccupancy(
+    lesson,
+    booking
+  ) {
+    /*
+     * Same Lectio activity.
+     */
+    if (
+      lesson.absid &&
+      booking.absid &&
+      lesson.absid ===
+        booking.absid
+    ) {
+      return false;
+    }
+
+
+    /*
+     * Defensive self-match if Lectio exposes the same
+     * occupancy under slightly different activity IDs.
+     */
+    const sameTime =
+      booking.startMinutes ===
+        lesson.startMinutes &&
+      booking.endMinutes ===
+        lesson.endMinutes;
+
+
+    if (sameTime) {
+      return false;
+    }
+
+
+    /*
+     * If another LIVE booking continues beyond this
+     * lesson, this is not the final active occupancy.
+     */
+    return (
+      booking.endMinutes >
+      lesson.endMinutes
+    );
+  }
+
+
+  // =========================================================
+  // COURTESY CHAIRS UP (issue #83)
+  // =========================================================
+
+  /*
+   * The class that has a room for the rest of the day after this lesson,
+   * as its sorted hold ids - or null when that is not one class.
+   *
+   * "One class" is judged by holds, not by activity: a double lesson after
+   * this one is two bookings of the same class and still counts, and so
+   * does a long gap before it. A later booking with no hold at all (a
+   * meeting, an exam) makes the answer unknown, never a guess.
+   */
+  function nextClassHolds(
+    lesson,
+    laterBookings
+  ) {
+    let key =
+      null;
+
+    let holds =
+      null;
+
+
+    for (
+      const booking of laterBookings
+    ) {
+      // A cache written before 1.4.9 does not know.
+      if (
+        !Array.isArray(
+          booking.holds
+        ) ||
+        !booking.holds.length
+      ) {
+        return null;
+      }
+
+
+      const bookingKey =
+        booking.holds.join(',');
+
+
+      if (
+        key !== null &&
+        bookingKey !== key
+      ) {
+        return null;
+      }
+
+
+      key =
+        bookingKey;
+
+      holds =
+        booking.holds;
+    }
+
+
+    // This class coming back to the same room later is not "the next class".
+    if (
+      !holds ||
+      key ===
+        (lesson.holds || []).join(',')
+    ) {
+      return null;
+    }
+
+
+    return holds;
+  }
+
+
+  /*
+   * { ourSize, nextSize } when the class after this lesson is so much
+   * smaller that leaving the chairs to it is unfair: ourSize > ratio x
+   * nextSize, strictly. Anything unknown - the setting is off, either side
+   * has no hold, a size has not been learned or could not be read, or a
+   * side counts no students at all (a staff hold) - is no courtesy marker.
+   */
+  function findCourtesy(
+    lesson,
+    laterBookings
+  ) {
+    const ratio =
+      courtesyRatio();
+
+
+    if (!ratio) {
+      return null;
+    }
+
+
+    const nextHolds =
+      nextClassHolds(
+        lesson,
+        laterBookings
+      );
+
+
+    if (!nextHolds) {
+      return null;
+    }
+
+
+    const sizes =
+      loadHoldSizes();
+
+
+    const ourSize =
+      classSize(
+        lesson.holds,
+        sizes
+      );
+
+    const nextSize =
+      classSize(
+        nextHolds,
+        sizes
+      );
+
+
+    if (
+      !ourSize ||
+      !nextSize ||
+      ourSize <= ratio * nextSize
+    ) {
+      return null;
+    }
+
+
+    return {
+      ourSize,
+      nextSize
+    };
+  }
+
+
+  function courtesyRatio() {
+    const ratio =
+      Number(
+        settings.courtesyRatio
+      );
+
+
+    return Number.isFinite(ratio) && ratio > 0
+      ? ratio
+      : 0;
+  }
+
+
+  /*
+   * The students in a lesson made of several holds, added up. Overlapping
+   * holds would be counted twice, which only ever makes a big class look
+   * bigger. 0 means unknown.
+   */
+  function classSize(
+    holds,
+    sizes
+  ) {
+    if (
+      !Array.isArray(holds) ||
+      !holds.length
+    ) {
+      return 0;
+    }
+
+
+    let total =
+      0;
+
+
+    for (
+      const holdId of holds
+    ) {
+      const entry =
+        sizes[holdId];
+
+
+      if (
+        !isFreshHoldSize(entry) ||
+        typeof entry.n !== 'number'
+      ) {
+        return 0;
+      }
+
+
+      total +=
+        entry.n;
+    }
+
+
+    return total;
+  }
+
+
+  function isFreshHoldSize(
+    entry
+  ) {
+    if (
+      !entry ||
+      typeof entry !== 'object'
+    ) {
+      return false;
+    }
+
+
+    const age =
+      Date.now() -
+      Number(
+        entry.at || 0
+      );
+
+
+    const life =
+      typeof entry.n === 'number'
+        ? HOLD_SIZE_TTL_MS
+        : HOLD_SIZE_RETRY_MS;
+
+
+    return age >= 0 && age < life;
+  }
+
+
+  function loadHoldSizes() {
+    try {
+      const sizes =
+        JSON.parse(
+          localStorage.getItem(
+            HOLD_SIZE_KEY
+          ) || '{}'
+        );
+
+
+      return sizes && typeof sizes === 'object'
+        ? sizes
+        : {};
+    }
+
+    catch (_) {
+      return {};
+    }
+  }
+
+
+  function saveHoldSize(
+    holdId,
+    count
+  ) {
+    const sizes =
+      loadHoldSizes();
+
+
+    sizes[holdId] = {
+      n:
+        count,
+
+      at:
+        Date.now()
+    };
+
+
+    try {
+      localStorage.setItem(
+        HOLD_SIZE_KEY,
+        JSON.stringify(
+          sizes
+        )
+      );
+    }
+
+    catch (_) {
+      reportStorageWriteFailure();
+    }
+  }
+
+
+  /*
+   * Learns the class sizes the courtesy rule is missing, and only those:
+   * for lessons in the lookahead whose room has exactly one class after
+   * them, both that class's holds and the lesson's own. Every other lesson
+   * is already decided without a size. Resolves true when something new
+   * was learned, so the caller knows to repaint.
+   */
+  async function refreshHoldSizes(
+    lessons,
+    roomMap
+  ) {
+    if (!courtesyRatio()) {
+      return false;
+    }
+
+
+    const now =
+      new Date();
+
+
+    const sizes =
+      loadHoldSizes();
+
+
+    const wanted =
+      new Set();
+
+
+    for (
+      const lesson of lessons
+    ) {
+      const daysAway =
+        differenceInCalendarDays(
+          lesson.dateObj,
+          now
+        );
+
+
+      if (
+        daysAway < 0 ||
+        daysAway > LOOKAHEAD_DAYS ||
+        !lesson.holds ||
+        !lesson.holds.length
+      ) {
+        continue;
+      }
+
+
+      for (
+        const room of lesson.rooms
+      ) {
+        const nextHolds =
+          nextClassHoldsInRoom(
+            lesson,
+            room,
+            roomMap
+          );
+
+
+        if (!nextHolds) {
+          continue;
+        }
+
+
+        for (
+          const holdId of [
+            ...lesson.holds,
+            ...nextHolds
+          ]
+        ) {
+          if (
+            !isFreshHoldSize(
+              sizes[holdId]
+            )
+          ) {
+            wanted.add(holdId);
+          }
+        }
+      }
+    }
+
+
+    let learned =
+      false;
+
+
+    for (
+      const holdId of [...wanted].slice(
+        0,
+        MAX_HOLD_SIZE_FETCHES
+      )
+    ) {
+      try {
+        const count =
+          await fetchHoldSize(
+            holdId
+          );
+
+
+        saveHoldSize(
+          holdId,
+          count
+        );
+
+
+        learned =
+          true;
+      }
+
+      catch (error) {
+        // Not remembered: a timeout or a skipped request is worth
+        // trying again on the next page load.
+        console.warn(
+          '[Lectio Chairs Up] Class size lookup failed:',
+          holdId,
+          error
+        );
+      }
+    }
+
+
+    return learned;
+  }
+
+
+  function nextClassHoldsInRoom(
+    lesson,
+    room,
+    roomMap
+  ) {
+    const roomId =
+      roomMap.get(
+        normalizeRoom(
+          room
+        )
+      );
+
+
+    if (!roomId) {
+      return null;
+    }
+
+
+    const {
+      isoWeek,
+      isoYear
+    } =
+      getISOWeek(
+        lesson.dateObj
+      );
+
+
+    const cache =
+      getRoomWeekCache(
+        roomId,
+        isoWeek,
+        isoYear
+      );
+
+
+    if (!cache) {
+      return null;
+    }
+
+
+    const laterBookings =
+      (
+        cache.days?.[
+          lesson.isoDate
+        ] || []
+      ).filter(
+        booking =>
+          isLaterOccupancy(
+            lesson,
+            booking
+          )
+      );
+
+
+    return laterBookings.length
+      ? nextClassHolds(
+        lesson,
+        laterBookings
+      )
+      : null;
+  }
+
+
+  /*
+   * The hold's members page says "Antal elever: N". It only does so with
+   * showstudents=1: without it Lectio answers with its "Fejl" page (HTTP
+   * 200). A page with no count - that, or an account not allowed to see
+   * the class - is null, remembered as unknown, never as 0.
+   */
+  async function fetchHoldSize(
+    holdId
+  ) {
+    const url =
+      `/lectio/${SCHOOL}/subnav/members.aspx` +
+      `?holdelementid=${encodeURIComponent(holdId.replace(/^HE/, ''))}` +
+      `&showstudents=1` +
+      `&showteachers=1`;
+
+
+    const doc =
+      await fetchHtml(
+        url
+      );
+
+
+    return parseHoldSize(
+      doc
+    );
+  }
+
+
+  function parseHoldSize(
+    doc
+  ) {
+    const match =
+      String(
+        doc?.body?.textContent || ''
+      ).match(
+        /Antal elever:\s*(\d+)/i
+      );
+
+
+    return match
+      ? Number(match[1])
+      : null;
   }
 
 
@@ -3407,7 +4284,8 @@
             icon.remove();
 
             activity.classList.remove(
-              LAST_CLASS
+              LAST_CLASS,
+              COURTESY_CLASS
             );
           }
         }
@@ -3455,7 +4333,8 @@
         );
 
       element.classList.remove(
-        LAST_CLASS
+        LAST_CLASS,
+        COURTESY_CLASS
       );
 
       return;
@@ -3473,7 +4352,8 @@
 
 
     element.classList.remove(
-      LAST_CLASS
+      LAST_CLASS,
+      COURTESY_CLASS
     );
 
 
@@ -3501,13 +4381,31 @@
         );
 
 
-    if (!lastRooms.length) {
+    /*
+     * Red wins over yellow: a lesson that is last in any of its rooms
+     * puts its chairs up anyway.
+     */
+    const courtesy =
+      lastRooms.length
+        ? []
+        : statuses.filter(
+          item =>
+            item.status === 'courtesy'
+        );
+
+
+    if (
+      !lastRooms.length &&
+      !courtesy.length
+    ) {
       return;
     }
 
 
     element.classList.add(
-      LAST_CLASS
+      lastRooms.length
+        ? LAST_CLASS
+        : COURTESY_CLASS
     );
 
 
@@ -3521,11 +4419,23 @@
       ICON_CLASS;
 
 
-    const tooltip =
-      buildTooltip(
-        lastRooms,
-        unknownRooms
+    if (courtesy.length) {
+      icon.classList.add(
+        ICON_COURTESY_CLASS
       );
+    }
+
+
+    const tooltip =
+      courtesy.length
+        ? buildCourtesyTooltip(
+          courtesy,
+          unknownRooms
+        )
+        : buildTooltip(
+          lastRooms,
+          unknownRooms
+        );
 
 
     icon.setAttribute(
@@ -3556,6 +4466,32 @@
   ) {
     let text =
       `CHAIRS UP - Last active booking in ${lastRooms.join(', ')}`;
+
+
+    if (
+      unknownRooms.length
+    ) {
+      text +=
+        `\nCould not verify: ${unknownRooms.join(', ')}`;
+    }
+
+
+    return text;
+  }
+
+
+  function buildCourtesyTooltip(
+    courtesy,
+    unknownRooms
+  ) {
+    let text =
+      'COURTESY CHAIRS UP - Not the last class in the room, ' +
+      'but the class after you is much smaller.\n' +
+      courtesy
+        .map(
+          describeCourtesy
+        )
+        .join('\n');
 
 
     if (
@@ -3647,8 +4583,20 @@
           );
 
 
+        /*
+         * A room-week from before 1.4.9 has no hold ids, so it is
+         * refreshed as if it were missing (issue #83).
+         */
+        const cacheIsCurrent =
+          Boolean(
+            cache &&
+            cache.format ===
+              ROOM_WEEK_FORMAT
+          );
+
+
         const cacheAge =
-          cache
+          cacheIsCurrent
             ? Date.now() -
               Number(
                 cache.fetchedAt || 0
@@ -3704,7 +4652,7 @@
               -5;
 
 
-          if (!cache) {
+          if (!cacheIsCurrent) {
             shouldRefresh =
               true;
 
@@ -3900,6 +4848,9 @@
 
 
     return {
+      format:
+        ROOM_WEEK_FORMAT,
+
       fetchedAt:
         Date.now(),
 
@@ -3962,6 +4913,11 @@
     return {
       absid:
         getAbsId(
+          element
+        ),
+
+      holds:
+        getHoldIds(
           element
         ),
 
@@ -4321,6 +5277,39 @@
   }
 
 
+  /*
+   * The holds (classes) a lesson block belongs to, as their context-card ids
+   * ("HE<digits>"). Lectio renders the block's content twice - once for
+   * desktop, once for mobile - so the same card appears twice and is counted
+   * once. A block with no hold (a meeting, an exam) returns [].
+   */
+  function getHoldIds(
+    element
+  ) {
+    return [
+      ...new Set(
+        [
+          ...element.querySelectorAll(
+            '[data-lectiocontextcard^="HE"]'
+          )
+        ]
+          .map(
+            card =>
+              card.getAttribute(
+                'data-lectiocontextcard'
+              )
+          )
+          .filter(
+            id =>
+              /^HE\d+$/.test(
+                id || ''
+              )
+          )
+      )
+    ].sort();
+  }
+
+
   function getAbsId(
     element
   ) {
@@ -4565,12 +5554,14 @@
          other block keeps Lectio's own overflow: hidden, and a marked one
          clips its text one level down instead - otherwise the text of a
          short lesson spills out of its box (issue #73). */
-      a.s2skemabrik.s2brik.${LAST_CLASS} {
+      a.s2skemabrik.s2brik.${LAST_CLASS},
+      a.s2skemabrik.s2brik.${COURTESY_CLASS} {
         overflow:
           visible !important;
       }
 
-      a.s2skemabrik.s2brik.${LAST_CLASS} > :not(.${ICON_CLASS}) {
+      a.s2skemabrik.s2brik.${LAST_CLASS} > :not(.${ICON_CLASS}),
+      a.s2skemabrik.s2brik.${COURTESY_CLASS} > :not(.${ICON_CLASS}) {
         overflow:
           hidden;
 
@@ -4579,13 +5570,21 @@
       }
 
 
-      .${LAST_CLASS} {
+      .${LAST_CLASS},
+      .${COURTESY_CLASS} {
         z-index:
           25 !important;
       }
 
       html[data-lectio-chairs-up-marker='outline'] .${LAST_CLASS} {
         outline: 3px solid #e31845 !important;
+        outline-offset: 2px !important;
+      }
+
+      /* Dashed as well as yellow, so it reads as a different marker
+         without telling the two colours apart. */
+      html[data-lectio-chairs-up-marker='outline'] .${COURTESY_CLASS} {
+        outline: 3px dashed #e0a100 !important;
         outline-offset: 2px !important;
       }
 
@@ -4721,6 +5720,27 @@
 
         pointer-events:
           none;
+      }
+
+
+      /* Courtesy chairs up (issue #83): yellow with dark ink, because
+         white on yellow cannot be read. */
+      .${ICON_CLASS}.${ICON_COURTESY_CLASS} {
+        background:
+          linear-gradient(
+            180deg,
+            #ffd84d 0%,
+            #f2b100 100%
+          );
+
+        box-shadow:
+          0 2px 5px rgba(0,0,0,0.28),
+          0 0 0 1px rgba(120,80,0,0.18);
+      }
+
+      .${ICON_CLASS}.${ICON_COURTESY_CLASS} svg {
+        stroke:
+          #3a2800;
       }
 
 
@@ -4968,6 +5988,42 @@
 
         font-weight:
           600;
+      }
+
+
+      .${LESSON_NOTICE_CLASS}.${NOTICE_COURTESY_CLASS} {
+        background:
+          linear-gradient(
+            180deg,
+            #ffd84d 0%,
+            #f2b100 100%
+          );
+
+        color:
+          #3a2800;
+
+        box-shadow:
+          0 4px 12px rgba(0,0,0,0.24),
+          0 0 0 1px rgba(120,80,0,0.2);
+      }
+
+      .${NOTICE_COURTESY_CLASS} .lectio-chairs-up-lesson-chair {
+        background:
+          rgba(58, 40, 0, 0.08);
+
+        border-color:
+          rgba(58, 40, 0, 0.85);
+      }
+
+      .${NOTICE_COURTESY_CLASS} .lectio-chairs-up-lesson-chair svg {
+        stroke:
+          #3a2800;
+      }
+
+      .${NOTICE_COURTESY_CLASS} .lectio-chairs-up-lesson-copy strong,
+      .${NOTICE_COURTESY_CLASS} .lectio-chairs-up-lesson-copy span {
+        color:
+          #3a2800;
       }
 
 

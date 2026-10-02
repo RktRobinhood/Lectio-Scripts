@@ -48,4 +48,13 @@ Both tests load the Unstable copy while it exists and the Stable one after promo
 
 `tests/module-frames.browser.test.js` and `tests/chairs-up-drift.browser.test.js` cover both; they load the Unstable copies while they exist and the Stable ones after promotion.
 
+**Chairs Up 1.4.9** adds a yellow **courtesy chairs up** marker (issue #83). It marks a lesson when exactly one class has the room for the rest of the day after it, and our class is more than *ratio* × that class's size. Gaps before that class don't matter, and a double lesson of the same class still counts as one class.
+
+- The ratio is a new setting, **Courtesy chairs up**: Off, 1.25, 1.5 (default) or 2 chairs per student. Red still wins: a lesson that is last in any of its rooms is never yellow.
+- Class size is the enrolled count from the hold's members page (`subnav/members.aspx?holdelementid=…&showstudents=1&showteachers=1`, "Antal elever: N"). Only the number is cached, per hold, for 14 days. A page without a count is cached as unknown for a day. Students get the feature too; if their account cannot open another class's members page, the size is unknown and nothing shows.
+- Anything unknown shows nothing: a later booking with no hold, a hold with 0 students, or a size that could not be read. Sizes are only fetched for lessons that have exactly one class after them, at most 12 per page view, through the same request slots and backoff as the room weeks.
+- Room-week caches now record each booking's hold ids (`format: 2`). A cache from before this version still paints red, and is refetched as if it were missing.
+
+`tests/chairs-up-courtesy.browser.test.js` covers seven rooms on the timetable and the activity-page notice. It loads the Unstable copy while it exists and the Stable one after promotion.
+
 `modules.json` must never be emptied. Every shipped Manager rejects an overlay with no modules in it, keeps the overlay it cached last, and reports the failure on every refresh; a Manager older than 1.22.1 also lets that cached overlay win outright, so it would keep offering installs from the `modules-unstable/` URLs a promotion deletes. So when the last module here is promoted, the overlay keeps one entry that is an exact copy of its entry in `catalogue/modules.json`, `installUrl` included. A current Manager resolves equal versions to Stable, and an old one installs the Stable file whichever entry it picks. `node scripts/check-versions.mjs` accepts an overlay entry with no file here only when it is that exact copy, and fails an overlay with no entries at all.
