@@ -76,7 +76,9 @@
 
                 const migrated = JSON.parse(localStorage.getItem(window.radarSettingsKey));
                 assert(migrated.displayMode === 'auto', `the migration was not written back: ${migrated.displayMode}`);
-                assert(migrated.schema === 2, 'the migrated record was not stamped with its schema, so it would migrate again');
+                // Schema 2 is the one that ended this migration; later schemas
+                // (0.9.10 brought 3, for its own one-time rewrite) still end it.
+                assert(Number(migrated.schema) >= 2, `the migrated record was not stamped with its schema, so it would migrate again: ${migrated.schema}`);
                 assert(migrated.pollMinutes === 10, 'the migration discarded an unrelated stored setting');
 
                 // The Manager is installed on this page, so automatic mode puts

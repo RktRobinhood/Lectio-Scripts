@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio English Mode
 // @namespace    lectio-english-mode
-// @version      1.11.8
+// @version      1.11.10
 // @description  Context-aware English layer for Lectio with instant core UI translation, persistent cache and Google fallback.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-start
@@ -69,7 +69,7 @@
      * could not see a const scoped to that function. Keep it above the boot
      * block (scripts/check-boot-order.mjs).
      */
-    const MODULE_VERSION = '1.11.8';
+    const MODULE_VERSION = '1.11.10';
 
     /*
      * Lectio Manager handshake.
@@ -219,9 +219,15 @@
             }
 
             if (detail.key === 'language' && [MODE_DA, MODE_EN].includes(detail.value)) {
+                // Replaying a settings file sends the language it already
+                // has; that is no reason to reload the page under the user.
+                if (detail.value === GM_getValue(STORAGE_MODE, MODE_DA)) {
+                    return;
+                }
+
                 GM_setValue(STORAGE_MODE, detail.value);
                 announce();
-                location.reload();
+                reloadWithoutResubmitting();
             } else if (
                 detail.key === 'switchPosition' &&
                 SWITCH_POSITIONS.includes(detail.value)
@@ -1634,7 +1640,32 @@
             );
     }
 
+    /*
+     * Switching language reloads the page, and on Lectio the page is often
+     * the answer to a form post: adding a file or link to homework is a
+     * whole-page postback. location.reload() would send that post again -
+     * behind a "Confirm resubmission" prompt people click through - and add
+     * the material a second time (issue #72). Navigating to the same address
+     * loads it with a plain GET instead. The fragment is dropped because
+     * replacing a URL that differs only by its fragment just scrolls.
+     */
+    function reloadWithoutResubmitting() {
+        location.replace(
+            location.href.split('#')[0]
+        );
+    }
+
+    /*
+     * Anything someone is typing into is theirs, and a rich-text editor's
+     * content is what Lectio saves. isContentEditable also covers the
+     * editor's own descendants, contenteditable="" and a document in design
+     * mode, which the attribute selector below cannot.
+     */
     function isEditable(element) {
+        if (element?.isContentEditable) {
+            return true;
+        }
+
         return !!element
             ?.closest
             ?.(
@@ -4117,12 +4148,19 @@
     }
 
     function processElement(element) {
+        // Inside a rich-text editor every attribute and text node is the
+        // user's content, not Lectio's UI: an image's alt, a link's title,
+        // a line broken with <br> that happens to match a dictionary phrase.
+        // Translating any of it wrote English into the homework that was
+        // then saved. A plain text input is not content-editable, so its
+        // placeholder is still translated.
         if (
             mode !== MODE_EN ||
             !(
                 element instanceof
                 Element
             ) ||
+            element.isContentEditable ||
             ignored(element) ||
             isFixedNav(element)
         ) {
@@ -4656,7 +4694,7 @@
                     button.dataset.lang
                 );
 
-                location.reload();
+                reloadWithoutResubmitting();
             }
         );
 

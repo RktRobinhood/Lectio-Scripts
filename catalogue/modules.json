@@ -23,15 +23,15 @@
         "teacher"
       ],
       "status": "stable",
-      "version": "1.11.8",
-      "changelog": "The version in the start-up line this writes to the browser console is now the version it really is. It had been stuck at 1.5.3 for months, so a bug report quoting it named a version that no longer existed.",
+      "version": "1.11.10",
+      "changelog": "Nothing inside the homework editor is translated any more, so English cannot end up in homework you save. Switching language no longer re-sends a form you just sent, which could add a file or link twice.",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-English-Mode.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
       "i18n": {
         "da": {
           "name": "English Mode",
           "description": "Tilføjer en DA / EN-knap og oversætter Lectios brugerflade til kontekstbevidst engelsk.",
-          "changelog": "Versionen i opstartslinjen i browserens konsol er nu den version, modulet faktisk har. Den stod fast på 1.5.3 i månedsvis, så en fejlrapport, der citerede den, nævnte en version, som ikke længere fandtes."
+          "changelog": "Intet i lektie-editoren bliver oversat længere, så der kan ikke havne engelsk i lektier, du gemmer. Skift af sprog sender ikke længere en formular, du lige har sendt, igen - det kunne tilføje en fil eller et link to gange."
         }
       }
     },
@@ -152,22 +152,22 @@
         "change-log"
       ],
       "name": "Lectio Change Radar",
-      "description": "Lectio watcher with a compact themed radar HUD. Choose exactly what it tracks - timetable cancellations, moves, rooms, teachers and homework, plus optional assignment, absence and document watching - plus upcoming assignment deadlines raised as they come inside your chosen lookahead - with urgency states, unseen-change tracking and a rotating local change log.",
+      "description": "Lectio watcher with a compact themed radar HUD. Choose exactly what it tracks - timetable cancellations, moves, rooms, teachers and homework, plus optional assignment, absence and document watching - plus upcoming assignment deadlines raised as they come inside your chosen lookahead - with urgency states, unseen-change tracking and a rotating local change log. For teachers, a to-do of lessons waiting for attendance, submissions waiting for marking and assignments due this week, with a mark on each unregistered lesson.",
       "category": "Timetable",
       "audience": [
         "student",
         "teacher"
       ],
       "status": "stable",
-      "version": "0.9.7",
-      "changelog": "Change Radar leaves Experimental and is now on Stable. A change shows what it was against what it is: the old value struck through beside the new one, with a coloured stripe for cancelled, added, moved or due.",
+      "version": "0.9.15",
+      "changelog": "Teachers get a to-do on the Forside and an attendance mark on lessons still waiting for registration. It appears 15 minutes before the lesson and pulses once it is over. The radar no longer appears inside Lectio dialogs.",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Change-Radar.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
       "i18n": {
         "da": {
           "name": "Lectio Ændringsradar",
-          "description": "Lectio-vagt med en kompakt radar-HUD i temaets farver. Du vælger selv, hvad den holder øje med - aflysninger, flytninger, lokaler, lærere og lektier i skemaet, plus valgfri overvågning af opgaver, fravær og dokumenter - plus kommende opgavefrister, der meldes, når de kommer inden for det valgte tidsrum - med hastestatus, styr på usete ændringer og en roterende lokal ændringslog.",
-          "changelog": "Ændringsradaren forlader Eksperimentel og er nu på Stabil. En ændring viser, hvad den var, over for hvad den er: den gamle værdi streget ud ved siden af den nye, med en farvet stribe for aflyst, tilføjet, flyttet eller forfalden."
+          "description": "Lectio-vagt med en kompakt radar-HUD i temaets farver. Du vælger selv, hvad den holder øje med - aflysninger, flytninger, lokaler, lærere og lektier i skemaet, plus valgfri overvågning af opgaver, fravær og dokumenter - plus kommende opgavefrister, der meldes, når de kommer inden for det valgte tidsrum - med hastestatus, styr på usete ændringer og en roterende lokal ændringslog. For lærere en to-do med lektioner, der venter på fravær, afleveringer, der venter på retning, og opgaver med frist i denne uge, med et mærke på hver lektion uden registreret fravær.",
+          "changelog": "Lærere får en to-do på forsiden og et fraværsmærke på lektioner, der venter på registrering. Det vises 15 minutter før lektionen og pulserer, når den er slut. Radaren dukker ikke længere op i Lectios dialoger."
         }
       }
     }
