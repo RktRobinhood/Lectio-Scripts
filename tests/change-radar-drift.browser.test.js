@@ -1,6 +1,7 @@
 /*
  * Change Radar's `schedule-bricks` drift report fires only for a block it
- * should have read (issue #86). The fixture explains the four cases.
+ * should have read (issue #86), and such a week fails the check rather than
+ * becoming the baseline. The fixture explains the four cases.
  */
 
 const { createServer } = require('node:http');

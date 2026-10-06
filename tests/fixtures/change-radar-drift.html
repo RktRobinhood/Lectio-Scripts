@@ -96,6 +96,12 @@
                     if (drift[0].kind !== 'drift' || drift[0].found !== 0) {
                         throw new Error(`wrong report: ${JSON.stringify(drift[0])}`);
                     }
+
+                    // A week that could not be read is a failed check, not an
+                    // empty timetable: nothing may be stored as the baseline
+                    // later checks are compared against.
+                    const stored = JSON.parse(localStorage.getItem('lectioChangeRadar.v1.223.current-user.state') || 'null');
+                    if (stored?.snapshot) throw new Error('a week that could not be read became the baseline');
                 } else if (drift.length) {
                     throw new Error(`reported drift on a week with nothing to read: ${JSON.stringify(drift)}`);
                 }

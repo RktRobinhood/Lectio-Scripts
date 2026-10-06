@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "channel": "unstable",
-  "generatedAt": "2026-09-25T12:00:00Z",
+  "generatedAt": "2026-10-06T12:00:00Z",
   "modules": [
     {
       "id": "change-radar",
@@ -17,16 +17,16 @@
         "student",
         "teacher"
       ],
-      "status": "stable",
-      "version": "0.9.16",
-      "changelog": "A week holding only all-day entries, such as a holiday, no longer shows up as a problem in the Manager's problem log.",
-      "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Change-Radar.user.js",
+      "status": "unstable",
+      "version": "0.9.17",
+      "changelog": "Each change in the log has a small x that removes just that one. Teachers: changes you make to a lesson yourself no longer show up on your own radar. An unreadable week now fails the check instead of logging its lessons as removed.",
+      "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Change-Radar.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
       "i18n": {
         "da": {
           "name": "Lectio Ændringsradar",
           "description": "Lectio-vagt med en kompakt radar-HUD i temaets farver. Du vælger selv, hvad den holder øje med - aflysninger, flytninger, lokaler, lærere og lektier i skemaet, plus valgfri overvågning af opgaver, fravær og dokumenter - plus kommende opgavefrister, der meldes, når de kommer inden for det valgte tidsrum - med hastestatus, styr på usete ændringer og en roterende lokal ændringslog. For lærere en to-do med lektioner, der venter på fravær, afleveringer, der venter på retning, og opgaver med frist i denne uge, med et mærke på hver lektion uden registreret fravær.",
-          "changelog": "En uge med kun heldagsaktiviteter, fx en ferie, vises ikke længere som et problem i Managerens problemlog."
+          "changelog": "Hver ændring i loggen har et lille x, der kun fjerner den ene. Lærere: ændringer, du selv laver på en lektion, vises ikke længere på din egen radar. En ulæselig uge giver nu et mislykket tjek i stedet for at melde lektionerne som fjernet."
         }
       }
     }

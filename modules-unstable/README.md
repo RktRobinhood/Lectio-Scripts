@@ -25,8 +25,14 @@ The extra patch bump at promotion is not ceremony. A tester's installed copy poi
 
 ## What is here now
 
-**Nothing is under test.** Chairs Up, English Mode and Change Radar were promoted on 2026-10-02 (Chairs Up 1.4.12, English Mode 1.11.10, Change Radar 0.9.15), and no module file lives here.
+### Change Radar 0.9.17 (Stable has 0.9.16)
 
-`modules.json` still holds one entry: an exact copy of Change Radar's entry in `catalogue/modules.json`, `installUrl` included. It is a placeholder, not a module under test, for the reason below. Replace it with the next real entry when work starts here again.
+- **Remove one entry** (#85). Each change in the log has a small × in its top-right corner that removes that entry alone; Clear still empties the whole log.
+- **Ignore changes I make** (#84), a teacher-only toggle under *What to watch*, on by default. Lectio does not say who changed a lesson, so the radar remembers when you were the one editing it: typing or saving on an activity's own page (`aktivitetforside2.aspx`) or its edit page (`aktivitetrediger.aspx`), or arriving back from one. A timetable change to that lesson found by the check that takes in your edit is not logged. Later changes, and changes to other lessons, still are. Known gap: editing a whole series ("alle i serien") only marks the lesson you edited from.
+- **A week that cannot be read fails the check** (#86, follow-up to the Stable fix). If a fetched week has blocks that should be lessons and none can be read, the check fails and the last good snapshot stays, instead of every lesson in that week being logged as removed.
+
+To try it: as a teacher, change a lesson's room and press Refresh; nothing should appear. A colleague's change to one of your lessons still should.
+
+## When nothing is under test
 
 `modules.json` must never be emptied. Every shipped Manager rejects an overlay with no modules in it, keeps the overlay it cached last, and reports the failure on every refresh; a Manager older than 1.22.1 also lets that cached overlay win outright, so it would keep offering installs from the `modules-unstable/` URLs a promotion deletes. So when the last module here is promoted, the overlay keeps one entry that is an exact copy of its entry in `catalogue/modules.json`, `installUrl` included. A current Manager resolves equal versions to Stable, and an old one installs the Stable file whichever entry it picks. `node scripts/check-versions.mjs` accepts an overlay entry with no file here only when it is that exact copy, and fails an overlay with no entries at all.

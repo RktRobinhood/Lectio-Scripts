@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio Change Radar own-edits and dismiss fixture</title>
+    <script>
+        /* Issues #84 and #85. Served as a teacher's own activity page
+           (aktivitetforside2.aspx?absid=900001&laererid=1), so the radar takes
+           this account for a teacher and this page for the lesson being
+           edited.
+
+           Round 0: baseline, two lessons.
+           Round 1: the teacher types on this page, then both lessons move
+                    room. The other lesson's move is logged; this one is not.
+           Round 2: well after the edit, this lesson moves again - somebody
+                    else - and that is logged.
+           Then one entry's x removes that entry alone, without following
+           the entry's link. */
+        const realNow = Date.now;
+        let clockOffset = 0;
+        Date.now = () => realNow.call(Date) + clockOffset;
+        window.advanceClock = (ms) => { clockOffset += ms; };
+
+        window.round = 0;
+
+        const brick = (absid, title, room) => {
+            const tooltip = [title, '20/10-2030 08:00 til 09:30', 'Hold: 3a MA', 'Lærer: MP', 'Lokaler: ' + room].join('\n');
+            return '<a class="s2skemabrik s2brik s2normal" href="/lectio/223/aktivitet/aktivitetforside2.aspx?absid=' + absid + '" ' +
+                'data-tooltip="' + tooltip + '"><span class="s2skemabrikcontent">' + title + '</span></a>';
+        };
+
+        const ROOMS = [
+            { mine: 'A12', other: 'C01' },
+            { mine: 'B07', other: 'C02' },
+            { mine: 'D33', other: 'C02' }
+        ];
+
+        window.fetch = async (url) => {
+            const text = String(url);
+            let body = '<!doctype html><html><body></body></html>';
+            if (/SkemaNy\.aspx/i.test(text)) {
+                const rooms = ROOMS[window.round];
+                body = '<!doctype html><html><body><table><tr><td>' +
+                    brick(900001, 'Matematik A', rooms.mine) + brick(900002, 'Fysik B', rooms.other) +
+                    '</td></tr></table></body></html>';
+            }
+            return { ok: true, status: 200, url: text, text: async () => body };
+        };
+
+        // Floating HUD, one watched week, and no extra sources, so each round
+        // is one schedule request.
+        localStorage.setItem('lectioChangeRadar.v1.223.teacher-1.settings', JSON.stringify({
+            displayMode: 'floating',
+            pollMinutes: 30,
+            weeksAhead: 0,
+            trackAssignments: false,
+            teacherTodo: false
+        }));
+    </script>
+    <script src="/change-radar.user.js"></script>
+</head>
+<body>
+    <main id="masterContent">
+        <form id="aspnetForm"><input id="room" value="A12"></form>
+    </main>
+    <script>
+        const failures = [];
+        const assert = (condition, message) => {
+            if (!condition) failures.push(message);
+        };
+
+        const STATE_KEY = 'lectioChangeRadar.v1.223.teacher-1.state';
+        const EDITS_KEY = 'lectioChangeRadar.v1.223.teacher-1.ownEdits';
+        const readState = () => {
+            try {
+                return JSON.parse(localStorage.getItem(STATE_KEY) || '{}');
+            } catch (_) {
+                return {};
+            }
+        };
+        const history = () => readState().history || [];
+        const entriesFor = (absid) => history().filter((item) => item.eventId === 'ABS' + absid);
+
+        const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+        const waitFor = async (predicate, label) => {
+            for (let attempt = 0; attempt < 120; attempt += 1) {
+                if (predicate()) return;
+                await wait(50);
+            }
+            throw new Error('timed out waiting for ' + label);
+        };
+
+        // Switching a tracker re-checks on a 600ms debounce, so flipping one that
+        // nothing here touches is what drives each round's check.
+        const check = (values) => window.dispatchEvent(new CustomEvent('lectio-manager:set-setting', {
+            detail: { moduleId: 'change-radar', values }
+        }));
+
+        const finish = () => {
+            const output = document.createElement('pre');
+            output.id = 'test-result';
+            output.textContent = failures.length ? failures.join(' | ') : 'pass';
+            document.body.dataset.testResult = failures.length ? 'fail' : 'pass';
+            document.body.appendChild(output);
+        };
+
+        (async () => {
+            try {
+                await waitFor(() => readState().snapshot, 'the baseline');
+
+                // --- Round 1: the teacher edits this lesson, then the check.
+                const field = document.getElementById('room');
+                field.value = 'B07';
+                field.dispatchEvent(new Event('input', { bubbles: true }));
+                assert(/ABS900001/.test(localStorage.getItem(EDITS_KEY) || ''),
+                    'typing on the activity page should be remembered as an own edit');
+
+                window.advanceClock(5 * 60 * 1000);
+                window.round = 1;
+                check({ trackLessonNotes: true });
+                await waitFor(() => entriesFor(900002).length === 1, 'the other lesson\'s room change');
+
+                assert(entriesFor(900001).length === 0,
+                    'the teacher\'s own room change was logged: ' + JSON.stringify(entriesFor(900001)));
+
+                // --- Round 2: long after the edit, somebody else moves it.
+                window.advanceClock(20 * 60 * 1000);
+                window.round = 2;
+                check({ trackLessonNotes: false });
+                await waitFor(() => entriesFor(900001).length === 1, 'a later change to the edited lesson');
+
+                // --- Dismiss one entry.
+                const before = history().length;
+                const buttons = [...document.querySelectorAll('.lcr-dismiss')];
+                assert(buttons.length === before, 'every entry should have its own x, got ' + buttons.length + ' for ' + before);
+
+                const target = buttons.find((button) => /Fysik/.test(button.getAttribute('aria-label') || ''));
+                assert(Boolean(target), 'no x for the Fysik entry');
+                if (target) {
+                    const pageBefore = location.href;
+                    target.click();
+                    await wait(200);
+                    assert(location.href === pageBefore, 'the x followed the entry\'s link');
+                    assert(history().length === before - 1, 'the x should remove exactly one entry');
+                    assert(entriesFor(900002).length === 0, 'the dismissed entry is still in the log');
+                    assert(entriesFor(900001).length === 1, 'the other entry should be kept');
+                    assert(document.querySelectorAll('.lcr-dismiss').length === before - 1,
+                        'the panel should redraw without the dismissed entry');
+                }
+            } catch (error) {
+                failures.push(error.message);
+            }
+
+            finish();
+        })();
+    </script>
+</body>
+</html>
