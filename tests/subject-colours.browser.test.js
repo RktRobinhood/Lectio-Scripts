@@ -90,6 +90,14 @@ test('subject colours are learned from a repeating timetable and keep their own 
         const dock = await runFixture('dock');
         assert.match(dock, /data-test-result="pass"/, dock);
 
+        // With nothing changing on the page, the key never redraws itself
+        // (issue #89): not as the floating key, and not as an open dock panel.
+        const legendIdle = await runFixture('legend-idle', { virtualTimeMs: 8000 });
+        assert.match(legendIdle, /data-test-result="pass"/, legendIdle);
+
+        const dockIdle = await runFixture('dock-idle', { virtualTimeMs: 8000 });
+        assert.match(dockIdle, /data-test-result="pass"/, dockIdle);
+
         // Left on automatic, the key goes to the dock when a Manager answers
         // Discovery, and falls back to the page when none ever does.
         const autoDock = await runFixture('auto-dock');

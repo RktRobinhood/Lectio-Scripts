@@ -86,7 +86,7 @@
             // 'legacy-floating', which models a record left by 0.7.0 - where
             // 'floating' was only ever the default nobody had chosen.
             ...(phase === 'legacy-floating' ? {} : { schema: 2 }),
-            legendLocation: phase === 'dock'
+            legendLocation: phase === 'dock' || phase === 'dock-idle'
                 ? 'dock'
                 : (phase.startsWith('auto-') ? 'auto' : 'floating'),
             patternMarkers: phase === 'pattern' || phase === 'pattern-scale',
@@ -525,6 +525,43 @@
                     const rows = mount.querySelectorAll('.lectio-subject-colours-legend__row');
                     if (rows.length !== 2) {
                         throw new Error(`the dock colour key listed ${rows.length} classes instead of 2`);
+                    }
+                }
+
+                // Issue #89. Nothing on the page changes, so nothing the key
+                // draws may change either. Writing the toggle's label (or
+                // rebuilding the dock panel) used to queue a mutation under
+                // <body>, which the module's own page observer answered by
+                // redrawing the key - eight times a second, for as long as the
+                // timetable stayed open. An absence proof, so a flat wait,
+                // covered by the virtual-time budget this phase is run with.
+                if (phase === 'legend-idle' || phase === 'dock-idle') {
+                    let watched = document.getElementById('lectio-subject-colours-legend');
+
+                    if (phase === 'dock-idle') {
+                        watched = document.createElement('div');
+                        document.body.appendChild(watched);
+                        window.dispatchEvent(new CustomEvent('lectio-manager:dock:render-panel', {
+                            detail: { moduleId: 'subject-colours', itemId: 'colour-key', mount: watched }
+                        }));
+                        if (!watched.querySelector('.lectio-subject-colours-legend__row')) {
+                            throw new Error('the dock colour key did not draw');
+                        }
+                    }
+
+                    if (!watched) throw new Error('the colour key did not appear with classes on screen');
+
+                    // One apply after load is the module's own first pass.
+                    await wait(1000);
+
+                    let records = 0;
+                    const counter = new MutationObserver((list) => { records += list.length; });
+                    counter.observe(watched, { childList: true, subtree: true, characterData: true });
+                    await wait(3000);
+                    counter.disconnect();
+
+                    if (records) {
+                        throw new Error(`the colour key redrew itself ${records} times on a page where nothing changed`);
                     }
                 }
 

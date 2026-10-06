@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Subject Colours
 // @namespace    https://www.lectio.dk/
-// @version      0.11.3
+// @version      0.11.4
 // @description  Learns which classes are actually yours from your own timetable and gives each one its own colour, with a separate muted spectrum for one-off activities like assemblies and meetings.
 // @match        https://www.lectio.dk/lectio/*
 // @grant        none
@@ -15,7 +15,7 @@
 
     const MODULE_ID = 'subject-colours';
     const MODULE_NAME = 'Lectio - Subject Colours';
-    const MODULE_VERSION = '0.11.3';
+    const MODULE_VERSION = '0.11.4';
     const LOG = '[Lectio Subject Colours]';
     const STYLE_ID = 'lectio-subject-colours-styles';
 
@@ -220,6 +220,9 @@
     let previewStyle = null;
     let legendExpanded = false;
     let dockLegendMount = null;
+    // What the open dock panel last drew, so an apply that changes nothing
+    // leaves it alone. Cleared whenever the Manager hands over a new mount.
+    let dockLegendDrawn = '';
     let managerSeen = false;
     let managerGraceTimer = 0;
     const loadedAt = Date.now();
@@ -1798,7 +1801,12 @@
 
     function updateLegendToggleLabel(container, count) {
         const label = container.querySelector('.lectio-subject-colours-legend__toggle-label');
-        if (label) label.textContent = legendLabels().toggle(count);
+        const text = legendLabels().toggle(count);
+        // Assigning textContent replaces the text node even when the words
+        // are the same, and that is a page mutation the page observer answers
+        // with another apply - which wrote the label again, eight times a
+        // second for the life of the page (issue #89).
+        if (label && label.textContent !== text) label.textContent = text;
     }
 
     // Recolouring straight from the legend, with no trip through the
@@ -1931,6 +1939,7 @@
 
     function removeDockLegend() {
         dockLegendMount = null;
+        dockLegendDrawn = '';
         window.dispatchEvent(new CustomEvent('lectio-manager:dock:remove', {
             detail: { moduleId: MODULE_ID, itemId: DOCK_ITEM_ID }
         }));
@@ -1963,6 +1972,12 @@
             return;
         }
 
+        // Rebuilt only when what it shows has changed, for the same reason the
+        // toggle label is (issue #89): the dock is inside <body>.
+        const signature = [legendLabels().heading, ...keys.map(key => `${key}:${paletteFor(key, 'class').fill}`)].join('|');
+        if (signature === dockLegendDrawn) return;
+        dockLegendDrawn = signature;
+
         const panel = document.createElement('div');
         panel.className = 'lectio-subject-colours-legend__dock-panel';
 
@@ -1983,6 +1998,7 @@
         if (detail.moduleId !== MODULE_ID || detail.itemId !== DOCK_ITEM_ID || !detail.mount) return;
 
         dockLegendMount = detail.mount;
+        dockLegendDrawn = '';
         renderDockLegendPanel();
     }
 
@@ -2803,7 +2819,16 @@
         // Lectio re-renders the schedule table in place when a week is changed,
         // so new blocks arrive without a page load. Both observers are torn down
         // with the page rather than left to accumulate across navigations.
-        const pageObserver = new MutationObserver(queueApply);
+        // A batch made up only of the key's own redraws is not news about the
+        // page, and answering it is how the key redrew itself forever (#89).
+        const ownMutation = (record) => {
+            const target = record.target;
+            return Boolean(target?.closest?.(`#${LEGEND_ID}`)) ||
+                Boolean(dockLegendMount && dockLegendMount.contains(target));
+        };
+        const pageObserver = new MutationObserver((records) => {
+            if (!records.every(ownMutation)) queueApply();
+        });
         pageObserver.observe(document.body, { childList: true, subtree: true });
 
         const themeObserver = new MutationObserver(() => {
