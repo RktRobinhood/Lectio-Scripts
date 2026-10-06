@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Change Radar
 // @namespace    https://github.com/RktRobinhood/Lectio-Scripts
-// @version      0.9.15
+// @version      0.9.16
 // @description  Watches Lectio for the changes you choose to track - timetable, assignments, absence, documents - and keeps a compact recent-change HUD.
 // @author       RktRobinhood
 // @match        https://www.lectio.dk/lectio/*
@@ -46,7 +46,7 @@
     id: 'change-radar',
     aliases: ['schedule-change-radar', 'lectio-change-radar', 'change-log'],
     name: 'Lectio Change Radar',
-    version: '0.9.15',
+    version: '0.9.16',
     channel: 'unstable'
   });
 
@@ -1523,8 +1523,14 @@
      * exactly what a quiet week looks like - so an empty week is left alone
      * and only the unambiguous case is raised: the fetched page rendered
      * blocks, and none of them matched what is parsed here.
+     *
+     * Only a block that should have matched counts (issue #86, the same shape
+     * as Chairs Up's #79). Lectio renders an all-day entry ("Hele dagen") as
+     * a.s2skemabrik.s2normal with no s2brik, so a week holding nothing else -
+     * a holiday, a trip - is a quiet week, not drift. Decoration that is not
+     * an anchor does not count either.
      */
-    if (!bricks.length && doc.querySelector('.s2skemabrik')) {
+    if (!bricks.length && [...doc.querySelectorAll('a.s2skemabrik')].some(shouldHaveBeenBrick)) {
       reportToManager('drift', 'schedule-bricks', 0);
     }
 
@@ -1534,6 +1540,14 @@
     }
 
     return result;
+  }
+
+  // A block with no tooltip at all, or one whose tooltip carries a lesson
+  // time, is one this module should have been able to read.
+  function shouldHaveBeenBrick(element) {
+    const tooltip = element.getAttribute('data-tooltip');
+    if (tooltip === null) return true;
+    return /\d{1,2}\/\d{1,2}-\d{4}\s+\d{1,2}:\d{2}\s+til\s+\d{1,2}:\d{2}/i.test(tooltip);
   }
 
   function parseBrick(brick) {

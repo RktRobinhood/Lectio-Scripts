@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>Change Radar drift-report fixture</title>
+    <script>
+        /* Issue #86. Change Radar reports `schedule-bricks` drift when a week
+           it fetched in the background rendered blocks and none of them is a
+           lesson it can read. It used to count any `.s2skemabrik` as such a
+           block, and Lectio renders an all-day entry ("Hele dagen") as
+           a.s2skemabrik.s2normal with no s2brik - so a holiday week, holding
+           nothing else, was reported on every check (x36 in one day).
+
+           The case comes from the query string, so one file serves all four;
+           the test runs each on its own page view. There is no Manager: this
+           listens for the report event in its place, and every week Change
+           Radar fetches is the case's week. */
+        window.reports = [];
+        window.pageErrors = [];
+        window.weekFetches = 0;
+
+        window.addEventListener('lectio-module:report', (event) => {
+            window.reports.push(event.detail);
+        });
+
+        window.addEventListener('error', (event) => {
+            window.pageErrors.push(String(event.message));
+        });
+
+        const CASES = {
+            // Should stay silent: a quiet week, not drift.
+            'all-day': {
+                expectReport: false,
+                html: '<a class="s2skemabrik s2normal" data-tooltip="Efterårsferie\n12/10-2026 Hele dagen">Efterårsferie</a>'
+                    + '<a class="s2skemabrik s2normal" data-tooltip="Efterårsferie\n13/10-2026 Hele dagen">Efterårsferie</a>'
+            },
+            'decoration': {
+                expectReport: false,
+                html: '<div class="prepend-fonticon-activity s2skemabrik"></div>'
+            },
+            // Should report: a timed lesson Change Radar can no longer match.
+            'timed-without-s2brik': {
+                expectReport: true,
+                html: '<a class="s2skemabrik s2normal" href="/lectio/223/aktivitet/aktivitetforside2.aspx?absid=1" data-tooltip="12/10-2026 08:15 til 09:45\nHold: 1a Fag1\nLokale: 1.01">1a Fag1</a>'
+            },
+            // And the drift module-problem-reports pins: the tooltip itself gone.
+            'no-tooltip': {
+                expectReport: true,
+                html: '<a class="s2skemabrik s2normal"><span>1a Fag1 HL</span></a>'
+            }
+        };
+
+        window.fixtureCase = new URLSearchParams(location.search).get('case');
+
+        const week = '<!DOCTYPE html><html><body><table>'
+            + '<tr class="s2dayHeader"><th>Uge 42</th></tr>'
+            + '<tr><td data-date="2026-10-12">' + (CASES[window.fixtureCase]?.html || '') + '</td></tr>'
+            + '</table></body></html>';
+
+        // Nothing here reaches Lectio, and nothing may hang.
+        window.fetch = (url) => {
+            const isWeek = /SkemaNy\.aspx/i.test(String(url));
+            if (isWeek) window.weekFetches += 1;
+            return Promise.resolve(new Response(
+                isWeek ? week : '<!DOCTYPE html><html><body></body></html>',
+                { status: 200, headers: { 'content-type': 'text/html' } }
+            ));
+        };
+    </script>
+</head>
+<body>
+    <pre id="test-result" data-test-result="pending">PENDING</pre>
+
+    <script src="/change-radar.user.js"></script>
+    <script>
+        window.addEventListener('load', async () => {
+            const result = document.getElementById('test-result');
+
+            try {
+                const expected = CASES[window.fixtureCase];
+                if (!expected) throw new Error(`unknown case: ${window.fixtureCase}`);
+
+                // Change Radar jitters its first check by up to four seconds.
+                // An absence proof needs the whole window, so this is a flat
+                // wait, covered by the test's virtual-time budget.
+                await new Promise((done) => setTimeout(done, 10000));
+
+                // Silence only means something if the week was read at all.
+                if (!window.weekFetches) throw new Error('Change Radar never fetched a week');
+
+                const drift = window.reports.filter((report) =>
+                    report.moduleId === 'change-radar' && report.code === 'schedule-bricks');
+
+                if (expected.expectReport) {
+                    if (!drift.length) throw new Error('expected a schedule-bricks report, got none');
+                    if (drift[0].kind !== 'drift' || drift[0].found !== 0) {
+                        throw new Error(`wrong report: ${JSON.stringify(drift[0])}`);
+                    }
+                } else if (drift.length) {
+                    throw new Error(`reported drift on a week with nothing to read: ${JSON.stringify(drift)}`);
+                }
+
+                if (window.pageErrors.length) throw new Error(window.pageErrors.join(' | '));
+
+                result.dataset.testResult = 'pass';
+                result.textContent = 'PASS';
+            } catch (error) {
+                result.dataset.testResult = 'fail';
+                result.textContent = `FAIL: ${error.message}`;
+            }
+        });
+    </script>
+</body>
+</html>
