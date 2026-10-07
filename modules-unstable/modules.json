@@ -29,6 +29,27 @@
           "changelog": "Hver ændring i loggen har et lille x, der kun fjerner den ene. Lærere: ændringer, du selv laver på en lektion, vises ikke længere på din egen radar. En ulæselig uge giver nu et mislykket tjek i stedet for at melde lektionerne som fjernet."
         }
       }
+    },
+    {
+      "id": "unit-copier",
+      "name": "Unit Copier",
+      "description": "Plan copying last year's unit into one of your classes. The old lessons sit side by side with your class's lessons, paired in order and ready to adjust by dragging, leaving a lesson empty, or leaving one out. Plan only for now: nothing is copied into Lectio yet.",
+      "category": "Timetable",
+      "audience": [
+        "teacher"
+      ],
+      "status": "unstable",
+      "version": "0.1.0",
+      "changelog": "First version: the planner. It reads your unit and your timetable and shows the plan; it does not copy anything into Lectio yet.",
+      "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Unit-Copier.user.js",
+      "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
+      "i18n": {
+        "da": {
+          "name": "Forløbskopiering",
+          "description": "Planlæg at lægge sidste års forløb ind på et af dine hold. De gamle lektioner står side om side med holdets lektioner, sat i rækkefølge og klar til at justere: træk, lad en lektion stå tom, eller udelad en. Foreløbig kun en plan: intet bliver kopieret ind i Lectio endnu.",
+          "changelog": "Første version: planlæggeren. Den læser dit forløb og dit skema og viser planen; den kopierer ikke noget ind i Lectio endnu."
+        }
+      }
     }
   ]
 }

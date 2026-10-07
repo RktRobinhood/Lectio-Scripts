@@ -33,6 +33,29 @@ The extra patch bump at promotion is not ceremony. A tester's installed copy poi
 
 To try it: as a teacher, change a lesson's room and press Refresh; nothing should appear. A colleague's change to one of your lessons still should.
 
+### Unit Copier 0.1.0 (new, Experimental only)
+
+The first part of issue #74: **the planner. It only reads.** On a unit's page (`studieplan/forloeb_vis.aspx`), a **Copy into a class** button appears next to Lectio's *Kopiér forløb*, and only on units the person can edit. It opens a side-by-side plan:
+
+- **Left:** the unit's lessons and their items, read off the page itself (`ACC` lessons; `ACH` items under *Lektier* or *Øvrigt indhold*; the `ACP` presentation). A lesson cancelled last year with nothing on it takes no place in the sequence.
+- **Right:** the chosen class's lessons from the chosen date, read week by week from the person's own `SkemaNy.aspx`. It stops once it has enough lessons, or after 30 weeks.
+  - The class menu's first guess is the same course in the same year-group as last year's class. The classes the unit already belongs to are listed last.
+  - Cancelled lessons are ignored. A lesson whose tooltip already has a *Lektier:* or *Øvrigt indhold:* line is left alone.
+- **Default plan:** last year's lessons in order onto the class's next free lessons. Holiday weeks fall out naturally.
+- **Adjusting:**
+  - *Leave empty* on a lesson moves everything after it along by one.
+  - *Leave out* drops one of last year's lessons.
+  - Dragging one of last year's lessons onto a lesson starts the sequence there.
+  - The up and down arrows reorder last year's lessons.
+- The draft is kept in `sessionStorage` for the tab. Nothing goes into `localStorage`.
+- **Copy plan as text** puts the plan on the clipboard.
+
+It sends only GETs of the person's own timetable. Copying the plan into Lectio comes later, under the ADR-0009 amendment of 2026-10-07 and its safety bar, once the write path has been checked on a throwaway lesson (issue #74, assessment section 5).
+
+`tests/unit-copier.browser.test.js` covers it: the default class, the in-order pairing across a holiday, leave empty, leave out, drag, both languages, only timetable GETs, and no button on a unit you cannot edit. The parser was also run once against a real saved unit page, outside the repo: it read 21 lessons and 18 items (16 homework, 1 other content, 1 presentation), matching the page's 17 `ACH` items plus 1 `ACP`.
+
+To try it: open last year's version of a unit you teach again this year, press **Copy into a class**, check the class it guessed, press **Find lessons**, and adjust.
+
 ## When nothing is under test
 
 `modules.json` must never be emptied. Every shipped Manager rejects an overlay with no modules in it, keeps the overlay it cached last, and reports the failure on every refresh; a Manager older than 1.22.1 also lets that cached overlay win outright, so it would keep offering installs from the `modules-unstable/` URLs a promotion deletes. So when the last module here is promoted, the overlay keeps one entry that is an exact copy of its entry in `catalogue/modules.json`, `installUrl` included. A current Manager resolves equal versions to Stable, and an old one installs the Stable file whichever entry it picks. `node scripts/check-versions.mjs` accepts an overlay entry with no file here only when it is that exact copy, and fails an overlay with no entries at all.
