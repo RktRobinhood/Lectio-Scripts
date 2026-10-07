@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>Unit Copier - Kopiér form fixture</title>
+    <script>
+        /* Issue #74, Unit Copier 0.2.0 on Lectio's Kopiér form
+           (studieplan/forloeb_kopier.aspx?fromphaseid=500). The field ids are
+           the real form's (read 2026-10-07). The class box is a type-ahead
+           that stores the chosen class in a hidden *EntityChooserCtrl$inpid;
+           on the real form it twice stored a different class from the one it
+           showed, so the module checks the stored id on Lectio's context
+           card.
+
+           Last year's unit has 4 lessons in sequence. The person's
+           timetable has 1i Math AA SL/2 three times a week for the next
+           two weeks, then nothing published (only information slots).
+           ?short=1 publishes only one week (3 lessons), so the end date is
+           an estimate. */
+        window.SHORT = new URLSearchParams(location.search).has('short');
+
+        const dayFromToday = (offset) => {
+            const date = new Date();
+            date.setHours(0, 0, 0, 0);
+            date.setDate(date.getDate() + offset);
+            return date;
+        };
+        const isoWeek = (date) => {
+            const day = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+            const weekday = day.getUTCDay() || 7;
+            day.setUTCDate(day.getUTCDate() + 4 - weekday);
+            const yearStart = new Date(Date.UTC(day.getUTCFullYear(), 0, 1));
+            return { week: Math.ceil(((day - yearStart) / 86400000 + 1) / 7), year: day.getUTCFullYear() };
+        };
+        const lectioDate = (date) => date.getDate() + '/' + (date.getMonth() + 1) + '-' + date.getFullYear();
+        window.dmy = (date) => String(date.getDate()).padStart(2, '0') + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' + date.getFullYear();
+
+        // Three lessons in each of the next published weeks, starting tomorrow.
+        const publishedDays = SHORT ? [1, 2, 3] : [1, 2, 3, 8, 9, 10];
+        window.CLASS_DAYS = publishedDays.map(dayFromToday);
+        const lastPublished = dayFromToday(SHORT ? 6 : 13);
+
+        const sourceLesson = (acc, when, items) => '<div class="ls-phase-activity" id="' + acc + '"><div><a class="s2skemabrik s2brik" href="#" data-tooltip="' + when + ' 10:00 til 11:00\nHold: x"><span data-lectiocontextcard="HE1">x</span></a></div>' +
+            '<div class="ls-phase-activity-content">' + (items || '<div id="x_emptyList"></div>') + '</div></div>';
+        const year = new Date().getFullYear() - 1;
+        const SOURCE = '<!doctype html><html><body><div class="ls-phase-activity" id="overview"><div data-to-toc-id="overview">Forløb - Unit 1: Algebra</div></div>' +
+            '<div id="x_actContainer">' +
+            sourceLesson('ACC1', '12/8-' + year, '<div id="a_InlineHomework"><article data-to-toc-id="ACH1"><h1>Calculators</h1></article></div>') +
+            sourceLesson('ACC2', '15/8-' + year) +
+            sourceLesson('ACC3', '19/8-' + year) +
+            sourceLesson('ACC4', '22/8-' + year) +
+            '</div></body></html>';
+
+        const block = (date, name, card) => '<a class="s2skemabrik s2brik" href="/lectio/223/aktivitet/aktivitetforside2.aspx?absid=' + date.getTime() + '" data-tooltip="' +
+            lectioDate(date) + ' 10:55 til 12:05\nHold: ' + name + '">' + (card ? '<span data-lectiocontextcard="' + card + '">' + name + '</span>' : name) + '</a>';
+
+        const weekHtml = (week, year) => {
+            const days = CLASS_DAYS.filter((day) => { const at = isoWeek(day); return at.week === week && at.year === year; });
+            const monday = (() => { const d = dayFromToday(0); for (let i = 0; i < 400; i += 1) { const at = isoWeek(d); if (at.week === week && at.year === year && d.getDay() === 1) return d; d.setDate(d.getDate() + 1); } return d; })();
+            const published = monday <= lastPublished || days.length;
+            const lessons = published
+                ? days.map((day) => block(day, '1i Math AA SL/2', 'HE700')).join('') + block(dayFromToday(0), '1i Psyc HL', 'HE900')
+                : block(monday, 'Alle Lærere', null);
+            return '<!doctype html><html><body><table><tr><td data-date="x">' + lessons + '</td></tr></table></body></html>';
+        };
+
+        window.requests = [];
+
+        window.fetch = (url, init) => {
+            const parsed = new URL(String(url), location.href);
+            requests.push({ path: parsed.pathname, search: parsed.search, method: (init && init.method) || 'GET' });
+
+            let html = null;
+
+            if (parsed.pathname === '/lectio/223/studieplan/forloeb_vis.aspx' && parsed.searchParams.get('phaseid') === '500') {
+                html = SOURCE;
+            } else if (parsed.pathname === '/lectio/223/contextcard/contextcard.aspx') {
+                const names = { HE111: '1i Math AA HL', HE222: '1i Math AA SL/2' };
+                const name = names[parsed.searchParams.get('lectiocontextcard')];
+                html = name ? '<html><body> Hold - ' + name + ' Fag: Matematik Skema Medlemmer </body></html>' : null;
+            } else if (parsed.pathname === '/lectio/223/SkemaNy.aspx') {
+                const param = parsed.searchParams.get('week') || '';
+                html = weekHtml(Number(param.slice(0, 2)), Number(param.slice(2)));
+            }
+
+            return html === null
+                ? Promise.reject(new TypeError('unexpected request ' + url))
+                : Promise.resolve(new Response(html, { status: 200, headers: { 'content-type': 'text/html' } }));
+        };
+    </script>
+</head>
+<body>
+    <div id="masterContent">
+        <h1>Kopiér forløb</h1>
+        <table>
+            <tr><th>Titel på nyt forløb:</th><td><input id="m_Content_nameTB_tb" value="Unit 1: Algebra"></td></tr>
+            <tr><th>Kopiér til hold:</th><td>
+                <input type="text" id="m_Content_EntityChooserCtrl_inp" name="m$Content$EntityChooserCtrl$inp" value="">
+                <input type="hidden" name="m$Content$EntityChooserCtrl$inpid" value="">
+            </td></tr>
+            <tr><th>Periode:</th><td>
+                <input type="text" id="m_Content_diCtrl_start__date_tb" maxlength="10" value="">
+                <input type="text" id="m_Content_diCtrl_end__date_tb" maxlength="10" value="">
+            </td></tr>
+        </table>
+        <a href="#" id="kopier">Kopiér</a>
+    </div>
+
+    <script>
+        history.replaceState(null, '', location.pathname + '?fromphaseid=500&schoolid=804' + (SHORT ? '&short=1' : ''));
+    </script>
+
+    <script src="/unit-copier.user.js"></script>
+
+    <script>
+        const failures = [];
+        const assert = (condition, message) => { if (!condition) failures.push(message); };
+        const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+        const waitFor = async (predicate, label) => {
+            for (let attempt = 0; attempt < 600; attempt += 1) {
+                if (predicate()) return true;
+                await wait(50);
+            }
+            failures.push('timed out waiting for ' + label);
+            return false;
+        };
+        const report = () => {
+            const output = document.createElement('pre');
+            output.id = 'test-result';
+            output.textContent = failures.length ? failures.join(' | ') : 'pass';
+            document.body.dataset.testResult = failures.length ? 'fail' : 'pass';
+            document.body.appendChild(output);
+        };
+
+        const guide = () => document.getElementById('lectio-unit-copier-guide');
+        const classLine = () => guide().querySelector('.luc-class');
+        const box = document.getElementById('m_Content_EntityChooserCtrl_inp');
+        const stored = document.querySelector('[name="m$Content$EntityChooserCtrl$inpid"]');
+
+        (async () => {
+            await waitFor(() => guide(), 'the explanation box');
+            if (!guide()) return;
+
+            assert(guide().querySelectorAll('ol li').length === 3, 'the three steps are missing');
+            assert(/lektioner er holdets lektioner mellem de to datoer i Periode, og de starter tomme/.test(guide().textContent), 'step 1 does not explain Periode and empty lessons');
+            assert(document.querySelector('table').nextElementSibling === guide(), 'the box is not right below the form fields');
+            await waitFor(() => /Vælg et hold/.test(classLine().textContent), 'the "choose a class" prompt');
+
+            /* The type-ahead shows one class and has stored another. */
+            box.value = '1i Math AA SL/2 (2026/27)';
+            stored.value = 'HE111';
+            await waitFor(() => classLine().dataset.kind === 'warn', 'the mismatch warning');
+            assert(/feltet viser "1i Math AA SL\/2", men Lectio har gemt "1i Math AA HL"/.test(classLine().textContent), 'mismatch reads: ' + classLine().textContent);
+            assert(!guide().querySelector('.luc-period button'), 'a Periode was suggested for the wrong class');
+
+            /* Chosen again: the right class. */
+            stored.value = 'HE222';
+            await waitFor(() => classLine().dataset.kind === 'ok', 'the class to be confirmed');
+            assert(/Lectio har gemt holdet: 1i Math AA SL\/2/.test(classLine().textContent), 'confirmation reads: ' + classLine().textContent);
+
+            await waitFor(() => guide().querySelector('.luc-period button'), 'the Periode suggestion');
+            const period = guide().querySelector('.luc-period').textContent;
+            assert(/Sidste års forløb har 4 lektioner/.test(period), 'source count: ' + period);
+
+            // The answer leads, and the button names the same dates.
+            const suggested = guide().querySelector('.luc-suggested');
+            const useButton = guide().querySelector('.luc-period button');
+            assert(suggested && /^Foreslået Periode: .+ til .+\.$/.test(suggested.textContent), 'the suggestion does not lead with the dates: ' + period);
+            assert(/^Brug .+ til .+$/.test(useButton.textContent) &&
+                suggested.textContent.includes(useButton.textContent.replace(/^Brug /, '').split(' til ')[0]),
+                'the button does not name the suggested dates: ' + useButton.textContent);
+
+            if (SHORT) {
+                // What the timetable shows is exact; only the one remaining
+                // lesson is estimated, one week past the last one shown.
+                assert(/3 af dem ligger i dit skema/.test(period) && /de øvrige 1 er anslået ud fra omkring \d+ lektioner om ugen/.test(period),
+                    'estimate reads: ' + period);
+            } else {
+                assert(/Alle 4 lektioner ligger i dit skema/.test(period), 'exact suggestion reads: ' + period);
+            }
+
+            useButton.click();
+            const start = document.getElementById('m_Content_diCtrl_start__date_tb').value;
+            const end = document.getElementById('m_Content_diCtrl_end__date_tb').value;
+            const expectedEnd = SHORT
+                ? (() => { const d = new Date(CLASS_DAYS[2]); d.setDate(d.getDate() + 7); return dmy(d); })()
+                : dmy(CLASS_DAYS[3]);
+            assert(start === dmy(CLASS_DAYS[0]) && end === expectedEnd, 'dates filled: ' + start + ' to ' + end + ', expected ' + dmy(CLASS_DAYS[0]) + ' to ' + expectedEnd);
+            assert(/Tjek dem, før du trykker Kopiér/.test(guide().textContent), 'no reminder to check the dates');
+
+            /* Reading only, and the timetable scan stopped where publishing ended. */
+            assert(requests.every((r) => r.method === 'GET'), 'a request that was not a GET');
+            const weekRequests = requests.filter((r) => r.path.endsWith('/SkemaNy.aspx')).length;
+            assert(weekRequests <= (SHORT ? 4 : 3), 'the timetable scan read ' + weekRequests + ' weeks; it should stop at the end of the published timetable');
+        })()
+            .catch((error) => failures.push('threw: ' + (error && error.stack || error)))
+            .finally(report);
+    </script>
+</body>
+</html>

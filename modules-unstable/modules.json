@@ -33,21 +33,21 @@
     {
       "id": "unit-copier",
       "name": "Unit Copier",
-      "description": "Plan copying last year's unit into one of your classes. The old lessons sit side by side with your class's lessons, paired in order and ready to adjust by dragging, leaving a lesson empty, or leaving one out. Plan only for now: nothing is copied into Lectio yet.",
+      "description": "Reuse last year's unit in a new class. On Lectio's Kopiér form it explains what happens, checks which class Lectio really stored, and suggests a Periode. On the copied unit it lines last year's lessons up with the new ones, ready to adjust. Plan only for now: nothing is copied into the lessons yet.",
       "category": "Timetable",
       "audience": [
         "teacher"
       ],
       "status": "unstable",
-      "version": "0.1.0",
-      "changelog": "First version: the planner. It reads your unit and your timetable and shows the plan; it does not copy anything into Lectio yet.",
+      "version": "0.2.0",
+      "changelog": "Rebuilt after the first test. It now sits where you copy units: help on Lectio's Kopiér form, then a \"Place last year's lessons\" banner on the copied unit, with one clear timeline.",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Unit-Copier.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
       "i18n": {
         "da": {
           "name": "Forløbskopiering",
-          "description": "Planlæg at lægge sidste års forløb ind på et af dine hold. De gamle lektioner står side om side med holdets lektioner, sat i rækkefølge og klar til at justere: træk, lad en lektion stå tom, eller udelad en. Foreløbig kun en plan: intet bliver kopieret ind i Lectio endnu.",
-          "changelog": "Første version: planlæggeren. Den læser dit forløb og dit skema og viser planen; den kopierer ikke noget ind i Lectio endnu."
+          "description": "Genbrug sidste års forløb på et nyt hold. På Lectios Kopiér-side forklarer den, hvad der sker, tjekker hvilket hold Lectio faktisk har gemt, og foreslår en Periode. På det kopierede forløb sætter den sidste års lektioner op mod de nye, klar til at justere. Foreløbig kun en plan: intet bliver kopieret ind i lektionerne endnu.",
+          "changelog": "Bygget om efter første test. Den sidder nu, hvor du kopierer forløb: hjælp på Lectios Kopiér-side og derefter en \"Placér sidste års lektioner\"-knap på det kopierede forløb med én tydelig tidslinje."
         }
       }
     }

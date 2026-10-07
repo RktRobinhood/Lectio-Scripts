@@ -1,10 +1,11 @@
 // ==UserScript==
 // @name         Lectio - Unit Copier
 // @namespace    https://github.com/RktRobinhood/Lectio-Scripts
-// @version      0.1.0
-// @description  Plan copying last year's unit into one of your classes: the old lessons side by side with your class's lessons, paired in order, ready to adjust. Plan only - nothing is copied into Lectio yet.
+// @version      0.2.0
+// @description  Reuse last year's unit in a new class: explains Lectio's Kopiér, checks the class Lectio really chose, suggests the Periode, and on the copied unit lines last year's lessons up with the new ones. Plan only - nothing is copied into Lectio yet.
 // @author       RktRobinhood
 // @match        https://www.lectio.dk/lectio/*/studieplan/forloeb_vis.aspx*
+// @match        https://www.lectio.dk/lectio/*/studieplan/forloeb_kopier.aspx*
 // @noframes
 // @grant        none
 // @run-at       document-idle
@@ -15,32 +16,34 @@
 // ==/UserScript==
 
 /*
- * UNIT COPIER - THE PLANNER (issue #74)
+ * UNIT COPIER (issue #74)
  *
- * The teacher's job: "put last year's unit into this year's class". Lectio's
- * own flow is Kopier forløb (an empty shell) and then, lesson by lesson, the
- * Vælg materiale picker. This module turns the matching half of that into one
- * screen: last year's lessons on the left, this class's lessons on the right,
- * paired in order by default, and adjusted by dragging, leaving a lesson empty
- * or leaving an old lesson out.
+ * The job: "put last year's unit into this year's class". Lectio does it in
+ * two steps, and this module sits on both:
  *
- * THIS VERSION ONLY READS. It reads the unit page it runs on, and the
- * teacher's own timetable (SkemaNy.aspx, one GET per week) to find the class's
- * lessons. It never posts anything to Lectio. Copying the plan into Lectio is
- * a later version, under the ADR-0009 amendment of 2026-10-07 and the safety
- * bar written there.
+ * 1. KOPIÉR FORLØB (studieplan/forloeb_kopier.aspx). Lectio creates a new
+ *    unit for the chosen class. Its lessons are the class's timetabled
+ *    lessons inside the Periode, and they are EMPTY; last year's material
+ *    goes into the new unit's Forløbsmaterialet pile. The form says none of
+ *    that. This module explains it, checks which class Lectio has really
+ *    stored (its type-ahead can store a different class from the one the box
+ *    shows - seen twice on 2026-10-07), and suggests a Periode long enough
+ *    for last year's lessons. The person presses Kopiér; this never does.
  *
- * What it relies on, all read off real pages (see issue #74):
- *   - a lesson on the unit page is div.ls-phase-activity#ACC<activity id>,
- *     with its timetable block (a.s2skemabrik[data-tooltip]) in its heading;
- *   - its items are article[data-to-toc-id^="ACH"], under *_InlineHomework
- *     (Lektier) or *_InlineOther (Øvrigt indhold); the presentation is
- *     [data-to-toc-id^="ACP"] under *_InlinePresentation;
- *   - a class is the HE<digits> context card on a lesson block, and a lesson
- *     that already has material carries a "Lektier:" or "Øvrigt indhold:"
- *     line in its tooltip.
- * Everything is matched on ids and attributes, never on Danish text, because
- * English Mode may have translated the text by the time this reads it.
+ * 2. THE COPIED UNIT (studieplan/forloeb_vis.aspx). Lectio remembers where a
+ *    copy came from: its material picker lists the original under
+ *    "Relaterede forløb". This module finds it there, reads both units, and
+ *    offers a plan: last year's lessons in order on this unit's lessons,
+ *    adjusted by skipping a day, leaving a lesson out, or dragging.
+ *
+ * THIS VERSION ONLY READS. Every request is a GET of a page the person can
+ * already open. Writing the plan into the lessons comes later, under the
+ * ADR-0009 amendment of 2026-10-07 and the safety bar written there.
+ *
+ * Everything is matched on ids and attributes, never on Danish text the page
+ * shows, because English Mode may have translated it. The few Danish strings
+ * matched (tooltip lines, the picker's tree) are read from fetched pages,
+ * which no module has touched.
  */
 
 (() => {
@@ -65,37 +68,43 @@
     // `node scripts/check-versions.mjs` enforces it.
     const MODULE_ID = 'unit-copier';
     const MODULE_NAME = 'Lectio - Unit Copier';
-    const MODULE_VERSION = '0.1.0';
+    const MODULE_VERSION = '0.2.0';
 
     const STYLE_ID = 'lectio-unit-copier-styles';
-    const BUTTON_ID = 'lectio-unit-copier-open';
-    const OVERLAY_ID = 'lectio-unit-copier';
+    const BANNER_ID = 'lectio-unit-copier-banner';
+    const DIALOG_ID = 'lectio-unit-copier';
+    const GUIDE_ID = 'lectio-unit-copier-guide';
     const DRAG_PREFIX = 'lectio-unit-copier:';
 
-    // The plan is a draft for this tab only: kept across a reload, gone when
-    // the tab closes. Nothing goes into localStorage.
-    const DRAFT_PREFIX = 'lectioUnitCopier.draft.';
+    /*
+     * Plans, so a teacher can come back when the school publishes more of the
+     * timetable and carry on where they stopped. One key, keyed inside by the
+     * copied unit's phase id. Declared to the Manager as prunable: losing it
+     * only resets a plan to its default.
+     */
+    const PLANS_KEY = 'lectioUnitCopier.plans.v1';
+    const PLAN_LIFE_MS = 400 * 24 * 60 * 60 * 1000;
 
-    // How far ahead to look for the class's lessons, and when to stop early.
-    const MAX_WEEKS = 30;
-    const SPARE_SLOTS = 4;
-    const WEEK_FETCH_TIMEOUT_MS = 10000;
-    const WEEK_FETCH_GAP_MS = 250;
+    const FETCH_TIMEOUT_MS = 10000;
+    const CLASS_CHECK_MS = 700;
+    const PERIOD_SCAN_WEEKS = 12;
 
     const TIME_PATTERN = /(\d{1,2})\/(\d{1,2})-(\d{4})\s+(\d{1,2}):(\d{2})\s+til\s+(\d{1,2}):(\d{2})/;
-    const CONTENT_LINE_PATTERN = /^\s*(Lektier|Øvrigt indhold)\s*:\s*$/m;
 
-    // One controller for every listener the module adds, so teardown is one
-    // abort() rather than a list that drifts out of step.
+    // One controller for every listener, and one for every request, so
+    // teardown is two abort() calls rather than lists that drift.
     const lifecycle = new AbortController();
+    const requests = new AbortController();
 
-    // Page-view state. Declared here, above the boot call at the bottom, so
-    // nothing start() reaches is still in its temporal dead zone
+    // Page-view state, declared above the boot call at the bottom
     // (scripts/check-boot-order.mjs).
-    let source = null;          // { phaseId, title, holdNames, lessons }
+    let unit = null;            // this unit, read off the page
+    let source = null;          // the unit it was copied from, fetched
     let plan = null;            // see newPlan()
-    let scanController = null;  // the week scan in flight, if any
     let lastFocus = null;
+    let classTimer = 0;
+    let waitingCause = null;    // why lessons are waiting: see checkWaitingCause()
+    let checkedClassId = null;   // null: nothing checked yet, not even the empty box
 
     /* ---------------------------------------------------------------- *
      * Language (ADR-0013)
@@ -111,99 +120,137 @@
         return language() === 'en'
             // i18n:en
             ? {
-                openButton: 'Copy into a class',
-                openButtonTitle: 'Plan putting this unit into one of your classes',
-                title: 'Copy this unit into a class',
-                planOnly: 'Plan only: nothing is copied into Lectio yet. Copying comes in a later version.',
-                classLabel: 'Class',
-                classLoading: 'Reading your timetable...',
-                classNone: 'No classes found in your timetable for the next two weeks.',
-                startLabel: 'From',
-                findButton: 'Find lessons',
-                scanning: 'Reading week {week}...',
-                scanStopped: 'Stopped after week {week}.',
-                sessionLost: 'Lectio did not return your timetable. Are you still logged in? Reload the page and try again.',
-                fetchFailed: 'Could not read week {week}. The lessons found so far are shown; try again to read the rest.',
-                sourceHeading: 'Last year',
-                targetHeading: 'Your class',
-                targetEmpty: 'Choose a class and press Find lessons.',
-                noLessonsFound: 'No lessons found for this class from that date.',
-                summary: '{source} lessons from last year onto {filled} of your lessons.',
-                summaryNotPlaced: '{n} not placed.',
-                summaryHasContent: '{n} of your lessons already have material and are left alone.',
-                summaryCancelled: '{n} cancelled lessons ignored.',
-                notPlacedHeading: 'Not placed',
-                leaveEmpty: 'Leave empty',
-                useLesson: 'Use this lesson',
-                leaveOut: 'Leave out',
-                putBack: 'Put back',
-                moveUp: 'Move up',
-                moveDown: 'Move down',
-                emptySlot: 'Nothing goes here',
-                leftEmpty: 'Left empty',
-                hasContent: 'Already has material - left alone',
-                leftOutNote: 'Left out',
-                noItems: 'No material',
-                dragHint: 'Drag a lesson from the left onto one of your lessons to put it there.',
+                bannerCopied: 'Copied from {source} ({count} lessons).',
+                bannerState: 'Lessons with material: {filled} of {total}.',
+                bannerButton: 'Place last year\'s lessons',
+                bannerChecking: 'Unit Copier: checking where this unit was copied from...',
+                title: 'Place last year\'s lessons',
+                subtitle: '{source} ({sourceYear}) → {target} ({targetYear})',
+                colYours: 'Your lesson',
+                colGets: 'Gets last year\'s lesson',
+                placedOne: '1 of {total} lessons from last year placed.',
+                placedMany: '{placed} of {total} lessons from last year placed.',
+                waitingOne: '1 more needs a lesson: this unit only has lessons up to {date}.',
+                waitingMany: '{n} more need lessons: this unit only has lessons up to {date}.',
+                waitingChecking: 'Checking your timetable to see why...',
+                waitingPeriod: 'Your timetable already has {more} more {name} lessons after this unit\'s Periode ends ({end}), up to {last}. Make the Periode longer to place them now; this plan is kept.',
+                waitingTimetable: 'Your timetable has no {name} lessons after {last} yet: the school has not published further. Come back when it has; this plan is kept.',
+                editPeriod: 'Change the Periode (Rediger forløb)',
+                bannerNotFound: 'Unit Copier could not tell which unit this one was copied from, so it cannot line up last year\'s lessons here.',
+                skippedOne: '1 lesson already has material and is left alone.',
+                skippedMany: '{n} lessons already have material and are left alone.',
+                week: 'Week {week}',
+                lessonNumber: 'Lesson {n}',
+                was: 'was {date}',
+                noMaterial: '(no material)',
                 kindHomework: 'Homework',
-                kindOther: 'Other content',
+                kindOther: 'Other',
                 kindPresentation: 'Presentation',
-                kindFile: 'file',
-                kindLink: 'link',
-                cancelledLastYear: 'cancelled last year',
+                hasContent: 'Already has material, not touched',
+                skipped: 'Skipped',
+                free: 'Free: no more lessons from last year',
+                skipDay: 'Skip this day',
+                skipDayTip: 'Keep this lesson free. The rest move one lesson later.',
+                leaveOut: 'Leave out',
+                leaveOutTip: 'Drop this lesson from the plan. The rest move one lesson earlier.',
+                useAnyway: 'Use anyway',
+                useAnywayTip: 'Put last year\'s lesson here as well. Nothing already on it will be changed.',
+                undo: 'Undo',
+                putBack: 'Put back',
+                dragTip: 'Drag onto another of your lessons to start this lesson there.',
+                waitingHeading: 'Waiting for lessons ({n})',
+                leftOutHeading: 'Left out ({n})',
+                planOnly: 'This is a plan. Nothing is changed in Lectio yet.',
+                startOver: 'Start over',
                 copyPlan: 'Copy plan as text',
-                copied: 'Plan copied.',
+                copied: 'Copied',
                 close: 'Close',
-                resetPlan: 'Start over',
-                weekdays: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+                noLessons: 'This unit has no lessons yet. Lengthen its Periode (Rediger forløb) so it covers the class\'s lessons.',
+                guideTitle: 'What Kopiér does',
+                guideStep1: 'Lectio makes a new unit for the class you choose. Its lessons are that class\'s lessons between the two Periode dates, and they start empty.',
+                guideStep2: 'Last year\'s material goes into the new unit\'s Forløbsmateriale, not into the lessons.',
+                guideStep3: 'After you press Kopiér, open the new unit and press "Place last year\'s lessons" to line them up.',
+                classChecking: 'Checking which class Lectio has stored...',
+                classOk: 'Lectio has stored the class: {name}.',
+                classMismatch: 'Careful: the box shows "{shown}", but Lectio has stored "{name}". Choose the class again from the list.',
+                classNone: 'Choose a class from the list that appears as you type.',
+                periodSource: 'Last year\'s unit has {count} lessons.',
+                periodScanning: 'Reading your timetable for {name}: week {week}...',
+                periodSuggested: 'Suggested Periode: {start} to {end}.',
+                periodExact: 'All {count} lessons fit in your published timetable.',
+                periodEstimate: '{shown} of them are in your timetable (up to {last}); the other {rest} are estimated at about {perWeek} lessons a week.',
+                periodNoLessons: 'No upcoming lessons for {name} were found in your timetable.',
+                periodUse: 'Use {start} to {end}',
+                periodUsed: 'Dates filled in. Check them before you press Kopiér.',
+                weekdays: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
+                months: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
             }
             // i18n:da
             : {
-                openButton: 'Kopiér ind i et hold',
-                openButtonTitle: 'Planlæg at lægge dette forløb ind på et af dine hold',
-                title: 'Kopiér forløbet ind i et hold',
-                planOnly: 'Kun en plan: intet bliver kopieret ind i Lectio endnu. Kopieringen kommer i en senere version.',
-                classLabel: 'Hold',
-                classLoading: 'Læser dit skema...',
-                classNone: 'Ingen hold fundet i dit skema de næste to uger.',
-                startLabel: 'Fra',
-                findButton: 'Find lektioner',
-                scanning: 'Læser uge {week}...',
-                scanStopped: 'Stoppede efter uge {week}.',
-                sessionLost: 'Lectio sendte ikke dit skema. Er du stadig logget ind? Genindlæs siden, og prøv igen.',
-                fetchFailed: 'Kunne ikke læse uge {week}. Lektionerne, der er fundet indtil nu, vises; prøv igen for at læse resten.',
-                sourceHeading: 'Sidste år',
-                targetHeading: 'Dit hold',
-                targetEmpty: 'Vælg et hold, og tryk Find lektioner.',
-                noLessonsFound: 'Ingen lektioner fundet for holdet fra den dato.',
-                summary: '{source} lektioner fra sidste år på {filled} af dine lektioner.',
-                summaryNotPlaced: '{n} ikke placeret.',
-                summaryHasContent: '{n} af dine lektioner har allerede materiale og bliver ikke rørt.',
-                summaryCancelled: '{n} aflyste lektioner springes over.',
-                notPlacedHeading: 'Ikke placeret',
-                leaveEmpty: 'Lad stå tom',
-                useLesson: 'Brug lektionen',
-                leaveOut: 'Udelad',
-                putBack: 'Tag med igen',
-                moveUp: 'Flyt op',
-                moveDown: 'Flyt ned',
-                emptySlot: 'Intet her',
-                leftEmpty: 'Står tom',
-                hasContent: 'Har allerede materiale - bliver ikke rørt',
-                leftOutNote: 'Udeladt',
-                noItems: 'Intet materiale',
-                dragHint: 'Træk en lektion fra venstre over på en af dine lektioner for at lægge den dér.',
+                bannerCopied: 'Kopieret fra {source} ({count} lektioner).',
+                bannerState: 'Lektioner med materiale: {filled} af {total}.',
+                bannerButton: 'Placér sidste års lektioner',
+                bannerChecking: 'Forløbskopiering: tjekker, hvor forløbet er kopieret fra...',
+                title: 'Placér sidste års lektioner',
+                subtitle: '{source} ({sourceYear}) → {target} ({targetYear})',
+                colYours: 'Din lektion',
+                colGets: 'Får sidste års lektion',
+                placedOne: '1 af {total} lektioner fra sidste år er placeret.',
+                placedMany: '{placed} af {total} lektioner fra sidste år er placeret.',
+                waitingOne: '1 mangler en lektion: forløbet har kun lektioner til og med {date}.',
+                waitingMany: '{n} mangler lektioner: forløbet har kun lektioner til og med {date}.',
+                waitingChecking: 'Tjekker dit skema for at se hvorfor...',
+                waitingPeriod: 'Dit skema har allerede {more} lektioner mere med {name} efter forløbets Periode slutter ({end}), til og med {last}. Gør Periode længere for at placere dem nu; planen bliver gemt.',
+                waitingTimetable: 'Dit skema har endnu ingen lektioner med {name} efter {last}: skolen har ikke lagt mere ud. Kom tilbage, når det er sket; planen bliver gemt.',
+                editPeriod: 'Ret Periode (Rediger forløb)',
+                bannerNotFound: 'Forløbskopiering kunne ikke se, hvilket forløb dette er kopieret fra, så den kan ikke sætte sidste års lektioner op her.',
+                skippedOne: '1 lektion har allerede materiale og bliver ikke rørt.',
+                skippedMany: '{n} lektioner har allerede materiale og bliver ikke rørt.',
+                week: 'Uge {week}',
+                lessonNumber: 'Lektion {n}',
+                was: 'var {date}',
+                noMaterial: '(intet materiale)',
                 kindHomework: 'Lektie',
-                kindOther: 'Øvrigt indhold',
+                kindOther: 'Øvrigt',
                 kindPresentation: 'Præsentation',
-                kindFile: 'fil',
-                kindLink: 'link',
-                cancelledLastYear: 'aflyst sidste år',
+                hasContent: 'Har allerede materiale, bliver ikke rørt',
+                skipped: 'Sprunget over',
+                free: 'Fri: ikke flere lektioner fra sidste år',
+                skipDay: 'Spring dagen over',
+                skipDayTip: 'Hold lektionen fri. Resten rykker én lektion senere.',
+                leaveOut: 'Udelad',
+                leaveOutTip: 'Tag lektionen ud af planen. Resten rykker én lektion tidligere.',
+                useAnyway: 'Brug alligevel',
+                useAnywayTip: 'Læg også sidste års lektion her. Intet, der allerede ligger her, bliver ændret.',
+                undo: 'Fortryd',
+                putBack: 'Tag med igen',
+                dragTip: 'Træk over på en anden af dine lektioner for at starte lektionen dér.',
+                waitingHeading: 'Venter på lektioner ({n})',
+                leftOutHeading: 'Udeladt ({n})',
+                planOnly: 'Dette er en plan. Intet bliver ændret i Lectio endnu.',
+                startOver: 'Start forfra',
                 copyPlan: 'Kopiér planen som tekst',
-                copied: 'Planen er kopieret.',
+                copied: 'Kopieret',
                 close: 'Luk',
-                resetPlan: 'Start forfra',
-                weekdays: ['søn', 'man', 'tir', 'ons', 'tor', 'fre', 'lør']
+                noLessons: 'Forløbet har ingen lektioner endnu. Gør dets Periode længere (Rediger forløb), så den dækker holdets lektioner.',
+                guideTitle: 'Det gør Kopiér',
+                guideStep1: 'Lectio laver et nyt forløb til det hold, du vælger. Dets lektioner er holdets lektioner mellem de to datoer i Periode, og de starter tomme.',
+                guideStep2: 'Sidste års materiale lægges i det nye forløbs Forløbsmateriale, ikke i lektionerne.',
+                guideStep3: 'Når du har trykket Kopiér, så åbn det nye forløb og tryk "Placér sidste års lektioner" for at sætte dem på plads.',
+                classChecking: 'Tjekker, hvilket hold Lectio har gemt...',
+                classOk: 'Lectio har gemt holdet: {name}.',
+                classMismatch: 'Pas på: feltet viser "{shown}", men Lectio har gemt "{name}". Vælg holdet igen fra listen.',
+                classNone: 'Vælg et hold fra listen, der kommer frem, når du skriver.',
+                periodSource: 'Sidste års forløb har {count} lektioner.',
+                periodScanning: 'Læser dit skema for {name}: uge {week}...',
+                periodSuggested: 'Foreslået Periode: {start} til {end}.',
+                periodExact: 'Alle {count} lektioner ligger i dit skema.',
+                periodEstimate: '{shown} af dem ligger i dit skema (til og med {last}); de øvrige {rest} er anslået ud fra omkring {perWeek} lektioner om ugen.',
+                periodNoLessons: 'Der blev ikke fundet kommende lektioner for {name} i dit skema.',
+                periodUse: 'Brug {start} til {end}',
+                periodUsed: 'Datoerne er udfyldt. Tjek dem, før du trykker Kopiér.',
+                weekdays: ['søn', 'man', 'tir', 'ons', 'tor', 'fre', 'lør'],
+                months: ['jan', 'feb', 'mar', 'apr', 'maj', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec']
             };
             // i18n:end
     }
@@ -213,7 +260,7 @@
     }
 
     /* ---------------------------------------------------------------- *
-     * Discovery (ADR-0002). No settings and nothing in localStorage yet.
+     * Discovery (ADR-0002), storage (docs/manager-storage-api.md)
      * ---------------------------------------------------------------- */
 
     function announce() {
@@ -224,9 +271,28 @@
                 version: MODULE_VERSION,
                 settingsSchema: [],
                 currentValues: {},
-                storage: []
+                storage: [
+                    {
+                        key: PLANS_KEY,
+                        kind: 'state',
+                        prunable: true,
+                        label: { en: 'Unit plans in progress', da: 'Forløbsplaner i gang' }
+                    }
+                ]
             }
         }));
+    }
+
+    function handlePrune(event) {
+        const detail = event?.detail;
+
+        if (detail?.id !== MODULE_ID || detail.key !== PLANS_KEY) return;
+
+        try {
+            localStorage.removeItem(PLANS_KEY);
+        } catch (_) {
+            // Nothing to remove if storage cannot be reached.
+        }
     }
 
     // A token written here, never text read off the page
@@ -241,6 +307,10 @@
      * Reading Lectio
      * ---------------------------------------------------------------- */
 
+    function schoolId() {
+        return (location.pathname.match(/^\/lectio\/(\d+)\//) || [])[1] || null;
+    }
+
     function parseTime(tooltip) {
         const match = String(tooltip || '').match(TIME_PATTERN);
 
@@ -250,7 +320,6 @@
 
         return {
             date: new Date(year, month - 1, day, startHour, startMinute),
-            iso: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
             start: `${String(startHour).padStart(2, '0')}:${String(startMinute).padStart(2, '0')}`,
             end: `${String(endHour).padStart(2, '0')}:${String(endMinute).padStart(2, '0')}`
         };
@@ -263,102 +332,278 @@
         return /^\s*(Aflyst!|Cancelled|Canceled)/i.test(block.getAttribute('data-tooltip') || '');
     }
 
-    // Distinct HE<digits> cards, with the name Lectio shows for each. The
-    // block's content is rendered twice (desktop and mobile), so each card
-    // appears twice and is counted once.
-    function holdsOf(element) {
-        const holds = new Map();
+    async function fetchDoc(url) {
+        const timeout = new AbortController();
+        const timer = setTimeout(() => timeout.abort(), FETCH_TIMEOUT_MS);
+        const relay = () => timeout.abort();
 
-        element.querySelectorAll('[data-lectiocontextcard^="HE"]').forEach((card) => {
-            const id = card.getAttribute('data-lectiocontextcard');
+        requests.signal.addEventListener('abort', relay, { once: true });
 
-            if (/^HE\d+$/.test(id) && !holds.has(id)) holds.set(id, card.textContent.trim());
-        });
+        try {
+            const response = await fetch(url, {
+                method: 'GET',
+                credentials: 'include',
+                cache: 'no-store',
+                headers: { Accept: 'text/html,application/xhtml+xml' },
+                signal: timeout.signal
+            });
 
-        return holds;
-    }
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            if (/login/i.test(response.url || '')) throw Object.assign(new Error('session'), { code: 'session' });
 
-    function absIdOf(block) {
-        const href = block.getAttribute('href') || '';
-        const fromHref = href.match(/[?&]absid=(\d+)/i);
-
-        if (fromHref) return fromHref[1];
-
-        const fromBrik = (block.getAttribute('data-brikid') || '').match(/ABS(\d+)/i);
-
-        return fromBrik ? fromBrik[1] : null;
+            return new DOMParser().parseFromString(await response.text(), 'text/html');
+        } finally {
+            clearTimeout(timer);
+            requests.signal.removeEventListener('abort', relay);
+        }
     }
 
     /*
-     * The unit this page shows. Read once, from the DOM Lectio rendered:
-     * nothing is fetched for the source side.
+     * A unit page - this one, or one fetched. Lessons are
+     * div.ls-phase-activity#ACC<id> with their timetable block in the heading;
+     * items are [data-to-toc-id^="ACH"] under *_InlineHomework (Lektier) or
+     * *_InlineOther (Øvrigt indhold), and the presentation is ACP.
      */
-    function readSourceUnit() {
-        const container = document.querySelector('[id$="_actContainer"]');
-
-        if (!container) return null;
-
+    function readUnit(doc, href) {
+        const container = doc.querySelector('[id$="_actContainer"]');
         const lessons = [];
 
-        container.querySelectorAll('.ls-phase-activity[id^="ACC"]').forEach((lesson) => {
+        (container ? container.querySelectorAll('.ls-phase-activity[id^="ACC"]') : []).forEach((lesson) => {
             const block = lesson.querySelector('a.s2skemabrik[data-tooltip]');
-            const time = block ? parseTime(block.getAttribute('data-tooltip')) : null;
             const items = [];
 
             lesson.querySelectorAll('[data-to-toc-id^="ACH"], [data-to-toc-id^="ACP"]').forEach((item) => {
                 const id = item.getAttribute('data-to-toc-id');
 
-                // The table of contents repeats each id on an anchor; only the
-                // rendered item itself counts.
                 if (item.tagName === 'A' || items.some((known) => known.id === id)) return;
 
-                const kind = id.startsWith('ACP')
-                    ? 'presentation'
-                    : item.closest('[id$="_InlineOther"]')
-                        ? 'other'
-                        : 'homework';
+                const kind = id.startsWith('ACP') ? 'presentation' : item.closest('[id$="_InlineOther"]') ? 'other' : 'homework';
                 const heading = item.querySelector('h1, h2, h3');
-                const linkType = item.querySelector('[data-lc-display-linktype]')?.getAttribute('data-lc-display-linktype') || '';
                 const title = (heading?.textContent || item.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 120);
 
-                items.push({ id, kind, linkType, title });
+                items.push({ id, kind, title });
             });
+
+            // The class, by the timetable's own HE card on the lesson's block.
+            const card = block?.querySelector('[data-lectiocontextcard^="HE"]');
 
             lessons.push({
                 id: lesson.id,
-                time,
+                time: block ? parseTime(block.getAttribute('data-tooltip')) : null,
                 cancelled: isCancelled(block),
+                hold: card ? { id: card.getAttribute('data-lectiocontextcard'), name: card.textContent.trim() } : null,
                 items
             });
         });
 
-        // A lesson cancelled last year with nothing on it never happened, so
-        // it takes no place in the sequence. One with material keeps its place:
-        // the material was planned, even if the lesson fell through.
-        const sequence = lessons.filter((lesson) => !lesson.cancelled || lesson.items.length);
+        const heading = doc.querySelector('[data-to-toc-id="overview"]');
+        const title = (heading?.textContent || '').replace(/\s+/g, ' ').trim().replace(/^Forløb\s*-\s*/i, '');
 
-        // The classes the unit already belongs to, oldest first:
-        // "2025/26: 1i MathAnSL/2", then the same class a year on.
-        const holdRow = document.querySelector('[id$="_HoldRow"]');
-        const holdCards = holdRow ? [...holdRow.querySelectorAll('[data-lectiocontextcard^="HE"]')] : [];
-        const holdNames = holdCards.map((card) => card.textContent.replace(/^\s*\d{4}\/\d{2}\s*:\s*/, '').trim());
-        const holdIds = new Set(holdCards.map((card) => card.getAttribute('data-lectiocontextcard')));
-
-        const phaseId = new URL(location.href).searchParams.get('phaseid') || '';
-        const heading = document.querySelector('[data-to-toc-id="overview"]');
+        // "19-10-2026 — 06-11-2026" in the unit's Periode row.
+        const periodDates = (doc.querySelector('[id$="_PeriodsRow"] td')?.textContent || '').match(/\d{1,2}-\d{1,2}-\d{4}/g) || [];
+        const periodEnd = periodDates[1] ? (([day, month, year]) => new Date(year, month - 1, day, 23, 59))(periodDates[1].split('-').map(Number)) : null;
 
         return {
-            phaseId,
-            title: (heading?.textContent || document.title).replace(/\s+/g, ' ').trim(),
-            holdNames,
-            holdIds,
-            lessons: sequence
+            phaseId: new URL(href, location.href).searchParams.get('phaseid') || '',
+            title,
+            periodEnd,
+            lessons
         };
     }
 
-    function schoolId() {
-        return (location.pathname.match(/^\/lectio\/(\d+)\//) || [])[1] || null;
+    // Last year's lessons as a sequence. A lesson cancelled with nothing on it
+    // never happened, so it takes no place; one with material keeps its place.
+    function sourceSequence(sourceUnit) {
+        return sourceUnit.lessons.filter((lesson) => !lesson.cancelled || lesson.items.length);
     }
+
+    // This unit's lessons that can take something: the cancelled ones cannot.
+    function targetLessons(targetUnit) {
+        return targetUnit.lessons
+            .filter((lesson) => !lesson.cancelled && lesson.time)
+            .map((lesson) => ({ id: lesson.id, time: lesson.time, hasContent: lesson.items.length > 0 }));
+    }
+
+    function schoolYear() {
+        const chosen = Number(document.querySelector('#m_ChooseTerm_term, [id$="_ChooseTerm_term"]')?.value);
+
+        if (Number.isInteger(chosen) && chosen > 2000) return chosen;
+
+        const now = new Date();
+
+        return now.getMonth() >= 7 ? now.getFullYear() : now.getFullYear() - 1;
+    }
+
+    /*
+     * Where this unit was copied from. Lectio's own material picker lists it
+     * first under "Relaterede forløb": the tree's first node, with the
+     * original as PH<phase id> inside it. The picker is a page anyone with
+     * this unit can open; this only reads it.
+     */
+    async function findSourcePhaseId(targetUnit) {
+        const first = targetUnit.lessons[0];
+
+        if (!first || !targetUnit.phaseId) return null;
+
+        const url = `/lectio/${schoolId()}/documentchoosercontent.aspx?mode=pickhomework&year=${schoolYear()}` +
+            `&activitycontentid=${encodeURIComponent(first.id.replace(/^ACC/, ''))}&phaseids=${encodeURIComponent(targetUnit.phaseId)}`;
+        const doc = await fetchDoc(url);
+        const root = doc.querySelector('[lec-node-id]');
+
+        if (!root) {
+            reportToManager('drift', 'picker-tree', 0);
+
+            return null;
+        }
+
+        const title = root.querySelector('.TreeNode-title')?.textContent || '';
+
+        if (!/relaterede|related/i.test(title) && root.getAttribute('lec-node-id') !== '__26') return null;
+
+        const related = [...root.querySelectorAll('[lec-node-id^="PH"]')]
+            .map((node) => (node.getAttribute('lec-node-id').match(/^PH(\d+)/) || [])[1])
+            .filter((id) => id && id !== targetUnit.phaseId);
+
+        return related[0] || null;
+    }
+
+    /* ---------------------------------------------------------------- *
+     * Plans kept between visits
+     * ---------------------------------------------------------------- */
+
+    function loadPlans() {
+        try {
+            const plans = JSON.parse(localStorage.getItem(PLANS_KEY) || '{}');
+
+            return plans && typeof plans === 'object' ? plans : {};
+        } catch (_) {
+            return {};
+        }
+    }
+
+    function writePlans(plans) {
+        try {
+            if (Object.keys(plans).length) localStorage.setItem(PLANS_KEY, JSON.stringify(plans));
+            else localStorage.removeItem(PLANS_KEY);
+        } catch (_) {
+            if (!writePlans.reported) {
+                writePlans.reported = true;
+                reportToManager('error', 'storage-write');
+            }
+        }
+    }
+
+    // On load, not only on the path that reads a plan (issue #29).
+    function prunePlans() {
+        const plans = loadPlans();
+        const now = Date.now();
+        let changed = false;
+
+        Object.entries(plans).forEach(([key, entry]) => {
+            if (!entry || typeof entry !== 'object' || !(now - Number(entry.at || 0) < PLAN_LIFE_MS)) {
+                delete plans[key];
+                changed = true;
+            }
+        });
+
+        if (changed) writePlans(plans);
+    }
+
+    function savePlan() {
+        if (!unit?.phaseId || !plan) return;
+
+        const plans = loadPlans();
+
+        plans[unit.phaseId] = {
+            source: source.phaseId,
+            count: plan.lessons.length,
+            order: plan.order,
+            leftOut: [...plan.leftOut],
+            skip: [...plan.skip],
+            at: Date.now()
+        };
+
+        writePlans(plans);
+    }
+
+    function restorePlan() {
+        const saved = loadPlans()[unit.phaseId];
+        const count = plan.lessons.length;
+
+        if (!saved || saved.source !== source.phaseId || saved.count !== count) return;
+        if (!Array.isArray(saved.order) || saved.order.length !== count) return;
+        if ([...saved.order].sort((a, b) => a - b).some((value, index) => value !== index)) return;
+
+        plan.order = saved.order;
+        plan.leftOut = new Set((saved.leftOut || []).filter((index) => Number.isInteger(index) && index < count));
+        plan.skip = new Map((saved.skip || []).filter((entry) => Array.isArray(entry) && typeof entry[1] === 'boolean'));
+    }
+
+    /* ---------------------------------------------------------------- *
+     * The plan
+     *
+     * order:   last year's lessons, by index, in the order they are placed.
+     * leftOut: last year's lessons the teacher left out.
+     * skip:    per lesson of this unit, an override of "leave it free".
+     *          Without one, a lesson that already has material is left free.
+     * ---------------------------------------------------------------- */
+
+    function newPlan() {
+        const lessons = sourceSequence(source);
+
+        return {
+            lessons,
+            targets: targetLessons(unit),
+            order: lessons.map((_, index) => index),
+            leftOut: new Set(),
+            skip: new Map()
+        };
+    }
+
+    function isSkipped(target) {
+        return plan.skip.has(target.id) ? plan.skip.get(target.id) : target.hasContent;
+    }
+
+    function assign() {
+        const queue = plan.order.filter((index) => !plan.leftOut.has(index));
+        let next = 0;
+
+        const rows = plan.targets.map((target) => {
+            if (isSkipped(target)) {
+                return { target, lesson: null, reason: target.hasContent && !plan.skip.has(target.id) ? 'has-content' : 'skipped' };
+            }
+
+            const index = queue[next];
+
+            next += 1;
+
+            return { target, lesson: index === undefined ? null : index, reason: index === undefined ? 'free' : '' };
+        });
+
+        return { rows, waiting: queue.slice(next) };
+    }
+
+    // Put one of last year's lessons on one of this unit's lessons; everything
+    // placed after it moves along with it.
+    function placeAt(lessonIndex, targetIndex) {
+        const target = plan.targets[targetIndex];
+
+        if (!target) return;
+        if (isSkipped(target)) plan.skip.set(target.id, false);
+
+        plan.leftOut.delete(lessonIndex);
+
+        const before = plan.targets.slice(0, targetIndex).filter((slot) => !isSkipped(slot)).length;
+        const placed = plan.order.filter((index) => index !== lessonIndex && !plan.leftOut.has(index));
+        const outside = plan.order.filter((index) => index !== lessonIndex && plan.leftOut.has(index));
+
+        placed.splice(Math.min(before, placed.length), 0, lessonIndex);
+        plan.order = [...placed, ...outside];
+    }
+
+    /* ---------------------------------------------------------------- *
+     * Formatting
+     * ---------------------------------------------------------------- */
 
     function isoWeek(date) {
         const day = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
@@ -371,589 +616,26 @@
         return { week: Math.ceil(((day - yearStart) / 86400000 + 1) / 7), year: day.getUTCFullYear() };
     }
 
+    function dayLabel(date) {
+        const text = labels();
+
+        return `${text.weekdays[date.getDay()]} ${date.getDate()} ${text.months[date.getMonth()]}`;
+    }
+
+    function dayWithYear(date) {
+        return `${dayLabel(date)} ${date.getFullYear()}`;
+    }
+
+    function lectioDate(date) {
+        return `${String(date.getDate()).padStart(2, '0')}-${String(date.getMonth() + 1).padStart(2, '0')}-${date.getFullYear()}`;
+    }
+
     function addDays(date, days) {
         const next = new Date(date);
 
         next.setDate(next.getDate() + days);
 
         return next;
-    }
-
-    /*
-     * One week of the teacher's own timetable. Own lessons only, by
-     * construction: SkemaNy.aspx without a type is the signed-in person's
-     * schedule. A page that is not a timetable at all (a login page after the
-     * session ran out) is an error, not an empty week.
-     */
-    async function fetchWeek(date, signal) {
-        const { week, year } = isoWeek(date);
-        const url = `/lectio/${schoolId()}/SkemaNy.aspx?week=${String(week).padStart(2, '0')}${year}&showtype=0`;
-        const timeout = new AbortController();
-        const timer = setTimeout(() => timeout.abort(), WEEK_FETCH_TIMEOUT_MS);
-        const relay = () => timeout.abort();
-
-        signal.addEventListener('abort', relay, { once: true });
-
-        try {
-            const response = await fetch(url, {
-                method: 'GET',
-                credentials: 'include',
-                cache: 'no-store',
-                headers: { Accept: 'text/html,application/xhtml+xml' },
-                signal: timeout.signal
-            });
-
-            if (!response.ok) throw Object.assign(new Error(`HTTP ${response.status}`), { code: 'fetch' });
-
-            const doc = new DOMParser().parseFromString(await response.text(), 'text/html');
-
-            if (/login/i.test(response.url || '') || !doc.querySelector('[data-date], tr.s2dayHeader')) {
-                throw Object.assign(new Error('not a timetable'), { code: 'session' });
-            }
-
-            return { week, doc };
-        } finally {
-            clearTimeout(timer);
-            signal.removeEventListener('abort', relay);
-        }
-    }
-
-    function lessonsInWeek(doc) {
-        return [...doc.querySelectorAll('a.s2skemabrik[data-tooltip]')]
-            .map((block) => {
-                const tooltip = block.getAttribute('data-tooltip') || '';
-                const time = parseTime(tooltip);
-
-                if (!time) return null;
-
-                return {
-                    absId: absIdOf(block),
-                    time,
-                    holds: holdsOf(block),
-                    cancelled: isCancelled(block),
-                    hasContent: CONTENT_LINE_PATTERN.test(tooltip),
-                    href: block.getAttribute('href') || ''
-                };
-            })
-            .filter(Boolean);
-    }
-
-    /* ---------------------------------------------------------------- *
-     * Which class: the teacher's classes, best guess first
-     * ---------------------------------------------------------------- */
-
-    // "1i Math AA SL/2" and "2i MathAnSL/2" are the same course in different
-    // years. Drop the leading class code, then compare letter pairs.
-    function courseKey(name) {
-        return String(name).toLowerCase().replace(/^\s*\d+\s*[a-zæøå]+\s+/, '').replace(/[^a-z0-9æøå]/g, '');
-    }
-
-    function similarity(a, b) {
-        const pairs = (text) => {
-            const out = [];
-
-            for (let index = 0; index < text.length - 1; index += 1) out.push(text.slice(index, index + 2));
-
-            return out;
-        };
-        const left = pairs(courseKey(a));
-        const right = pairs(courseKey(b));
-
-        if (!left.length || !right.length) return 0;
-
-        const pool = [...right];
-        let shared = 0;
-
-        left.forEach((pair) => {
-            const at = pool.indexOf(pair);
-
-            if (at >= 0) {
-                shared += 1;
-                pool.splice(at, 1);
-            }
-        });
-
-        return (2 * shared) / (left.length + right.length);
-    }
-
-    /*
-     * Best guess first, never chosen silently: the teacher sees the guess in
-     * the class menu and can change it.
-     *
-     * The unit is usually still attached to last year's class, which has
-     * moved up a year ("1i" is now "2i") and is the wrong target, so the
-     * classes the unit already belongs to go last. Among the rest, the same
-     * course in the same year-group as last year's class wins: last year's
-     * "1i MathAnSL/2" points at this year's "1i Math AA SL/2".
-     */
-    function rankClasses(holds, unit) {
-        const firstYear = (String(unit.holdNames[0] || '').match(/^\s*(\d+)/) || [])[1];
-
-        return [...holds.values()]
-            .map((hold) => {
-                const course = Math.max(0, ...unit.holdNames.map((name) => similarity(name, hold.name)));
-                const sameYear = firstYear && (String(hold.name).match(/^\s*(\d+)/) || [])[1] === firstYear ? 0.15 : 0;
-                const ownClass = unit.holdIds.has(hold.id) ? -1 : 0;
-
-                return { ...hold, score: course + sameYear + ownClass };
-            })
-            .sort((a, b) => b.score - a.score || b.count - a.count || a.name.localeCompare(b.name));
-    }
-
-    async function discoverClasses(signal) {
-        const today = new Date();
-        const holds = new Map();
-
-        for (const date of [today, addDays(today, 7)]) {
-            const { doc } = await fetchWeek(date, signal);
-
-            lessonsInWeek(doc).forEach((lesson) => {
-                if (lesson.cancelled) return;
-
-                lesson.holds.forEach((name, id) => {
-                    const known = holds.get(id) || { id, name, count: 0 };
-
-                    known.count += 1;
-                    holds.set(id, known);
-                });
-            });
-        }
-
-        return holds;
-    }
-
-    /* ---------------------------------------------------------------- *
-     * The plan
-     *
-     * order:   the source lessons, by index, in the order they are placed.
-     * leftOut: source indices the teacher left out.
-     * skip:    per target lesson (by absId), an override of "leave empty".
-     *          Without one, a lesson that already has material is left
-     *          empty and every other lesson is used.
-     * ---------------------------------------------------------------- */
-
-    function newPlan() {
-        return {
-            holdId: '',
-            start: todayIso(),
-            classes: [],
-            targets: [],
-            cancelledTargets: 0,
-            order: source.lessons.map((_, index) => index),
-            leftOut: new Set(),
-            skip: new Map(),
-            status: '',
-            statusKind: ''
-        };
-    }
-
-    function todayIso() {
-        const now = new Date();
-
-        return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    }
-
-    function isSkipped(target) {
-        return plan.skip.has(target.absId) ? plan.skip.get(target.absId) : target.hasContent;
-    }
-
-    function assign() {
-        const queue = plan.order.filter((index) => !plan.leftOut.has(index));
-        let next = 0;
-
-        const rows = plan.targets.map((target) => {
-            if (isSkipped(target)) {
-                return { target, lesson: null, reason: target.hasContent && !plan.skip.has(target.absId) ? 'has-content' : 'left-empty' };
-            }
-
-            const index = queue[next];
-
-            next += 1;
-
-            return { target, lesson: index === undefined ? null : index, reason: index === undefined ? 'nothing' : '' };
-        });
-
-        return { rows, notPlaced: queue.slice(next) };
-    }
-
-    // Put a source lesson on a target lesson: everything placed after it moves
-    // along with it, which is what "start from here" means to a teacher.
-    function placeAt(lessonIndex, targetIndex) {
-        const target = plan.targets[targetIndex];
-
-        if (!target) return;
-        if (isSkipped(target)) plan.skip.set(target.absId, false);
-
-        plan.leftOut.delete(lessonIndex);
-
-        const before = plan.targets.slice(0, targetIndex).filter((slot) => !isSkipped(slot)).length;
-        const placed = plan.order.filter((index) => index !== lessonIndex && !plan.leftOut.has(index));
-        const outside = plan.order.filter((index) => index !== lessonIndex && plan.leftOut.has(index));
-
-        placed.splice(Math.min(before, placed.length), 0, lessonIndex);
-        plan.order = [...placed, ...outside];
-    }
-
-    function moveLesson(lessonIndex, step) {
-        const at = plan.order.indexOf(lessonIndex);
-        const to = at + step;
-
-        if (at < 0 || to < 0 || to >= plan.order.length) return;
-
-        [plan.order[at], plan.order[to]] = [plan.order[to], plan.order[at]];
-    }
-
-    function saveDraft() {
-        try {
-            sessionStorage.setItem(DRAFT_PREFIX + source.phaseId, JSON.stringify({
-                lessons: source.lessons.length,
-                holdId: plan.holdId,
-                start: plan.start,
-                order: plan.order,
-                leftOut: [...plan.leftOut],
-                skip: [...plan.skip]
-            }));
-        } catch (_) {
-            // A draft that cannot be kept is only a convenience lost.
-        }
-    }
-
-    function loadDraft() {
-        try {
-            const draft = JSON.parse(sessionStorage.getItem(DRAFT_PREFIX + source.phaseId) || 'null');
-            const count = source.lessons.length;
-
-            if (!draft || draft.lessons !== count) return;
-            if (!Array.isArray(draft.order) || draft.order.length !== count) return;
-            if ([...draft.order].sort((a, b) => a - b).some((value, index) => value !== index)) return;
-
-            plan.holdId = typeof draft.holdId === 'string' ? draft.holdId : '';
-            plan.start = /^\d{4}-\d{2}-\d{2}$/.test(draft.start) ? draft.start : plan.start;
-            plan.order = draft.order;
-            plan.leftOut = new Set((draft.leftOut || []).filter((index) => Number.isInteger(index) && index < count));
-            plan.skip = new Map((draft.skip || []).filter((entry) => Array.isArray(entry) && typeof entry[1] === 'boolean'));
-        } catch (_) {
-            // A draft that cannot be read is simply not restored.
-        }
-    }
-
-    /* ---------------------------------------------------------------- *
-     * Finding the class's lessons
-     * ---------------------------------------------------------------- */
-
-    async function findLessons() {
-        if (!plan.holdId) return;
-
-        cancelScan();
-        scanController = new AbortController();
-
-        const signal = scanController.signal;
-        const text = labels();
-        const [year, month, day] = plan.start.split('-').map(Number);
-        const from = new Date(year, month - 1, day);
-        const needed = plan.order.filter((index) => !plan.leftOut.has(index)).length + SPARE_SLOTS;
-        const found = new Map();
-        let cancelled = 0;
-        let lastWeek = isoWeek(from).week;
-
-        plan.targets = [];
-        plan.cancelledTargets = 0;
-
-        try {
-            for (let offset = 0; offset < MAX_WEEKS; offset += 1) {
-                const date = addDays(from, offset * 7);
-
-                lastWeek = isoWeek(date).week;
-                setStatus(fill(text.scanning, { week: lastWeek }), 'busy');
-
-                const { doc } = await fetchWeek(date, signal);
-
-                lessonsInWeek(doc).forEach((lesson) => {
-                    if (!lesson.holds.has(plan.holdId) || !lesson.absId || found.has(lesson.absId)) return;
-
-                    const lessonDay = new Date(lesson.time.date);
-
-                    lessonDay.setHours(0, 0, 0, 0);
-
-                    if (lessonDay < from) return;
-
-                    if (lesson.cancelled) {
-                        cancelled += 1;
-
-                        return;
-                    }
-
-                    found.set(lesson.absId, lesson);
-                });
-
-                plan.targets = [...found.values()].sort((a, b) => a.time.date - b.time.date);
-                plan.cancelledTargets = cancelled;
-                render();
-
-                const usable = plan.targets.filter((target) => !isSkipped(target)).length;
-
-                if (usable >= needed) break;
-
-                await new Promise((resolve) => setTimeout(resolve, WEEK_FETCH_GAP_MS));
-
-                if (signal.aborted) throw Object.assign(new Error('aborted'), { code: 'aborted' });
-            }
-
-            setStatus(plan.targets.length ? '' : text.noLessonsFound, plan.targets.length ? '' : 'warn');
-        } catch (error) {
-            if (signal.aborted && error.code !== 'session') {
-                setStatus(fill(text.scanStopped, { week: lastWeek }), 'warn');
-            } else if (error.code === 'session') {
-                setStatus(text.sessionLost, 'error');
-            } else {
-                setStatus(fill(text.fetchFailed, { week: lastWeek }), 'error');
-            }
-        } finally {
-            if (scanController && scanController.signal === signal) scanController = null;
-
-            saveDraft();
-            render();
-        }
-    }
-
-    function cancelScan() {
-        if (scanController) {
-            scanController.abort();
-            scanController = null;
-        }
-    }
-
-    function setStatus(message, kind) {
-        plan.status = message;
-        plan.statusKind = kind || '';
-
-        const status = document.querySelector(`#${OVERLAY_ID} .luc-status`);
-
-        if (status) {
-            status.textContent = message;
-            status.dataset.kind = plan.statusKind;
-        }
-    }
-
-    /* ---------------------------------------------------------------- *
-     * Presentation (ADR-0006: every colour through the theming seam)
-     * ---------------------------------------------------------------- */
-
-    function addStyles() {
-        if (document.getElementById(STYLE_ID)) return;
-
-        const style = document.createElement('style');
-
-        style.id = STYLE_ID;
-        style.textContent = `
-            #${OVERLAY_ID} {
-                position: fixed;
-                inset: 0;
-                z-index: 100000;
-                display: flex;
-                align-items: stretch;
-                justify-content: center;
-                padding: 24px;
-                box-sizing: border-box;
-                background: rgba(16, 24, 28, 0.45);
-                font: 400 13px/1.4 Roboto, Arial, sans-serif;
-            }
-
-            #${OVERLAY_ID} .luc-dialog {
-                display: flex;
-                flex-direction: column;
-                width: min(1200px, 100%);
-                background: var(--lectio-theme-surface, #ffffff);
-                color: var(--lectio-theme-text, #17242a);
-                border-radius: var(--lectio-theme-radius, 10px);
-                box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
-                overflow: hidden;
-            }
-
-            #${OVERLAY_ID} header,
-            #${OVERLAY_ID} footer {
-                display: flex;
-                flex-wrap: wrap;
-                align-items: center;
-                gap: 10px 14px;
-                padding: 12px 16px;
-                background: var(--lectio-theme-surface-alt, #f1f4f5);
-            }
-
-            #${OVERLAY_ID} header h2 {
-                margin: 0 auto 0 0;
-                font-size: 17px;
-            }
-
-            #${OVERLAY_ID} .luc-plan-only {
-                flex-basis: 100%;
-                margin: 0;
-                color: var(--lectio-theme-muted, #5b676d);
-            }
-
-            #${OVERLAY_ID} label {
-                display: inline-flex;
-                align-items: center;
-                gap: 6px;
-            }
-
-            #${OVERLAY_ID} select,
-            #${OVERLAY_ID} input[type="date"] {
-                font: inherit;
-                padding: 3px 6px;
-                max-width: 260px;
-            }
-
-            #${OVERLAY_ID} button {
-                font: inherit;
-                cursor: pointer;
-                border: 1px solid var(--lectio-theme-muted, #9aa6ab);
-                border-radius: 6px;
-                padding: 4px 10px;
-                background: var(--lectio-theme-surface, #ffffff);
-                color: var(--lectio-theme-text, #17242a);
-            }
-
-            #${OVERLAY_ID} button.luc-primary {
-                background: var(--lectio-theme-accent, #0f6f6f);
-                border-color: var(--lectio-theme-accent, #0f6f6f);
-                color: #ffffff;
-            }
-
-            #${OVERLAY_ID} button.luc-small {
-                padding: 1px 7px;
-                font-size: 12px;
-            }
-
-            #${OVERLAY_ID} button:disabled {
-                opacity: 0.5;
-                cursor: default;
-            }
-
-            #${OVERLAY_ID} .luc-summary,
-            #${OVERLAY_ID} .luc-status {
-                flex-basis: 100%;
-                margin: 0;
-            }
-
-            #${OVERLAY_ID} .luc-summary {
-                font-weight: 600;
-            }
-
-            #${OVERLAY_ID} .luc-status:empty {
-                display: none;
-            }
-
-            #${OVERLAY_ID} .luc-status[data-kind="error"],
-            #${OVERLAY_ID} .luc-status[data-kind="warn"] {
-                color: var(--lectio-theme-accent-alt, #9a3b1f);
-            }
-
-            #${OVERLAY_ID} .luc-body {
-                display: grid;
-                grid-template-columns: minmax(260px, 2fr) minmax(320px, 3fr);
-                gap: 16px;
-                padding: 12px 16px;
-                overflow: auto;
-                flex: 1;
-                min-height: 0;
-            }
-
-            #${OVERLAY_ID} .luc-column h3 {
-                margin: 0 0 8px;
-                font-size: 14px;
-            }
-
-            #${OVERLAY_ID} ol {
-                list-style: none;
-                margin: 0;
-                padding: 0;
-            }
-
-            #${OVERLAY_ID} .luc-card,
-            #${OVERLAY_ID} .luc-row {
-                border: 1px solid var(--lectio-theme-muted, #d6dde0);
-                border-radius: 8px;
-                padding: 6px 8px;
-                margin-bottom: 6px;
-                background: var(--lectio-theme-surface, #ffffff);
-            }
-
-            #${OVERLAY_ID} .luc-card[draggable="true"] {
-                cursor: grab;
-            }
-
-            #${OVERLAY_ID} .luc-card[data-left-out="true"] {
-                opacity: 0.55;
-            }
-
-            #${OVERLAY_ID} .luc-row[data-drop="true"] {
-                outline: 2px dashed var(--lectio-theme-accent, #0f6f6f);
-                outline-offset: 1px;
-            }
-
-            #${OVERLAY_ID} .luc-row[data-state="skipped"] {
-                background: var(--lectio-theme-surface-alt, #f1f4f5);
-            }
-
-            #${OVERLAY_ID} .luc-line {
-                display: flex;
-                flex-wrap: wrap;
-                align-items: center;
-                gap: 6px;
-            }
-
-            #${OVERLAY_ID} .luc-when {
-                font-weight: 600;
-                min-width: 120px;
-            }
-
-            #${OVERLAY_ID} .luc-tools {
-                margin-left: auto;
-                display: inline-flex;
-                gap: 4px;
-            }
-
-            #${OVERLAY_ID} .luc-items {
-                display: flex;
-                flex-wrap: wrap;
-                gap: 4px;
-                margin-top: 4px;
-            }
-
-            #${OVERLAY_ID} .luc-item {
-                border-radius: 999px;
-                padding: 1px 8px;
-                font-size: 12px;
-                background: var(--lectio-theme-surface-alt, #e8eef0);
-                color: var(--lectio-theme-text, #17242a);
-            }
-
-            #${OVERLAY_ID} .luc-item[data-kind="other"] {
-                border: 1px dashed var(--lectio-theme-muted, #9aa6ab);
-            }
-
-            #${OVERLAY_ID} .luc-muted {
-                color: var(--lectio-theme-muted, #5b676d);
-            }
-
-            #${OVERLAY_ID} .luc-hint {
-                margin: 0 0 8px;
-                color: var(--lectio-theme-muted, #5b676d);
-            }
-
-            @media (max-width: 760px) {
-                #${OVERLAY_ID} {
-                    padding: 0;
-                }
-
-                #${OVERLAY_ID} .luc-body {
-                    grid-template-columns: 1fr;
-                }
-            }
-        `;
-
-        (document.head || document.documentElement).appendChild(style);
     }
 
     function element(tag, className, text) {
@@ -977,199 +659,745 @@
         return node;
     }
 
-    function whenOf(time) {
-        if (!time) return '';
+    /* ---------------------------------------------------------------- *
+     * Presentation (ADR-0006: every colour through the theming seam)
+     * ---------------------------------------------------------------- */
 
-        const weekday = labels().weekdays[time.date.getDay()];
+    function addStyles() {
+        if (document.getElementById(STYLE_ID)) return;
 
-        return `${weekday} ${time.date.getDate()}/${time.date.getMonth() + 1} · ${time.start}-${time.end}`;
+        const style = document.createElement('style');
+
+        style.id = STYLE_ID;
+        style.textContent = `
+            /* Lectio's page CSS reaches into anything put on the page; reset
+               what it changes before styling. */
+            #${DIALOG_ID}, #${DIALOG_ID} *, #${BANNER_ID}, #${BANNER_ID} *, #${GUIDE_ID}, #${GUIDE_ID} * {
+                box-sizing: border-box;
+                text-align: left;
+                text-transform: none;
+                letter-spacing: normal;
+                float: none;
+            }
+
+            #${DIALOG_ID} :is(h2, h3, p, ol, ul, li), #${BANNER_ID} :is(p), #${GUIDE_ID} :is(h3, p, ol, li) {
+                margin: 0;
+                padding: 0;
+            }
+
+            #${DIALOG_ID} :is(ol, ul), #${GUIDE_ID} ol {
+                list-style: none;
+            }
+
+            #${DIALOG_ID} :is(button, select, input), #${BANNER_ID} button, #${GUIDE_ID} button {
+                font: inherit;
+                line-height: 1.25;
+                width: auto;
+                height: auto;
+                text-align: center;
+                cursor: pointer;
+                border: 1px solid var(--lectio-theme-muted, #9aa6ab);
+                border-radius: 6px;
+                padding: 4px 10px;
+                background: var(--lectio-theme-surface, #ffffff);
+                color: var(--lectio-theme-text, #17242a);
+            }
+
+            #${DIALOG_ID} .luc-primary, #${BANNER_ID} .luc-primary, #${GUIDE_ID} .luc-primary {
+                background: var(--lectio-theme-accent, #0f6f6f);
+                border-color: var(--lectio-theme-accent, #0f6f6f);
+                color: var(--lectio-theme-on-accent, #ffffff);
+                font-weight: 600;
+            }
+
+            #${BANNER_ID}, #${GUIDE_ID} {
+                display: flex;
+                flex-wrap: wrap;
+                align-items: center;
+                gap: 8px 14px;
+                margin: 0 0 14px;
+                padding: 10px 14px;
+                border: 1px solid var(--lectio-theme-accent, #0f6f6f);
+                border-left-width: 5px;
+                border-radius: var(--lectio-theme-radius, 8px);
+                background: var(--lectio-theme-surface, #ffffff);
+                color: var(--lectio-theme-text, #17242a);
+                font: 400 13px/1.45 Roboto, Arial, sans-serif;
+            }
+
+            #${BANNER_ID} p {
+                flex: 1 1 320px;
+            }
+
+            #${GUIDE_ID} {
+                display: block;
+                max-width: 640px;
+                margin: 14px 0;
+            }
+
+            #${GUIDE_ID} h3 {
+                font-size: 14px;
+                margin-bottom: 6px;
+            }
+
+            #${GUIDE_ID} ol {
+                counter-reset: luc-step;
+                margin-bottom: 8px;
+            }
+
+            #${GUIDE_ID} ol li {
+                counter-increment: luc-step;
+                padding-left: 22px;
+                position: relative;
+                margin-bottom: 4px;
+            }
+
+            #${GUIDE_ID} ol li::before {
+                content: counter(luc-step) ".";
+                position: absolute;
+                left: 0;
+                font-weight: 600;
+            }
+
+            #${GUIDE_ID} .luc-check {
+                margin-top: 6px;
+            }
+
+            #${GUIDE_ID} .luc-check[data-kind="ok"] {
+                color: var(--lectio-theme-accent, #0f6f6f);
+            }
+
+            #${GUIDE_ID} .luc-check[data-kind="warn"] {
+                color: var(--lectio-theme-accent-alt, #9a3b1f);
+                font-weight: 600;
+            }
+
+            #${GUIDE_ID} .luc-suggested {
+                margin-top: 6px;
+                font-weight: 700;
+            }
+
+            #${GUIDE_ID} .luc-muted, #${BANNER_ID} .luc-muted {
+                color: var(--lectio-theme-muted, #5b676d);
+            }
+
+            /* A native modal: it sits in the browser's top layer, above
+               anything another module floats over the page. */
+            #${DIALOG_ID} {
+                width: min(1100px, calc(100vw - 32px));
+                max-height: calc(100vh - 32px);
+                padding: 0;
+                border: 0;
+                border-radius: var(--lectio-theme-radius, 10px);
+                background: var(--lectio-theme-surface, #ffffff);
+                color: var(--lectio-theme-text, #17242a);
+                font: 400 13px/1.45 Roboto, Arial, sans-serif;
+                box-shadow: 0 12px 40px var(--lectio-theme-shadow, rgba(0, 0, 0, 0.3));
+            }
+
+            #${DIALOG_ID}[open] {
+                display: flex;
+                flex-direction: column;
+            }
+
+            #${DIALOG_ID}::backdrop {
+                background: var(--lectio-theme-backdrop, rgba(16, 24, 28, 0.45));
+            }
+
+            #${DIALOG_ID} .luc-head, #${DIALOG_ID} .luc-foot {
+                display: flex;
+                flex-wrap: wrap;
+                align-items: center;
+                gap: 6px 12px;
+                padding: 12px 18px;
+                background: var(--lectio-theme-surface-alt, #f1f4f5);
+            }
+
+            #${DIALOG_ID} .luc-head h2 {
+                font-size: 17px;
+                flex: 1 1 auto;
+            }
+
+            #${DIALOG_ID} .luc-subtitle {
+                flex-basis: 100%;
+                color: var(--lectio-theme-muted, #5b676d);
+            }
+
+            #${DIALOG_ID} .luc-status {
+                padding: 10px 18px;
+                border-bottom: 1px solid var(--lectio-theme-muted, #d6dde0);
+            }
+
+            #${DIALOG_ID} .luc-status strong {
+                display: block;
+                font-size: 14px;
+            }
+
+            #${DIALOG_ID} .luc-scroll {
+                overflow: auto;
+                flex: 1;
+                min-height: 0;
+                padding: 0 18px 12px;
+            }
+
+            #${DIALOG_ID} .luc-columns, #${DIALOG_ID} .luc-row {
+                display: grid;
+                grid-template-columns: 11em 1fr auto;
+                gap: 4px 14px;
+                align-items: start;
+            }
+
+            #${DIALOG_ID} .luc-columns {
+                position: sticky;
+                top: 0;
+                z-index: 1;
+                padding: 8px 0 6px;
+                background: var(--lectio-theme-surface, #ffffff);
+                color: var(--lectio-theme-muted, #5b676d);
+                font-size: 12px;
+                font-weight: 600;
+                text-transform: uppercase;
+            }
+
+            #${DIALOG_ID} .luc-week {
+                padding: 10px 0 4px;
+                font-weight: 700;
+                color: var(--lectio-theme-muted, #5b676d);
+            }
+
+            #${DIALOG_ID} .luc-row {
+                padding: 8px 10px;
+                margin-bottom: 6px;
+                border: 1px solid var(--lectio-theme-muted, #d6dde0);
+                border-radius: 8px;
+            }
+
+            #${DIALOG_ID} .luc-row[data-state="has-content"], #${DIALOG_ID} .luc-row[data-state="skipped"] {
+                border-style: dashed;
+                color: var(--lectio-theme-muted, #5b676d);
+            }
+
+            #${DIALOG_ID} .luc-row[data-drop="true"] {
+                outline: 2px solid var(--lectio-theme-accent, #0f6f6f);
+                outline-offset: 1px;
+            }
+
+            #${DIALOG_ID} .luc-when {
+                font-weight: 600;
+            }
+
+            #${DIALOG_ID} .luc-when small {
+                display: block;
+                font-weight: 400;
+                color: var(--lectio-theme-muted, #5b676d);
+            }
+
+            #${DIALOG_ID} .luc-lesson {
+                display: flex;
+                gap: 8px;
+                align-items: flex-start;
+            }
+
+            #${DIALOG_ID} .luc-grip {
+                cursor: grab;
+                user-select: none;
+                padding: 0 2px;
+                font-size: 16px;
+                line-height: 1.1;
+                color: var(--lectio-theme-muted, #5b676d);
+            }
+
+            /* Text colour, not accent: in link blue it read as clickable. */
+            #${DIALOG_ID} .luc-number {
+                font-weight: 700;
+                color: var(--lectio-theme-text, #17242a);
+                white-space: nowrap;
+                margin-right: 6px;
+            }
+
+            #${DIALOG_ID} .luc-edit-period {
+                color: var(--lectio-theme-accent, #0f6f6f);
+                font-weight: 600;
+                text-decoration: underline;
+            }
+
+            #${DIALOG_ID} .luc-kind {
+                display: block;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+
+            #${DIALOG_ID} .luc-kind b {
+                font-weight: 600;
+            }
+
+            #${DIALOG_ID} .luc-muted {
+                color: var(--lectio-theme-muted, #5b676d);
+            }
+
+            #${DIALOG_ID} .luc-actions {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 4px;
+                justify-content: flex-end;
+            }
+
+            #${DIALOG_ID} .luc-actions button {
+                font-size: 12px;
+                padding: 2px 8px;
+            }
+
+            #${DIALOG_ID} .luc-horizon {
+                margin: 14px 0 6px;
+                padding-top: 10px;
+                border-top: 3px solid var(--lectio-theme-accent-alt, #9a3b1f);
+            }
+
+            #${DIALOG_ID} .luc-horizon h3, #${DIALOG_ID} details summary {
+                font-size: 14px;
+                font-weight: 700;
+            }
+
+            #${DIALOG_ID} .luc-waiting li {
+                padding: 2px 0;
+            }
+
+            #${DIALOG_ID} details {
+                margin-top: 10px;
+            }
+
+            #${DIALOG_ID} .luc-foot .luc-note {
+                flex: 1 1 260px;
+                color: var(--lectio-theme-muted, #5b676d);
+            }
+
+            @media (max-width: 860px) {
+                #${DIALOG_ID} {
+                    width: 100vw;
+                    max-height: 100vh;
+                    border-radius: 0;
+                }
+
+                #${DIALOG_ID} .luc-columns {
+                    display: none;
+                }
+
+                #${DIALOG_ID} .luc-row {
+                    grid-template-columns: 1fr;
+                }
+
+                #${DIALOG_ID} .luc-actions {
+                    justify-content: flex-start;
+                }
+            }
+        `;
+
+        (document.head || document.documentElement).appendChild(style);
     }
 
-    function itemChips(lesson, text) {
-        const box = element('div', 'luc-items');
+    /* ---------------------------------------------------------------- *
+     * The copied unit: banner and planner
+     * ---------------------------------------------------------------- */
 
-        if (!lesson.items.length) {
-            box.append(element('span', 'luc-muted', text.noItems));
+    function canEdit() {
+        return Boolean(document.querySelector('[id$="_editbtn"], [id$="_activateEditModeBtn"]'));
+    }
 
-            return box;
+    async function startUnitPage() {
+        unit = readUnit(document, location.href);
+
+        if (!canEdit() || !unit.phaseId) return;
+
+        if (!unit.lessons.length) {
+            // A container with lesson boxes this could not read is drift. A
+            // unit with no lessons in its Periode has none to read.
+            if (document.querySelector('[id$="_actContainer"] .ls-phase-activity')) reportToManager('drift', 'unit-lessons', 0);
+
+            return;
         }
 
-        lesson.items.forEach((item) => {
-            const kind = item.kind === 'other' ? text.kindOther : item.kind === 'presentation' ? text.kindPresentation : text.kindHomework;
-            const link = item.linkType === 'file' ? ` (${text.kindFile})` : item.linkType ? ` (${text.kindLink})` : '';
-            const chip = element('span', 'luc-item', item.title || kind);
+        addStyles();
 
-            chip.dataset.kind = item.kind;
-            chip.title = `${kind}${link}`;
-            box.append(chip);
+        // Say what is happening while it looks, so a copied unit never just
+        // shows nothing (the failure of 0.1.0).
+        renderBanner('checking');
+
+        source = await loadSource();
+
+        if (source) {
+            renderBanner('ready');
+        } else if (targetLessons(unit).every((lesson) => !lesson.hasContent)) {
+            // Every lesson empty is what a fresh copy looks like, so a unit
+            // like that deserves a word. Any other unit is simply left alone.
+            renderBanner('not-found');
+        } else {
+            document.getElementById(BANNER_ID)?.remove();
+        }
+    }
+
+    async function loadSource() {
+        let sourceId = null;
+        let found = null;
+
+        try {
+            sourceId = await findSourcePhaseId(unit);
+
+            if (!sourceId) return null;
+
+            const url = `/lectio/${schoolId()}/studieplan/forloeb_vis.aspx?phaseid=${encodeURIComponent(sourceId)}`;
+
+            found = readUnit(await fetchDoc(url), url);
+        } catch (_) {
+            return null;
+        }
+
+        if (!sourceSequence(found).length) return null;
+
+        // Lectio may relate the two units both ways, so last year's unit can
+        // list this year's copy under Relaterede forløb too. A source is
+        // older: its first lesson comes before this unit's first lesson.
+        const sourceFirst = found.lessons.find((lesson) => lesson.time)?.time.date;
+        const ownFirst = unit.lessons.find((lesson) => lesson.time)?.time.date;
+
+        return sourceFirst && ownFirst && sourceFirst < ownFirst ? found : null;
+    }
+
+    function renderBanner(state) {
+        if (state) renderBanner.state = state;
+        if (!renderBanner.state) return;
+
+        const text = labels();
+        let banner = document.getElementById(BANNER_ID);
+
+        if (!banner) {
+            banner = element('div');
+            banner.id = BANNER_ID;
+            banner.setAttribute('role', 'status');
+
+            const anchor = document.querySelector('.ls-phase-activity#overview') || document.querySelector('[id$="_actContainer"]');
+
+            anchor.before(banner);
+        }
+
+        banner.dataset.state = renderBanner.state;
+
+        if (renderBanner.state === 'checking') {
+            banner.replaceChildren(element('p', 'luc-muted', text.bannerChecking));
+
+            return;
+        }
+
+        if (renderBanner.state === 'not-found' || !source) {
+            banner.replaceChildren(element('p', '', text.bannerNotFound));
+
+            return;
+        }
+
+        const lessons = targetLessons(unit);
+        const filled = lessons.filter((lesson) => lesson.hasContent).length;
+        const copy = element('p');
+
+        copy.append(
+            element('strong', '', fill(text.bannerCopied, { source: source.title, count: sourceSequence(source).length })),
+            document.createTextNode(' '),
+            document.createTextNode(fill(text.bannerState, { filled, total: lessons.length }))
+        );
+
+        banner.replaceChildren(copy, button(text.bannerButton, openDialog, 'luc-primary'));
+    }
+
+    function openDialog() {
+        if (!source || document.getElementById(DIALOG_ID)) return;
+
+        lastFocus = document.activeElement;
+        plan = newPlan();
+        restorePlan();
+
+        const dialog = element('dialog');
+
+        dialog.id = DIALOG_ID;
+        // Escape closes a native dialog by itself; the Close button goes
+        // through closeDialog(). Either way it leaves the page at once, so
+        // the banner can open a fresh one straight after.
+        dialog.addEventListener('close', () => forgetDialog(dialog));
+        dialog.addEventListener('click', (event) => {
+            if (event.target === dialog) dialog.close();
         });
+        document.body.append(dialog);
+        render();
+
+        if (typeof dialog.showModal === 'function') dialog.showModal();
+        else dialog.setAttribute('open', '');
+
+        if (!waitingCause && assign().waiting.length) {
+            checkWaitingCause().then(render);
+        }
+    }
+
+    /*
+     * Why some of last year's lessons have nowhere to go yet, in the teacher's
+     * terms. Either the class already has more lessons in the timetable after
+     * this unit's Periode ends (lengthen the Periode now), or the school has
+     * not published the timetable that far (come back later). Reads the
+     * person's own timetable from the day after the Periode, stopping once
+     * it has found enough lessons or two weeks in a row with none of the
+     * person's classes in them - past the published timetable.
+     */
+    async function checkWaitingCause() {
+        waitingCause = { kind: 'checking' };
+
+        const hold = unit.lessons.find((lesson) => lesson.hold)?.hold;
+        const lastTarget = targetLessons(unit).map((lesson) => lesson.time.date).sort((a, b) => b - a)[0];
+        const periodEnd = unit.periodEnd || lastTarget;
+
+        if (!hold || !periodEnd) {
+            waitingCause = null;
+
+            return;
+        }
+
+        const needed = assign().waiting.length;
+        const seen = new Set();
+        let last = null;
+        let quiet = 0;
+
+        try {
+            for (let offset = 0; offset < PERIOD_SCAN_WEEKS && seen.size < needed; offset += 1) {
+                const { week, year } = isoWeek(addDays(periodEnd, 1 + offset * 7));
+                const doc = await fetchDoc(`/lectio/${schoolId()}/SkemaNy.aspx?week=${String(week).padStart(2, '0')}${year}&showtype=0`);
+                const blocks = [...doc.querySelectorAll('a.s2skemabrik[data-tooltip]')];
+
+                if (!blocks.some((block) => block.querySelector('[data-lectiocontextcard^="HE"]'))) {
+                    quiet += 1;
+
+                    if (quiet >= 2) break;
+
+                    continue;
+                }
+
+                quiet = 0;
+
+                blocks.forEach((block) => {
+                    if (isCancelled(block) || !block.querySelector(`[data-lectiocontextcard="${hold.id}"]`)) return;
+
+                    const time = parseTime(block.getAttribute('data-tooltip'));
+                    const key = block.getAttribute('href') || block.getAttribute('data-brikid') || '';
+
+                    if (!time || time.date <= periodEnd || seen.has(key)) return;
+
+                    seen.add(key);
+
+                    if (!last || time.date > last) last = time.date;
+                });
+            }
+        } catch (_) {
+            waitingCause = null;
+
+            return;
+        }
+
+        waitingCause = seen.size
+            ? { kind: 'period', more: seen.size, last, end: periodEnd, name: hold.name }
+            : { kind: 'timetable', last: lastTarget || periodEnd, name: hold.name };
+    }
+
+    function waitingCauseText(text) {
+        if (!waitingCause) return '';
+        if (waitingCause.kind === 'checking') return text.waitingChecking;
+
+        if (waitingCause.kind === 'period') {
+            return fill(text.waitingPeriod, {
+                more: waitingCause.more,
+                name: waitingCause.name,
+                end: dayWithYear(waitingCause.end),
+                last: dayWithYear(waitingCause.last)
+            });
+        }
+
+        return fill(text.waitingTimetable, { name: waitingCause.name, last: dayWithYear(waitingCause.last) });
+    }
+
+    // Lectio's own "Rediger forløb" link on this page, where the Periode is set.
+    function editPeriodLink(text) {
+        const href = document.querySelector('[id$="_editbtn"]')?.getAttribute('href');
+
+        if (!href) return null;
+
+        const link = element('a', 'luc-edit-period', text.editPeriod);
+
+        link.href = href;
+
+        return link;
+    }
+
+    function closeDialog() {
+        const dialog = document.getElementById(DIALOG_ID);
+
+        if (!dialog) return;
+
+        if (typeof dialog.close === 'function' && dialog.open) dialog.close();
+
+        forgetDialog(dialog);
+    }
+
+    function forgetDialog(dialog) {
+        if (!dialog.isConnected) return;
+
+        dialog.remove();
+
+        if (lastFocus && typeof lastFocus.focus === 'function') lastFocus.focus();
+
+        lastFocus = null;
+    }
+
+    function lessonCell(index, text) {
+        const lesson = plan.lessons[index];
+        const box = element('div', 'luc-lesson');
+        const grip = element('span', 'luc-grip', '⠿');
+        const body = element('div');
+
+        grip.draggable = true;
+        grip.title = text.dragTip;
+        grip.setAttribute('aria-hidden', 'true');
+        grip.addEventListener('dragstart', (event) => {
+            event.dataTransfer.setData('text/plain', DRAG_PREFIX + index);
+            event.dataTransfer.effectAllowed = 'move';
+        });
+
+        body.append(element('span', 'luc-number', fill(text.lessonNumber, { n: index + 1 })));
+
+        const groups = [
+            ['homework', text.kindHomework],
+            ['other', text.kindOther],
+            ['presentation', text.kindPresentation]
+        ];
+
+        if (!lesson.items.length) {
+            body.append(document.createTextNode(' '), element('span', 'luc-muted', text.noMaterial));
+        }
+
+        groups.forEach(([kind, label]) => {
+            const titles = lesson.items.filter((item) => item.kind === kind).map((item) => item.title);
+
+            if (!titles.length) return;
+
+            const line = element('span', 'luc-kind');
+
+            line.dataset.kind = kind;
+            line.title = titles.join('\n');
+            line.append(element('b', '', `${label}: `), document.createTextNode(titles.join(' · ')));
+            body.append(line);
+        });
+
+        if (lesson.time) body.append(element('span', 'luc-muted', fill(text.was, { date: dayWithYear(lesson.time.date) })));
+
+        box.append(grip, body);
 
         return box;
     }
 
-    function lessonLabel(lesson, text) {
-        const parts = [whenOf(lesson.time) || lesson.id];
-
-        if (lesson.cancelled) parts.push(`(${text.cancelledLastYear})`);
-
-        return parts.join(' ');
-    }
-
     function render() {
-        const overlay = document.getElementById(OVERLAY_ID);
+        const dialog = document.getElementById(DIALOG_ID);
 
-        if (!overlay || !plan) return;
+        if (!dialog || !plan) return;
 
         const text = labels();
-        const { rows, notPlaced } = assign();
-        const dialog = overlay.querySelector('.luc-dialog');
-        const scrollTop = overlay.querySelector('.luc-body')?.scrollTop || 0;
+        const { rows, waiting } = assign();
+        const placed = rows.filter((row) => row.lesson !== null).length;
+        const total = plan.order.length - plan.leftOut.size;
+        const hasContent = rows.filter((row) => row.reason === 'has-content').length;
+        const scrollTop = dialog.querySelector('.luc-scroll')?.scrollTop || 0;
 
-        dialog.replaceChildren();
         dialog.setAttribute('aria-label', text.title);
 
-        /* Header: the one decision - which class, from when. */
-        const header = element('header');
+        /* Header. */
+        const head = element('div', 'luc-head');
 
-        header.append(element('h2', '', text.title));
+        head.append(
+            element('h2', '', text.title),
+            button(`✕ ${text.close}`, closeDialog),
+            element('p', 'luc-subtitle', fill(text.subtitle, subtitleValues()))
+        );
 
-        const classLabel = element('label', '', text.classLabel);
-        const classSelect = element('select');
+        /* What the plan comes to, in a sentence or three. */
+        const status = element('div', 'luc-status');
 
-        if (!plan.classes.length) {
-            const option = element('option', '', plan.statusKind === 'error' ? '-' : text.classLoading);
+        status.setAttribute('role', 'status');
+        status.append(element('strong', '', fill(placed === 1 ? text.placedOne : text.placedMany, { placed, total })));
 
-            option.value = '';
-            classSelect.append(option);
-            classSelect.disabled = true;
-        } else {
-            plan.classes.forEach((hold) => {
-                const option = element('option', '', hold.name);
+        if (hasContent) status.append(element('p', '', fill(hasContent === 1 ? text.skippedOne : text.skippedMany, { n: hasContent })));
 
-                option.value = hold.id;
-                option.selected = hold.id === plan.holdId;
-                classSelect.append(option);
-            });
+        const lastTarget = plan.targets[plan.targets.length - 1];
+
+        if (waiting.length && lastTarget) {
+            const line = element('p', '', fill(waiting.length === 1 ? text.waitingOne : text.waitingMany, {
+                n: waiting.length,
+                date: dayWithYear(lastTarget.time.date)
+            }));
+            const cause = waitingCauseText(text);
+
+            if (cause) line.append(document.createTextNode(` ${cause}`));
+
+            if (waitingCause?.kind === 'period') {
+                const link = editPeriodLink(text);
+
+                if (link) line.append(document.createTextNode(' '), link);
+            }
+
+            status.append(line);
         }
 
-        classSelect.addEventListener('change', () => {
-            plan.holdId = classSelect.value;
-            plan.targets = [];
-            plan.skip = new Map();
-            saveDraft();
-            render();
-        });
-        classLabel.append(classSelect);
-
-        const startLabel = element('label', '', text.startLabel);
-        const startInput = element('input');
-
-        startInput.type = 'date';
-        startInput.value = plan.start;
-        startInput.addEventListener('change', () => {
-            if (/^\d{4}-\d{2}-\d{2}$/.test(startInput.value)) {
-                plan.start = startInput.value;
-                plan.targets = [];
-                saveDraft();
-                render();
-            }
-        });
-        startLabel.append(startInput);
-
-        const find = button(text.findButton, () => findLessons(), 'luc-primary');
-
-        find.disabled = !plan.holdId || Boolean(scanController);
-
-        header.append(classLabel, startLabel, find, button(text.close, close));
-
-        const placed = rows.filter((row) => row.lesson !== null).length;
-        const hasContent = rows.filter((row) => row.reason === 'has-content').length;
-        const summary = element('p', 'luc-summary');
-        const sentences = [fill(text.summary, { source: plan.order.length - plan.leftOut.size, filled: placed })];
-
-        if (plan.targets.length && notPlaced.length) sentences.push(fill(text.summaryNotPlaced, { n: notPlaced.length }));
-        if (hasContent) sentences.push(fill(text.summaryHasContent, { n: hasContent }));
-        if (plan.cancelledTargets) sentences.push(fill(text.summaryCancelled, { n: plan.cancelledTargets }));
-
-        summary.textContent = plan.targets.length ? sentences.join(' ') : '';
-
-        const status = element('p', 'luc-status', plan.status);
-
-        status.dataset.kind = plan.statusKind;
-        status.setAttribute('role', 'status');
-
-        header.append(summary, status, element('p', 'luc-plan-only', text.planOnly));
-
-        /* Left: last year's lessons, in the order they will be placed. */
-        const body = element('div', 'luc-body');
-        const left = element('section', 'luc-column luc-source');
-        const sourceList = element('ol');
-
-        left.append(element('h3', '', `${text.sourceHeading}: ${source.title}`));
-
-        plan.order.forEach((lessonIndex, position) => {
-            const lesson = source.lessons[lessonIndex];
-            const card = element('li', 'luc-card');
-            const line = element('div', 'luc-line');
-            const out = plan.leftOut.has(lessonIndex);
-            const tools = element('span', 'luc-tools');
-            const up = button('↑', () => { moveLesson(lessonIndex, -1); saveDraft(); render(); }, 'luc-small', text.moveUp);
-            const down = button('↓', () => { moveLesson(lessonIndex, 1); saveDraft(); render(); }, 'luc-small', text.moveDown);
-
-            card.draggable = true;
-            card.dataset.lesson = String(lessonIndex);
-            card.dataset.leftOut = String(out);
-            card.addEventListener('dragstart', (event) => {
-                event.dataTransfer.setData('text/plain', DRAG_PREFIX + lessonIndex);
-                event.dataTransfer.effectAllowed = 'move';
-            });
-
-            up.disabled = position === 0;
-            down.disabled = position === plan.order.length - 1;
-
-            tools.append(
-                up,
-                down,
-                button(out ? text.putBack : text.leaveOut, () => {
-                    if (out) plan.leftOut.delete(lessonIndex);
-                    else plan.leftOut.add(lessonIndex);
-                    saveDraft();
-                    render();
-                }, 'luc-small')
-            );
-
-            line.append(element('span', 'luc-when', lessonLabel(lesson, text)));
-
-            if (out) line.append(element('span', 'luc-muted', text.leftOutNote));
-
-            line.append(tools);
-            card.append(line, itemChips(lesson, text));
-            sourceList.append(card);
-        });
-
-        left.append(sourceList);
-
-        /* Right: this class's lessons, each with what lands on it. */
-        const right = element('section', 'luc-column luc-target');
-        const holdName = plan.classes.find((hold) => hold.id === plan.holdId)?.name || '';
-
-        right.append(element('h3', '', holdName ? `${text.targetHeading}: ${holdName}` : text.targetHeading));
+        /* The timeline. */
+        const scroll = element('div', 'luc-scroll');
 
         if (!plan.targets.length) {
-            right.append(element('p', 'luc-muted', text.targetEmpty));
+            scroll.append(element('p', 'luc-muted', text.noLessons));
         } else {
-            right.append(element('p', 'luc-hint', text.dragHint));
+            const columns = element('div', 'luc-columns');
 
-            const targetList = element('ol');
+            columns.append(element('span', '', text.colYours), element('span', '', text.colGets), element('span'));
+            scroll.append(columns);
+
+            const list = element('ol', 'luc-timeline');
+            let currentWeek = '';
 
             rows.forEach((row, targetIndex) => {
-                const item = element('li', 'luc-row');
-                const line = element('div', 'luc-line');
-                const tools = element('span', 'luc-tools');
-                const skipped = row.reason === 'has-content' || row.reason === 'left-empty';
+                const { week, year } = isoWeek(row.target.time.date);
+                const weekKey = `${year}-${week}`;
 
-                item.dataset.target = row.target.absId;
-                item.dataset.state = skipped ? 'skipped' : row.lesson === null ? 'empty' : 'filled';
+                if (weekKey !== currentWeek) {
+                    currentWeek = weekKey;
+                    list.append(element('li', 'luc-week', fill(text.week, { week })));
+                }
+
+                const item = element('li', 'luc-row');
+                const when = element('div', 'luc-when', dayLabel(row.target.time.date));
+                const middle = element('div');
+                const actions = element('div', 'luc-actions');
+
+                when.append(element('small', '', `${row.target.time.start}-${row.target.time.end}`));
+                item.dataset.target = row.target.id;
+                item.dataset.state = row.lesson !== null ? 'placed' : row.reason;
+
+                if (row.lesson !== null) {
+                    middle.append(lessonCell(row.lesson, text));
+                    actions.append(
+                        button(text.skipDay, () => { plan.skip.set(row.target.id, true); changed(); }, '', text.skipDayTip),
+                        button(text.leaveOut, () => { plan.leftOut.add(row.lesson); changed(); }, '', text.leaveOutTip)
+                    );
+                } else if (row.reason === 'has-content') {
+                    middle.append(element('span', '', text.hasContent));
+                    actions.append(button(text.useAnyway, () => { plan.skip.set(row.target.id, false); changed(); }, '', text.useAnywayTip));
+                } else if (row.reason === 'skipped') {
+                    middle.append(element('span', '', text.skipped));
+                    actions.append(button(text.undo, () => {
+                        if (row.target.hasContent) plan.skip.set(row.target.id, true);
+                        else plan.skip.delete(row.target.id);
+                        changed();
+                    }));
+                } else {
+                    middle.append(element('span', 'luc-muted', text.free));
+                }
 
                 item.addEventListener('dragover', (event) => {
                     event.preventDefault();
@@ -1187,85 +1415,116 @@
 
                     const lessonIndex = Number(data.slice(DRAG_PREFIX.length));
 
-                    if (!Number.isInteger(lessonIndex) || !source.lessons[lessonIndex]) return;
+                    if (!Number.isInteger(lessonIndex) || !plan.lessons[lessonIndex]) return;
 
                     placeAt(lessonIndex, targetIndex);
-                    saveDraft();
-                    render();
+                    changed();
                 });
 
-                tools.append(button(skipped ? text.useLesson : text.leaveEmpty, () => {
-                    plan.skip.set(row.target.absId, !skipped);
-                    saveDraft();
-                    render();
-                }, 'luc-small'));
-
-                line.append(element('span', 'luc-when', whenOf(row.target.time)), tools);
-                item.append(line);
-
-                if (row.lesson !== null) {
-                    const lesson = source.lessons[row.lesson];
-
-                    item.append(element('div', 'luc-muted', `← ${lessonLabel(lesson, text)}`), itemChips(lesson, text));
-                } else {
-                    item.append(element('div', 'luc-muted',
-                        row.reason === 'has-content' ? text.hasContent : row.reason === 'left-empty' ? text.leftEmpty : text.emptySlot));
-                }
-
-                targetList.append(item);
+                item.append(when, middle, actions);
+                list.append(item);
             });
 
-            right.append(targetList);
-
-            if (notPlaced.length) {
-                const leftover = element('div', 'luc-card');
-
-                leftover.append(element('strong', '', `${text.notPlacedHeading} (${notPlaced.length})`));
-                leftover.append(element('div', 'luc-muted', notPlaced.map((index) => lessonLabel(source.lessons[index], text)).join(', ')));
-                right.append(leftover);
-            }
+            scroll.append(list);
         }
 
-        body.append(left, right);
+        /* Waiting: last year's lessons this unit has no lesson for yet. */
+        if (waiting.length) {
+            const horizon = element('section', 'luc-horizon');
+            const list = element('ol', 'luc-waiting');
+
+            horizon.append(element('h3', '', fill(text.waitingHeading, { n: waiting.length })));
+
+            const cause = waitingCauseText(text);
+
+            if (cause) horizon.append(element('p', 'luc-muted', cause));
+
+            waiting.forEach((index) => {
+                const lesson = plan.lessons[index];
+                const titles = lesson.items.map((entry) => entry.title).join(' · ') || text.noMaterial;
+                const was = lesson.time ? ` (${fill(text.was, { date: dayWithYear(lesson.time.date) })})` : '';
+
+                list.append(element('li', '', `${fill(text.lessonNumber, { n: index + 1 })}: ${titles}${was}`));
+            });
+
+            horizon.append(list);
+            scroll.append(horizon);
+        }
+
+        /* Left out, out of the way until wanted. */
+        if (plan.leftOut.size) {
+            const details = element('details');
+            const list = element('ol');
+
+            details.append(element('summary', '', fill(text.leftOutHeading, { n: plan.leftOut.size })));
+
+            [...plan.leftOut].sort((a, b) => a - b).forEach((index) => {
+                const line = element('li', '', `${fill(text.lessonNumber, { n: index + 1 })} `);
+
+                line.append(button(text.putBack, () => { plan.leftOut.delete(index); changed(); }));
+                list.append(line);
+            });
+
+            details.append(list);
+            details.open = true;
+            scroll.append(details);
+        }
 
         /* Footer. */
-        const footer = element('footer');
-        const copyButton = button(text.copyPlan, () => copyPlanText(copyButton));
+        const foot = element('div', 'luc-foot');
+        const copyButton = button(text.copyPlan, () => copyPlanText(copyButton), 'luc-primary');
 
-        copyButton.disabled = !plan.targets.length;
-        footer.append(copyButton, button(text.resetPlan, () => {
-            const keep = { holdId: plan.holdId, start: plan.start, classes: plan.classes, targets: plan.targets, cancelledTargets: plan.cancelledTargets };
+        foot.append(
+            element('p', 'luc-note', text.planOnly),
+            button(text.startOver, () => { plan = newPlan(); changed(); }),
+            copyButton
+        );
 
-            plan = Object.assign(newPlan(), keep);
-            saveDraft();
-            render();
-        }));
+        dialog.replaceChildren(head, status, scroll, foot);
+        dialog.querySelector('.luc-scroll').scrollTop = scrollTop;
+    }
 
-        dialog.append(header, body, footer);
-        body.scrollTop = scrollTop;
+    // "2025/26": a school year runs August to July. Both units usually
+    // share a title, so the years are what tell them apart.
+    function schoolYearOf(targetUnit) {
+        const first = targetUnit.lessons.find((lesson) => lesson.time)?.time.date;
+
+        if (!first) return '';
+
+        const start = first.getMonth() >= 7 ? first.getFullYear() : first.getFullYear() - 1;
+
+        return `${start}/${String(start + 1).slice(-2)}`;
+    }
+
+    function subtitleValues() {
+        return { source: source.title, sourceYear: schoolYearOf(source), target: unit.title, targetYear: schoolYearOf(unit) };
+    }
+
+    function changed() {
+        savePlan();
+        render();
     }
 
     function planText() {
         const text = labels();
-        const { rows, notPlaced } = assign();
-        const holdName = plan.classes.find((hold) => hold.id === plan.holdId)?.name || '';
-        const lines = [`${source.title} → ${holdName}`, ''];
+        const { rows, waiting } = assign();
+        const lines = [fill(text.subtitle, subtitleValues()), ''];
 
         rows.forEach((row) => {
-            const when = whenOf(row.target.time);
+            const when = `${dayWithYear(row.target.time.date)} ${row.target.time.start}`;
 
             if (row.lesson === null) {
-                lines.push(`${when}\t${row.reason === 'has-content' ? text.hasContent : row.reason === 'left-empty' ? text.leftEmpty : text.emptySlot}`);
+                lines.push(`${when}\t${row.reason === 'has-content' ? text.hasContent : row.reason === 'skipped' ? text.skipped : text.free}`);
             } else {
-                const lesson = source.lessons[row.lesson];
-                const items = lesson.items.map((item) => item.title).join('; ') || text.noItems;
+                const lesson = plan.lessons[row.lesson];
 
-                lines.push(`${when}\t← ${lessonLabel(lesson, text)}: ${items}`);
+                lines.push(`${when}\t${fill(text.lessonNumber, { n: row.lesson + 1 })}: ${lesson.items.map((item) => item.title).join(' · ') || text.noMaterial}`);
             }
         });
 
-        if (notPlaced.length) {
-            lines.push('', `${text.notPlacedHeading}: ${notPlaced.map((index) => lessonLabel(source.lessons[index], text)).join(', ')}`);
+        if (waiting.length) {
+            lines.push('', fill(text.waitingHeading, { n: waiting.length }));
+            waiting.forEach((index) => lines.push(`  ${fill(text.lessonNumber, { n: index + 1 })}: ${plan.lessons[index].items.map((item) => item.title).join(' · ') || text.noMaterial}`));
         }
 
         return lines.join('\n');
@@ -1288,144 +1547,316 @@
             try {
                 document.execCommand('copy');
             } catch (__) {
-                // Nothing more to try; the plan is still on screen.
+                // The plan is still on screen.
             }
 
             area.remove();
         }
 
-        trigger.textContent = labels().copied;
+        trigger.textContent = `${labels().copied} ✓`;
     }
 
     /* ---------------------------------------------------------------- *
-     * Opening and closing
+     * Lectio's Kopiér form: explain it, check the class, suggest a Periode
      * ---------------------------------------------------------------- */
 
-    async function open() {
-        if (document.getElementById(OVERLAY_ID)) return;
+    function classFields() {
+        return {
+            box: document.querySelector('[id$="_EntityChooserCtrl_inp"]'),
+            stored: document.querySelector('input[type="hidden"][name$="EntityChooserCtrl$inpid"]'),
+            start: document.querySelector('[id$="_diCtrl_start__date_tb"]'),
+            end: document.querySelector('[id$="_diCtrl_end__date_tb"]')
+        };
+    }
 
-        lastFocus = document.activeElement;
-        plan = newPlan();
-        loadDraft();
+    async function startCopyForm() {
+        const fields = classFields();
 
-        const overlay = element('div');
-        const dialog = element('div', 'luc-dialog');
+        if (!fields.box || !fields.stored || !fields.start || !fields.end) {
+            reportToManager('drift', 'copy-form', 0);
 
-        overlay.id = OVERLAY_ID;
-        dialog.setAttribute('role', 'dialog');
-        dialog.setAttribute('aria-modal', 'true');
-        dialog.tabIndex = -1;
-        overlay.append(dialog);
-        overlay.addEventListener('click', (event) => {
-            if (event.target === overlay) close();
-        });
-        document.body.append(overlay);
-        render();
-        dialog.focus();
-
-        cancelScan();
-        scanController = new AbortController();
-
-        const signal = scanController.signal;
-
-        try {
-            const holds = await discoverClasses(signal);
-
-            plan.classes = rankClasses(holds, source);
-
-            if (!plan.classes.some((hold) => hold.id === plan.holdId)) plan.holdId = plan.classes[0]?.id || '';
-
-            setStatus(plan.classes.length ? '' : labels().classNone, plan.classes.length ? '' : 'warn');
-        } catch (error) {
-            if (!signal.aborted) setStatus(error.code === 'session' ? labels().sessionLost : fill(labels().fetchFailed, { week: isoWeek(new Date()).week }), 'error');
-        } finally {
-            if (scanController && scanController.signal === signal) scanController = null;
+            return;
         }
 
-        render();
-    }
-
-    function close() {
-        cancelScan();
-        document.getElementById(OVERLAY_ID)?.remove();
-
-        if (lastFocus && typeof lastFocus.focus === 'function') lastFocus.focus();
-
-        lastFocus = null;
-    }
-
-    function handleKey(event) {
-        if (event.key === 'Escape' && document.getElementById(OVERLAY_ID)) close();
-    }
-
-    function installButton() {
-        if (document.getElementById(BUTTON_ID)) return;
-
-        // Only on a unit the person can edit: the same page Lectio gives
-        // Kopiér forløb and Rediger forløb to.
-        const copyLink = document.querySelector('[id$="_newfrombtn"]');
-        const canEdit = document.querySelector('[id$="_editbtn"], [id$="_activateEditModeBtn"]');
-
-        if (!copyLink || !canEdit) return;
+        addStyles();
 
         const text = labels();
-        const wrapper = element('div', 'buttontext');
-        const link = element('a');
+        const guide = element('section');
+        const steps = element('ol');
 
-        wrapper.id = BUTTON_ID;
-        link.href = '#';
-        link.setAttribute('data-role', 'button');
-        link.title = text.openButtonTitle;
-        // An icon name Lectio's own navigation already uses, so the font has it.
-        link.append(element('span', 'ls-fonticon', 'calendar_month'), document.createTextNode(text.openButton));
-        link.addEventListener('click', (event) => {
-            event.preventDefault();
-            open();
-        });
-        wrapper.append(link);
+        guide.id = GUIDE_ID;
+        guide.setAttribute('role', 'note');
+        steps.append(element('li', '', text.guideStep1), element('li', '', text.guideStep2), element('li', '', text.guideStep3));
+        guide.append(element('h3', '', text.guideTitle), steps, element('p', 'luc-check luc-class'), element('div', 'luc-period'));
 
-        const host = copyLink.closest('.buttontext') || copyLink;
+        const form = fields.end.closest('table') || fields.end.parentElement;
 
-        host.after(document.createTextNode(' '), wrapper);
-    }
+        form.after(guide);
 
-    function relabel() {
-        const wrapper = document.getElementById(BUTTON_ID);
+        const sourceId = new URL(location.href).searchParams.get('fromphaseid');
 
-        if (wrapper) {
-            wrapper.remove();
-            installButton();
+        if (sourceId) {
+            try {
+                const url = `/lectio/${schoolId()}/studieplan/forloeb_vis.aspx?phaseid=${encodeURIComponent(sourceId)}`;
+
+                source = readUnit(await fetchDoc(url), url);
+            } catch (_) {
+                source = null;
+            }
         }
 
-        render();
+        checkClass();
+        classTimer = setInterval(checkClass, CLASS_CHECK_MS);
+    }
+
+    function contextName(doc) {
+        // "Hold - 1i Math AA SL/2 Fag: ..." on a context card.
+        const textContent = (doc.body?.textContent || '').replace(/\s+/g, ' ').trim();
+
+        return ((textContent.match(/^\S+\s+-\s+(.+?)\s+(Fag|Subject):/) || [])[1] || '').trim();
+    }
+
+    async function checkClass() {
+        const fields = classFields();
+        const guide = document.getElementById(GUIDE_ID);
+
+        if (!guide || !fields.stored) return;
+
+        const storedId = fields.stored.value || '';
+
+        if (storedId === checkedClassId) return;
+
+        checkedClassId = storedId;
+
+        const line = guide.querySelector('.luc-class');
+        const period = guide.querySelector('.luc-period');
+        const text = labels();
+
+        period.replaceChildren();
+
+        if (!/^HE\d+$/.test(storedId)) {
+            line.textContent = text.classNone;
+            line.dataset.kind = '';
+
+            return;
+        }
+
+        line.textContent = text.classChecking;
+        line.dataset.kind = '';
+
+        let name = '';
+
+        try {
+            name = contextName(await fetchDoc(`/lectio/${schoolId()}/contextcard/contextcard.aspx?lectiocontextcard=${encodeURIComponent(storedId)}`));
+        } catch (_) {
+            name = '';
+        }
+
+        // A newer choice may have been made while this one was being looked up.
+        if (checkedClassId !== storedId || !name) return;
+
+        const shown = (fields.box.value || '').replace(/\s*\(\d{4}\/\d{2}\)\s*$/, '').trim();
+
+        if (shown && shown.toLowerCase() !== name.toLowerCase()) {
+            line.textContent = fill(text.classMismatch, { shown, name });
+            line.dataset.kind = 'warn';
+
+            return;
+        }
+
+        line.textContent = fill(text.classOk, { name });
+        line.dataset.kind = 'ok';
+
+        await suggestPeriod(name, storedId);
+    }
+
+    /*
+     * How long the new unit needs to be. Reads the person's own timetable a
+     * few weeks ahead for the chosen class (by the name Lectio confirmed; the
+     * chooser's ids and the timetable's are different id spaces), stopping
+     * when it has enough lessons or the published timetable runs out.
+     */
+    async function suggestPeriod(name, storedId) {
+        const guide = document.getElementById(GUIDE_ID);
+        const period = guide?.querySelector('.luc-period');
+
+        if (!period || !source) return;
+
+        const text = labels();
+        const needed = sourceSequence(source).length;
+        const found = [];
+        const seen = new Set();
+        // Lessons of this class per published week. The first week is partial
+        // (it starts today) and so is the last one before the published
+        // timetable runs out, so the typical week is the most common count,
+        // not the average (which read 2 a week for a 3-a-week class).
+        const perWeekCounts = [];
+        let quietWeeks = 0;
+
+        // Progress while it reads, so the box never sits silent.
+        const progress = element('p', 'luc-muted');
+
+        period.replaceChildren(element('p', '', fill(text.periodSource, { count: needed })), progress);
+
+        const today = new Date();
+
+        today.setHours(0, 0, 0, 0);
+
+        // A lesson already under way today is not where a new unit starts.
+        const now = new Date();
+
+        try {
+            for (let offset = 0; offset < PERIOD_SCAN_WEEKS && found.length < needed; offset += 1) {
+                const date = addDays(today, offset * 7);
+                const { week, year } = isoWeek(date);
+
+                progress.textContent = fill(text.periodScanning, { name, week });
+
+                const doc = await fetchDoc(`/lectio/${schoolId()}/SkemaNy.aspx?week=${String(week).padStart(2, '0')}${year}&showtype=0`);
+                const blocks = [...doc.querySelectorAll('a.s2skemabrik[data-tooltip]')];
+
+                // A week with none of the person's classes in it is past the
+                // published timetable (or a holiday): two in a row ends it.
+                const anyClass = blocks.some((block) => block.querySelector('[data-lectiocontextcard^="HE"]'));
+
+                if (!anyClass) {
+                    quietWeeks += 1;
+
+                    if (quietWeeks >= 2) break;
+
+                    continue;
+                }
+
+                quietWeeks = 0;
+
+                let inWeek = 0;
+
+                blocks.forEach((block) => {
+                    if (isCancelled(block)) return;
+
+                    const cards = [...block.querySelectorAll('[data-lectiocontextcard^="HE"]')];
+
+                    if (!cards.some((card) => card.textContent.trim().toLowerCase() === name.toLowerCase())) return;
+
+                    const time = parseTime(block.getAttribute('data-tooltip'));
+                    const key = block.getAttribute('href') || block.getAttribute('data-brikid') || '';
+
+                    if (!time || seen.has(key)) return;
+
+                    seen.add(key);
+                    inWeek += 1;
+
+                    if (time.date >= now) found.push(time.date);
+                });
+
+                if (inWeek) perWeekCounts.push(inWeek);
+            }
+        } catch (_) {
+            // Whatever was found is still worth showing.
+        }
+
+        if (checkedClassId !== storedId) return;
+
+        progress.remove();
+        found.sort((a, b) => a - b);
+
+        if (!found.length) {
+            period.append(element('p', '', fill(text.periodNoLessons, { name })));
+
+            return;
+        }
+
+        let start = found[0];
+        let end;
+        let sentence;
+
+        if (found.length >= needed) {
+            end = found[needed - 1];
+            sentence = fill(text.periodExact, { count: needed });
+        } else {
+            // The lessons the timetable already shows are exact, holidays
+            // included; only the rest, past its last lesson, is estimated.
+            const perWeek = typicalWeek(perWeekCounts);
+            const last = found[found.length - 1];
+            const rest = needed - found.length;
+            const weeks = Math.ceil(rest / perWeek);
+
+            end = addDays(last, weeks * 7);
+            sentence = fill(text.periodEstimate, {
+                name, perWeek, weeks, rest,
+                shown: found.length,
+                last: dayWithYear(last),
+                start: dayWithYear(start),
+                end: dayWithYear(end)
+            });
+        }
+
+        // The answer first, then how it was reached.
+        const range = { start: dayWithYear(start), end: dayWithYear(end) };
+        const use = button(fill(text.periodUse, range), () => {
+            const fields = classFields();
+
+            [[fields.start, start], [fields.end, end]].forEach(([input, date]) => {
+                input.value = lectioDate(date);
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+            });
+
+            note.textContent = text.periodUsed;
+        });
+        const note = element('p', 'luc-muted');
+
+        period.append(element('p', 'luc-suggested', fill(text.periodSuggested, range)), element('p', '', sentence), use, note);
+    }
+
+    // The most common number of lessons in a week; a tie goes to the larger.
+    function typicalWeek(counts) {
+        const tally = new Map();
+
+        counts.forEach((count) => tally.set(count, (tally.get(count) || 0) + 1));
+
+        const [best] = [...tally].sort((a, b) => b[1] - a[1] || b[0] - a[0])[0] || [1];
+
+        return Math.max(1, best);
     }
 
     /* ---------------------------------------------------------------- *
-     * Teardown
+     * Language changes, teardown, start
      * ---------------------------------------------------------------- */
 
+    function relabel() {
+        announce();
+        renderBanner();
+        render();
+
+        if (document.getElementById(GUIDE_ID)) {
+            document.getElementById(GUIDE_ID).remove();
+            checkedClassId = null;
+            clearInterval(classTimer);
+            classTimer = 0;
+            startCopyForm();
+        }
+    }
+
     function teardown() {
-        cancelScan();
+        requests.abort();
         lifecycle.abort();
-        document.getElementById(OVERLAY_ID)?.remove();
-        document.getElementById(BUTTON_ID)?.remove();
+        clearInterval(classTimer);
+        classTimer = 0;
+        document.getElementById(DIALOG_ID)?.remove();
+        document.getElementById(BANNER_ID)?.remove();
+        document.getElementById(GUIDE_ID)?.remove();
         document.getElementById(STYLE_ID)?.remove();
     }
 
-    /* ---------------------------------------------------------------- *
-     * Start
-     * ---------------------------------------------------------------- */
-
     window.addEventListener('lectio-manager:discover', announce, { signal: lifecycle.signal });
-    window.addEventListener('lectio-manager:language', () => { announce(); relabel(); }, { signal: lifecycle.signal });
-    document.addEventListener('keydown', handleKey, { signal: lifecycle.signal });
+    window.addEventListener('lectio-manager:prune-storage', handlePrune, { signal: lifecycle.signal });
+    window.addEventListener('lectio-manager:language', relabel, { signal: lifecycle.signal });
 
-    // A frozen page only stops its week scan; a page really going away is
-    // torn down. pageshow needs nothing back: a scan is only ever started by
-    // a click (issue #41's pattern, without its bug).
+    // Every request here is started by the page loading or by a click, so a
+    // frozen page has nothing to resume. A page really going away is torn
+    // down (issue #41's pattern).
     window.addEventListener('pagehide', (event) => {
-        cancelScan();
-
         if (event && event.persisted) return;
 
         teardown();
@@ -1433,21 +1864,13 @@
 
     function start() {
         announce();
+        prunePlans();
 
-        source = readSourceUnit();
-
-        if (!source) return;
-
-        if (!source.lessons.length) {
-            // The unit's lesson container is there and holds nothing this
-            // could read. A unit with no lessons has no container at all.
-            if (document.querySelector('[id$="_actContainer"] .ls-phase-activity')) reportToManager('drift', 'unit-lessons', 0);
-
-            return;
+        if (/\/studieplan\/forloeb_kopier\.aspx$/i.test(location.pathname)) {
+            startCopyForm();
+        } else if (/\/studieplan\/forloeb_vis\.aspx$/i.test(location.pathname)) {
+            startUnitPage();
         }
-
-        addStyles();
-        installButton();
     }
 
     if (document.readyState === 'loading') {

@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="da">
+<head>
+    <meta charset="utf-8">
+    <title>Unit Copier - copied unit fixture</title>
+    <script>
+        /* Issue #74, Unit Copier 0.2.0 on a copied unit (studieplan/
+           forloeb_vis.aspx). The shapes are the real pages' (read live on
+           2026-10-07): lessons div.ls-phase-activity#ACC<id>, items
+           [data-to-toc-id^=ACH] under *_InlineHomework / *_InlineOther, the
+           presentation ACP; the material picker's tree starts with
+           "Relaterede forløb" (lec-node-id __26) holding PH<original id>.
+
+           This unit (phase 900, this year), lessons days from today:
+             +3                 free
+             +4                 already has material ...... left alone
+             +5                 cancelled .................. not a lesson
+             +10, +11           free
+           Last year's unit (phase 500), its sequence:
+             Lesson 1  12/8  Calculators, Scheme.pdf (homework)
+             Lesson 2  15/8  Slides (other)
+             (19/8 cancelled, empty - takes no place)
+             Lesson 3  22/8  no material
+             Lesson 4  26/8  Quiz (homework), slides (presentation)
+           Default: +3 L1, +4 left alone, +10 L2, +11 L3, L4 waiting.
+
+           The Periode ends on the last lesson (+11). The person's timetable
+           has another of the class's lessons after it (+15), so the waiting
+           lesson is waiting on the Periode, not on publishing - and the
+           planner says so, with a link to Rediger forløb.
+
+           ?readonly=1  no edit controls: nothing happens, nothing fetched.
+           ?backwards=1 the related unit is NEWER than this one (Lectio
+                        relating both ways): no banner.
+           ?unrelated=1 the picker relates nothing and every lesson is empty,
+                        as on a fresh copy: the banner says it could not tell. */
+        const query = new URLSearchParams(location.search);
+        window.READONLY = query.has('readonly');
+        window.BACKWARDS = query.has('backwards');
+        window.UNRELATED = query.has('unrelated');
+
+        window.dayFromToday = (offset) => {
+            const date = new Date();
+            date.setHours(0, 0, 0, 0);
+            date.setDate(date.getDate() + offset);
+            return date;
+        };
+        window.lectioDate = (date) => date.getDate() + '/' + (date.getMonth() + 1) + '-' + date.getFullYear();
+
+        const prefix = (index) => 'm_Content_Visning_forloebOversigtControl2_tocAndToolbar_ActivitiesRep_ctl0' + index + '_Activity_';
+
+        window.lessonHtml = (lesson, index) => {
+            const article = ([id, , title]) => '<article class="lc-display-fragment ls-acr-display" data-to-toc-id="' + id + '"><h1>' + title + '</h1></article><a id="' + id + '"></a>';
+            const of = (kind) => (lesson.items || []).filter((item) => item[1] === kind);
+
+            return '<div class="ls-phase-activity" id="' + lesson.acc + '"><div class="ls-phase-activity-title"><div data-to-toc-id="' + lesson.acc + '">' +
+                '<a class="s2skemabrik s2normal s2brik' + (lesson.cancelled ? ' s2cancelled' : '') + '" href="#" data-tooltip="' +
+                (lesson.cancelled ? 'Aflyst!\n' : '') + lesson.when + '\nHold: x\nLokale: 223A"><span data-lectiocontextcard="HE1">x</span></a></div></div>' +
+                '<div class="ls-phase-activity-content">' +
+                (of('homework').length ? '<div id="' + prefix(index) + 'InlineHomework">' + of('homework').map(article).join('') + '</div>' : '') +
+                (of('other').length ? '<div id="' + prefix(index) + 'InlineOther">' + of('other').map(article).join('') + '</div>' : '') +
+                (of('presentation').length ? '<div id="' + prefix(index) + 'InlinePresentation">' + of('presentation').map(article).join('') + '</div>' : '') +
+                ((lesson.items || []).length ? '' : '<div id="' + prefix(index) + 'emptyList"></div>') + '</div></div>';
+        };
+
+        window.unitPageHtml = (title, lessons) =>
+            '<!doctype html><html><body><div class="ls-phase-activity" id="overview"><div data-to-toc-id="overview">Forløb - ' + title + '</div></div>' +
+            '<div id="m_Content_Visning_forloebOversigtControl2_tocAndToolbar_actContainer">' + lessons.map(lessonHtml).join('') + '</div></body></html>';
+
+        const year = new Date().getFullYear();
+        const sourceYear = BACKWARDS ? year + 1 : year - 1;
+
+        window.SOURCE_LESSONS = [
+            { acc: 'ACC501', when: '12/8-' + sourceYear + ' 11:00 til 12:10', items: [['ACH11', 'homework', 'Calculators'], ['ACH12', 'homework', 'Scheme.pdf']] },
+            { acc: 'ACC502', when: '15/8-' + sourceYear + ' 09:40 til 10:50', items: [['ACH21', 'other', 'Slides']] },
+            { acc: 'ACC503', when: '19/8-' + sourceYear + ' 09:40 til 10:50', cancelled: true },
+            { acc: 'ACC504', when: '22/8-' + sourceYear + ' 09:40 til 10:50' },
+            { acc: 'ACC505', when: '26/8-' + sourceYear + ' 12:35 til 13:45', items: [['ACH51', 'homework', 'Quiz'], ['ACP52', 'presentation', 'Unit 1 slides']] }
+        ];
+
+        window.requests = [];
+
+        window.fetch = (url, init) => {
+            const parsed = new URL(String(url), location.href);
+            requests.push({ path: parsed.pathname, search: parsed.search, method: (init && init.method) || 'GET' });
+
+            let html = null;
+
+            if (parsed.pathname === '/lectio/223/documentchoosercontent.aspx') {
+                html = '<!doctype html><html><body>' +
+                    '<div lec-role="treeviewnodecontainer" lec-node-id="__26"><a class="TreeNode" lec-command="ltv-selectnode"><div class="TreeNode-title">Relaterede forløb</div></a>' +
+                    (UNRELATED ? '' : '<div lec-role="treeviewnodecontainer" lec-node-id="PH500__25"><a class="TreeNode"><div class="TreeNode-title">Unit 1</div></a></div>') + '</div>' +
+                    '<div lec-role="treeviewnodecontainer" lec-node-id="__41"><a class="TreeNode"><div class="TreeNode-title">Holdmaterialer</div></a></div>' +
+                    '<div lec-role="treeviewnodecontainer" lec-node-id="PH900__25"><a class="TreeNode"><div class="TreeNode-title">This unit</div></a></div>' +
+                    '</body></html>';
+            } else if (parsed.pathname === '/lectio/223/studieplan/forloeb_vis.aspx' && parsed.searchParams.get('phaseid') === '500') {
+                html = unitPageHtml('Unit 1: Algebra', SOURCE_LESSONS);
+            } else if (parsed.pathname === '/lectio/223/SkemaNy.aspx') {
+                // Every week after the Periode: the class's lesson at +15 in
+                // whichever week holds it, and the person's other class so
+                // the week reads as published.
+                const later = dayFromToday(15);
+                html = '<!doctype html><html><body><table><tr><td data-date="x">' +
+                    '<a class="s2skemabrik s2brik" href="/lectio/223/aktivitet/aktivitetforside2.aspx?absid=915" data-tooltip="' +
+                    lectioDate(later) + ' 10:55 til 12:05\nHold: x"><span data-lectiocontextcard="HE1">x</span></a>' +
+                    '</td></tr></table></body></html>';
+            }
+
+            return html === null
+                ? Promise.reject(new TypeError('unexpected request ' + url))
+                : Promise.resolve(new Response(html, { status: 200, headers: { 'content-type': 'text/html' } }));
+        };
+
+        localStorage.clear();
+    </script>
+</head>
+<body>
+    <div id="masterContent">
+        <select id="m_ChooseTerm_term"><option value="2026" selected>2026/27</option></select>
+        <div id="buttons"><div class="buttontext"><a href="#" id="m_Content_Visning_newfrombtn">Kopiér forløb</a></div></div>
+        <div class="ls-phase-activity" id="overview"><div data-to-toc-id="overview">Forløb - Unit 1: Algebra (1i Math AA SL/2)</div>
+            <table><tr id="m_Content_Visning_forloebOversigtControl2_tocAndToolbar_PeriodsRow"><th>Periode:</th><td id="period"></td></tr></table></div>
+        <div id="m_Content_Visning_forloebOversigtControl2_tocAndToolbar_actContainer"></div>
+    </div>
+
+    <script>
+        if (!READONLY) {
+            document.getElementById('buttons').insertAdjacentHTML('beforeend', '<div class="buttontext"><a href="#" id="m_Content_Visning_editbtn">Rediger forløb</a></div>');
+        }
+
+        const dmy = (date) => String(date.getDate()).padStart(2, '0') + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' + date.getFullYear();
+        document.getElementById('period').textContent = dmy(dayFromToday(3)) + ' — ' + dmy(dayFromToday(11));
+
+        window.TARGETS = [
+            { acc: 'ACC901', offset: 3 },
+            { acc: 'ACC902', offset: 4, items: UNRELATED ? [] : [['ACH91', 'homework', 'Already here']] },
+            { acc: 'ACC903', offset: 5, cancelled: true },
+            { acc: 'ACC904', offset: 10 },
+            { acc: 'ACC905', offset: 11 }
+        ].map((lesson) => ({ ...lesson, when: lectioDate(dayFromToday(lesson.offset)) + ' 10:55 til 12:05' }));
+
+        document.querySelector('[id$="_actContainer"]').innerHTML = TARGETS.map(lessonHtml).join('');
+        history.replaceState(null, '', location.pathname + '?phaseid=900' + (location.search ? '&' + location.search.slice(1) : ''));
+    </script>
+
+    <script src="/unit-copier.user.js"></script>
+
+    <script>
+        const failures = [];
+        const assert = (condition, message) => { if (!condition) failures.push(message); };
+        const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+        const waitFor = async (predicate, label) => {
+            for (let attempt = 0; attempt < 400; attempt += 1) {
+                if (predicate()) return true;
+                await wait(50);
+            }
+            failures.push('timed out waiting for ' + label);
+            return false;
+        };
+        const report = () => {
+            const output = document.createElement('pre');
+            output.id = 'test-result';
+            output.textContent = failures.length ? failures.join(' | ') : 'pass';
+            document.body.dataset.testResult = failures.length ? 'fail' : 'pass';
+            document.body.appendChild(output);
+        };
+
+        const banner = () => document.getElementById('lectio-unit-copier-banner');
+        const dialog = () => document.getElementById('lectio-unit-copier');
+        const row = (acc) => dialog().querySelector('.luc-row[data-target="' + acc + '"]');
+        const buttonIn = (node, label) => [...node.querySelectorAll('button')].find((b) => b.textContent.trim() === label);
+        const what = (acc) => {
+            const r = row(acc);
+            if (!r) return 'missing';
+            if (r.dataset.state !== 'placed') return r.dataset.state;
+            return (r.querySelector('.luc-number').textContent.match(/\d+/) || [])[0];
+        };
+        const plan = () => ['ACC901', 'ACC902', 'ACC904', 'ACC905'].map((acc) => acc.slice(3) + '=' + what(acc)).join(' ');
+        const loaded = () => new Promise((resolve) => (document.readyState === 'loading'
+            ? document.addEventListener('DOMContentLoaded', resolve, { once: true }) : resolve()));
+
+        (async () => {
+            await loaded();
+
+            if (READONLY || BACKWARDS) {
+                // An absence proof: give the module time to have added it.
+                await wait(1500);
+                assert(!banner(), 'a banner appeared ' + (READONLY ? 'on a unit the person cannot edit' : 'for a related unit newer than this one'));
+                if (READONLY) assert(requests.length === 0, 'a read-only unit page fetched something');
+                return;
+            }
+
+            if (UNRELATED) {
+                // A freshly copied unit whose source cannot be found says so,
+                // rather than showing nothing.
+                await waitFor(() => banner() && banner().dataset.state === 'not-found', 'the "could not tell" banner');
+                assert(banner() && /kunne ikke se, hvilket forløb dette er kopieret fra/.test(banner().textContent),
+                    'not-found banner reads: ' + (banner() && banner().textContent));
+                assert(!buttonIn(banner(), 'Placér sidste års lektioner'), 'a place button with nothing to place');
+                return;
+            }
+
+            // It says it is checking first, then what it found.
+            await waitFor(() => banner() && banner().dataset.state === 'ready', 'the banner');
+            if (!banner()) return;
+
+            /* It found last year's unit through the picker, for this unit's first lesson. */
+            const picker = requests.find((r) => r.path.endsWith('/documentchoosercontent.aspx'));
+            const params = new URLSearchParams(picker && picker.search);
+            assert(params.get('activitycontentid') === '901' && params.get('phaseids') === '900' && params.get('year') === '2026' && params.get('mode') === 'pickhomework',
+                'the picker was asked the wrong question: ' + (picker && picker.search));
+            assert(/Kopieret fra Unit 1: Algebra \(4 lektioner\)/.test(banner().textContent) && /Lektioner med materiale: 1 af 4/.test(banner().textContent),
+                'banner reads: ' + banner().textContent);
+
+            buttonIn(banner(), 'Placér sidste års lektioner').click();
+            await waitFor(() => dialog() && dialog().open, 'the planner to open');
+
+            assert(plan() === '901=1 902=has-content 904=2 905=3', 'default plan: ' + plan());
+            assert(!row('ACC903'), 'the cancelled lesson is in the plan');
+            const status = dialog().querySelector('.luc-status').textContent;
+            assert(/3 af 4 lektioner fra sidste år er placeret/.test(status) && /1 mangler en lektion/.test(status) && /1 lektion har allerede materiale/.test(status),
+                'status reads: ' + status);
+            assert(/Lektion 4: Quiz · Unit 1 slides \(var /.test(dialog().querySelector('.luc-horizon').textContent), 'lesson 4 is not listed as waiting, with its old date');
+
+            /* Why it is waiting: here the Periode is too short, since the
+               timetable already has another lesson after it - with the way
+               to fix it. */
+            await waitFor(() => /Dit skema har allerede/.test(dialog().querySelector('.luc-status').textContent), 'the waiting cause');
+            const cause = dialog().querySelector('.luc-status').textContent;
+            assert(/allerede 1 lektioner mere med x efter forløbets Periode slutter/.test(cause), 'waiting cause reads: ' + cause);
+            const editLink = dialog().querySelector('.luc-status a.luc-edit-period');
+            assert(editLink && editLink.textContent === 'Ret Periode (Rediger forløb)' && editLink.getAttribute('href') === '#',
+                'no link to Rediger forløb beside the cause');
+            assert(row('ACC901').querySelector('.luc-kind[data-kind="homework"]').textContent.includes('Calculators · Scheme.pdf'), 'homework not grouped on lesson 1');
+            assert(row('ACC904').querySelector('.luc-kind[data-kind="other"]'), 'other content not shown on lesson 2');
+            assert(dialog().querySelectorAll('.luc-week').length >= 1, 'no week headings');
+
+            /* Skip a day: everything after it moves one lesson later. Undo puts it back. */
+            buttonIn(row('ACC901'), 'Spring dagen over').click();
+            assert(plan() === '901=skipped 902=has-content 904=1 905=2', 'after skipping 901: ' + plan());
+            buttonIn(row('ACC901'), 'Fortryd').click();
+            assert(plan() === '901=1 902=has-content 904=2 905=3', 'after undo: ' + plan());
+
+            /* Use a lesson that already has material. */
+            buttonIn(row('ACC902'), 'Brug alligevel').click();
+            assert(plan() === '901=1 902=2 904=3 905=4', 'after using 902 anyway: ' + plan());
+
+            /* Leave a lesson out, then put it back from the list. */
+            buttonIn(row('ACC904'), 'Udelad').click();
+            assert(plan() === '901=1 902=2 904=4 905=free', 'after leaving out lesson 3: ' + plan());
+            buttonIn(dialog().querySelector('details'), 'Tag med igen').click();
+            assert(plan() === '901=1 902=2 904=3 905=4', 'after putting lesson 3 back: ' + plan());
+
+            /* Drag lesson 3's grip onto 901: it starts there, the rest follow. */
+            const transfer = new DataTransfer();
+            row('ACC904').querySelector('.luc-grip').dispatchEvent(new DragEvent('dragstart', { dataTransfer: transfer, bubbles: true }));
+            row('ACC901').dispatchEvent(new DragEvent('dragover', { dataTransfer: transfer, bubbles: true, cancelable: true }));
+            row('ACC901').dispatchEvent(new DragEvent('drop', { dataTransfer: transfer, bubbles: true, cancelable: true }));
+            assert(plan() === '901=3 902=1 904=2 905=4', 'after dragging lesson 3 onto 901: ' + plan());
+
+            /* Kept for the next visit, by this unit and its source. */
+            const saved = JSON.parse(localStorage.getItem('lectioUnitCopier.plans.v1') || '{}')['900'];
+            assert(saved && saved.source === '500' && saved.order.join(',') === '2,0,1,3', 'plan not kept: ' + JSON.stringify(saved));
+
+            buttonIn(dialog(), '✕ Luk').click();
+            assert(!dialog(), 'Close did not close the planner');
+            buttonIn(banner(), 'Placér sidste års lektioner').click();
+            await waitFor(() => dialog() && dialog().open, 'the planner to reopen');
+            assert(plan() === '901=3 902=1 904=2 905=4', 'the plan was not restored on reopening: ' + plan());
+
+            /* The Manager switching to English rewords it in place. */
+            document.documentElement.dataset.lectioLanguage = 'en';
+            window.dispatchEvent(new CustomEvent('lectio-manager:language', { detail: { language: 'en' } }));
+            assert(dialog().querySelector('h2').textContent === 'Place last year\'s lessons', 'title after English: ' + dialog().querySelector('h2').textContent);
+            assert(/Copied from Unit 1: Algebra/.test(banner().textContent), 'banner after English: ' + banner().textContent);
+
+            /* It only read. */
+            assert(requests.every((r) => r.method === 'GET'), 'a request that was not a GET');
+            const count = (end) => requests.filter((r) => r.path.endsWith(end)).length;
+            assert(count('/documentchoosercontent.aspx') === 1 && count('/forloeb_vis.aspx') === 1 && count('/SkemaNy.aspx') >= 1 &&
+                requests.length === 2 + count('/SkemaNy.aspx'),
+                'unexpected requests: ' + requests.map((r) => r.path).join(', '));
+
+            /* A native modal, so nothing floating on the page can cover it. */
+            assert(dialog().tagName === 'DIALOG' && dialog().matches(':modal'), 'the planner is not a modal dialog');
+        })()
+            .catch((error) => failures.push('threw: ' + (error && error.stack || error)))
+            .finally(report);
+    </script>
+</body>
+</html>

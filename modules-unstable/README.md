@@ -33,28 +33,29 @@ The extra patch bump at promotion is not ceremony. A tester's installed copy poi
 
 To try it: as a teacher, change a lesson's room and press Refresh; nothing should appear. A colleague's change to one of your lessons still should.
 
-### Unit Copier 0.1.0 (new, Experimental only)
+### Unit Copier 0.2.0 (new, Experimental only)
 
-The first part of issue #74: **the planner. It only reads.** On a unit's page (`studieplan/forloeb_vis.aspx`), a **Copy into a class** button appears next to Lectio's *Kopiér forløb*, and only on units the person can edit. It opens a side-by-side plan:
+Issue #74, rebuilt after the owner's first test of 0.1.0. That version put a planner on the old unit's page, where he never goes, and failed on his real timetable. **It still only reads**: every request is a GET of a page the person can already open.
 
-- **Left:** the unit's lessons and their items, read off the page itself (`ACC` lessons; `ACH` items under *Lektier* or *Øvrigt indhold*; the `ACP` presentation). A lesson cancelled last year with nothing on it takes no place in the sequence.
-- **Right:** the chosen class's lessons from the chosen date, read week by week from the person's own `SkemaNy.aspx`. It stops once it has enough lessons, or after 30 weeks.
-  - The class menu's first guess is the same course in the same year-group as last year's class. The classes the unit already belongs to are listed last.
-  - Cancelled lessons are ignored. A lesson whose tooltip already has a *Lektier:* or *Øvrigt indhold:* line is left alone.
-- **Default plan:** last year's lessons in order onto the class's next free lessons. Holiday weeks fall out naturally.
-- **Adjusting:**
-  - *Leave empty* on a lesson moves everything after it along by one.
-  - *Leave out* drops one of last year's lessons.
-  - Dragging one of last year's lessons onto a lesson starts the sequence there.
-  - The up and down arrows reorder last year's lessons.
-- The draft is kept in `sessionStorage` for the tab. Nothing goes into `localStorage`.
-- **Copy plan as text** puts the plan on the clipboard.
+**The flow follows Lectio's own two steps:**
 
-It sends only GETs of the person's own timetable. Copying the plan into Lectio comes later, under the ADR-0009 amendment of 2026-10-07 and its safety bar, once the write path has been checked on a throwaway lesson (issue #74, assessment section 5).
+1. **Lectio's Kopiér form** (`studieplan/forloeb_kopier.aspx`). A "What Kopiér does" box sits under the fields.
+   - **Three steps, explained:** the new unit's lessons are the class's lessons inside the *Periode*, and they start empty; the material goes to *Forløbsmaterialet*; then use the banner on the new unit.
+   - **The class check.** It reads the class Lectio actually stored (hidden `…EntityChooserCtrl$inpid`, looked up on `contextcard.aspx`) and warns if that differs from the box. The type-ahead was seen storing a different class twice.
+   - **A suggested Periode.** It reads the person's own timetable for that class. Lessons the published timetable shows count exactly, holidays included. Only the remainder past the last published lesson is estimated, from the class's typical lessons per week. "Use these dates" fills the two fields; the person still presses Kopiér.
+2. **The copied unit** (`studieplan/forloeb_vis.aspx`). Lectio's material picker lists the original under *Relaterede forløb* (the tree's first node, `PH<phase id>`), so the source is found with one GET and nothing stored. A banner reads "Copied from … (N lessons). Lessons with material: X of Y. [Place last year's lessons]".
+   - **No backwards banner.** It does not appear if the related unit is newer than this one, since Lectio may relate the units both ways.
+   - **The planner.** It is a native modal `<dialog>`, in the browser's top layer, so nothing floating on the page covers it. It shows one timeline by week, "Your lesson | Gets last year's lesson".
+   - **Row actions:** *Skip this day*, *Leave out*, *Use anyway* (on a lesson that already has material) and *Undo*. A drag grip starts a lesson somewhere else.
+   - **The rest:** a "Waiting for lessons (n)" section says why (the unit only has the lessons in its Periode that are timetabled) and what to do. "Copy plan as text" sits in the footer.
+   - **The plan is kept** in `localStorage` (`lectioUnitCopier.plans.v1`, declared to the Manager, pruned after 400 days), so a teacher can come back when more of the timetable is published.
 
-`tests/unit-copier.browser.test.js` covers it: the default class, the in-order pairing across a holiday, leave empty, leave out, drag, both languages, only timetable GETs, and no button on a unit you cannot edit. The parser was also run once against a real saved unit page, outside the repo: it read 21 lessons and 18 items (16 homework, 1 other content, 1 presentation), matching the page's 17 `ACH` items plus 1 `ACP`.
+**Tested live, read-only, on the owner's account (2026-10-07):**
+- The banner found *Unit 1* (21 lessons) from his copied test unit.
+- On the Kopiér form for *Sequences and Series* (18 lessons) for 1i Math AA SL/2, it confirmed the class and read "next 8 lessons, up to Mon 2 Nov; about 3 a week; the other 10 take about 4 more weeks; to about Mon 30 Nov". The timetable is published only to week 45.
+- `tests/unit-copier.browser.test.js` covers: the copied unit; a unit the person cannot edit; a related unit newer than this one; the Kopiér form with a class mismatch and an exact Periode; and an estimated Periode.
 
-To try it: open last year's version of a unit you teach again this year, press **Copy into a class**, check the class it guessed, press **Find lessons**, and adjust.
+**To try it:** in Lectio's unit list, choose your class at the top, press **Kopiér** on last year's unit, and follow the box. After Kopiér, open the new unit and press **Place last year's lessons**.
 
 ## When nothing is under test
 
