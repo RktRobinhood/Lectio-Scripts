@@ -49,5 +49,5 @@ If your change turns out to be generally useful, open an Issue describing what i
 
 Two kinds of request are declined on principle, whether they come as an Issue or as code:
 
-- **Anything that acts for you without you.** A module may surface information, pre-fill a form, or link you to the right page. It must never submit, cancel, register or send on your behalf without your click, in that moment ([ADR-0009](./docs/adr/0009-human-in-the-loop-no-automated-consequential-actions.md)).
+- **Anything that acts for you without you.** A module may surface information, pre-fill a form, or link you to the right page. It must never submit, cancel, register or send on your behalf without your click, in that moment ([ADR-0009](./docs/adr/0009-human-in-the-loop-no-automated-consequential-actions.md)). The one exception is copying a unit: after you review the full plan, one click may add your own teaching material to the lessons you teach. It never edits or deletes anything.
 - **Anything that fabricates a record.** Auto-writing an absence excuse, auto-completing elevfeedback — anything that presents machine output as a person's own honest input ([ADR-0010](./docs/adr/0010-no-academic-dishonesty-features.md)).
