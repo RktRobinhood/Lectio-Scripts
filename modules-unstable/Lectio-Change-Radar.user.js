@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Change Radar
 // @namespace    https://github.com/RktRobinhood/Lectio-Scripts
-// @version      0.9.17
+// @version      0.9.18
 // @description  Watches Lectio for the changes you choose to track - timetable, assignments, absence, documents - and keeps a compact recent-change HUD.
 // @author       RktRobinhood
 // @match        https://www.lectio.dk/lectio/*
@@ -46,7 +46,7 @@
     id: 'change-radar',
     aliases: ['schedule-change-radar', 'lectio-change-radar', 'change-log'],
     name: 'Lectio Change Radar',
-    version: '0.9.17',
+    version: '0.9.18',
     channel: 'unstable'
   });
 
@@ -3776,6 +3776,11 @@
     for (const block of document.querySelectorAll('.s2skemabrik[data-tooltip]')) {
       const url = byActivity.get(getActivityId(block));
       if (!url || block.classList.contains('s2cancelled')) continue;
+      // An activity page draws its own lesson as a line of heading text, not
+      // a box: a corner mark lands on the room number at the end of it, and
+      // the page's toolbar already links to Fravær. Not every heading: the
+      // Forside's day lists are role="heading" too, and their blocks are real.
+      if (block.closest('[id$="_actHeader"], .ls-section-title-heading')) continue;
 
       const { phase, changesAt } = lessonMarkPhase(block, now);
       if (changesAt && (!nextChangeAt || changesAt < nextChangeAt)) nextChangeAt = changesAt;
@@ -3798,7 +3803,7 @@
       const mark = document.createElement('a');
       mark.className = `lcr-todo-mark ${tag ? 'lcr-todo-mark-tag' : 'lcr-todo-mark-icon'}${overdue ? ' lcr-todo-mark-overdue' : ''}`;
       paint(mark);
-      mark.href = url;
+      mark.href = returnToThisPage(url);
       const label = overdue ? text.markOverdueLabel : text.markLabel;
       mark.title = label;
       mark.setAttribute('aria-label', label);
@@ -3817,6 +3822,23 @@
     }
 
     return nextChangeAt;
+  }
+
+  // Lectio sends a saved registration back to the page its link names in
+  // prevurl=. The link a mark carries was read off the absence list, so it
+  // names that list; the mark is clicked from this page, so it names this one
+  // instead - relative to the school, the form Lectio writes itself.
+  function returnToThisPage(url) {
+    const prefix = `/lectio/${schoolId}/`;
+    if (!schoolId || !location.pathname.startsWith(prefix)) return url;
+    try {
+      const target = new URL(url, location.origin);
+      if (target.origin !== location.origin) return url;
+      target.searchParams.set('prevurl', location.pathname.slice(prefix.length) + location.search);
+      return target.href;
+    } catch (_) {
+      return url;
+    }
   }
 
   function registerDockItem(status) {

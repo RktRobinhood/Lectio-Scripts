@@ -18,15 +18,15 @@
         "teacher"
       ],
       "status": "unstable",
-      "version": "0.9.17",
-      "changelog": "Each change in the log has a small x that removes just that one. Teachers: changes you make to a lesson yourself no longer show up on your own radar. An unreadable week now fails the check instead of logging its lessons as removed.",
+      "version": "0.9.18",
+      "changelog": "Teachers: after you register attendance from a lesson's mark, Lectio now takes you back to the page you clicked it on instead of the absence list. The mark no longer sits on top of the lesson title on an activity page.",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-Change-Radar.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
       "i18n": {
         "da": {
           "name": "Lectio Ændringsradar",
           "description": "Lectio-vagt med en kompakt radar-HUD i temaets farver. Du vælger selv, hvad den holder øje med - aflysninger, flytninger, lokaler, lærere og lektier i skemaet, plus valgfri overvågning af opgaver, fravær og dokumenter - plus kommende opgavefrister, der meldes, når de kommer inden for det valgte tidsrum - med hastestatus, styr på usete ændringer og en roterende lokal ændringslog. For lærere en to-do med lektioner, der venter på fravær, afleveringer, der venter på retning, og opgaver med frist i denne uge, med et mærke på hver lektion uden registreret fravær.",
-          "changelog": "Hver ændring i loggen har et lille x, der kun fjerner den ene. Lærere: ændringer, du selv laver på en lektion, vises ikke længere på din egen radar. En ulæselig uge giver nu et mislykket tjek i stedet for at melde lektionerne som fjernet."
+          "changelog": "Lærere: når du har registreret fravær fra en lektions mærke, sender Lectio dig nu tilbage til siden, du klikkede på, i stedet for fraværslisten. Mærket ligger ikke længere oven på lektionens titel på en aktivitetsside."
         }
       }
     },

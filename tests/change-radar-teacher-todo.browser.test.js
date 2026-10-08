@@ -351,6 +351,10 @@ test("on a teacher's timetable the unregistered lesson is marked, and the studen
                     'the mark is not on lesson ABS70000025: ' + (block && block.getAttribute('data-brikid')));
                 check(marks[0] && /\\/lectio\\/223\\/ActivityAbsenceRegistration\\.aspx\\?id=70000025/.test(marks[0].href),
                     'the mark does not open that lesson\\'s registration page: ' + (marks[0] && marks[0].href));
+                // The link was read off the absence list, whose prevurl= sends
+                // a saved registration back there; the mark sends it here.
+                const back = marks[0] && new URL(marks[0].href).searchParams.get('prevurl');
+                check(back === 'SkemaNy.aspx', 'saving the registration does not come back to the timetable: ' + back);
                 check(!document.getElementById('lectio-change-radar-todo'), 'the Forside card was drawn on the timetable');
 
                 const state = readState() || {};
@@ -373,6 +377,45 @@ test("on a teacher's timetable the unregistered lesson is marked, and the studen
                     'a control for both roles carries an audience');
                 const sections = [...new Set(schema.filter((control) => !control.advanced).map((control) => control.section))];
                 check(sections.length === 4, 'expected four unfolded groups, got ' + JSON.stringify(sections));
+            });
+        `
+    });
+
+    assert.equal(result, 'pass', detail || result || 'no result reported');
+});
+
+test("an activity page's title is never marked, and a mark there brings the registration back to the page", async () => {
+    // The real activity page's lesson (ABS70000002) is made the unregistered
+    // one, and a copy of its block is set below the title as a plain lesson
+    // block: that copy being marked is what shows the marks were drawn at all,
+    // so the title going unmarked means something.
+    const { result, detail } = await runAgainstPage({
+        page: 'aktivitetsforside.html',
+        path: '/lectio/223/aktivitet/aktivitetforside2.aspx',
+        rawPages: {
+            ...TEACHER_PAGES,
+            '/lectio/223/subnav/fravaerlaerer.aspx': {
+                file: 'fravaersangivelse.html',
+                edit: (html) => html.replace(/70000025/g, '70000002')
+            }
+        },
+        prelude: preludeFor({
+            pollMinutes: 15, weeksAhead: 0,
+            trackAssignments: false, trackDocuments: false,
+            teacherTodo: true, teacherTodoMarks: true
+        }),
+        postlude: `${REPORTER}
+            const title = document.querySelector('[role="heading"] .s2skemabrik[data-tooltip]');
+            const copy = title.cloneNode(true);
+            copy.id = 'plain-copy';
+            document.body.appendChild(copy);
+
+            settle(() => checked() && copy.querySelector('.lcr-todo-mark'), () => {
+                check(!title.querySelector('.lcr-todo-mark'), 'the activity page title was marked');
+                const mark = copy.querySelector('.lcr-todo-mark');
+                const back = mark && new URL(mark.href).searchParams.get('prevurl');
+                check(back === 'aktivitet/aktivitetforside2.aspx',
+                    'saving the registration does not come back to the activity page: ' + back);
             });
         `
     });
