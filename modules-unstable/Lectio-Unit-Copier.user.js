@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio - Unit Copier
 // @namespace    https://github.com/RktRobinhood/Lectio-Scripts
-// @version      0.2.0
+// @version      0.2.1
 // @description  Reuse last year's unit in a new class: explains Lectio's Kopiér, checks the class Lectio really chose, suggests the Periode, and on the copied unit lines last year's lessons up with the new ones. Plan only - nothing is copied into Lectio yet.
 // @author       RktRobinhood
 // @match        https://www.lectio.dk/lectio/*/studieplan/forloeb_vis.aspx*
@@ -68,7 +68,7 @@
     // `node scripts/check-versions.mjs` enforces it.
     const MODULE_ID = 'unit-copier';
     const MODULE_NAME = 'Lectio - Unit Copier';
-    const MODULE_VERSION = '0.2.0';
+    const MODULE_VERSION = '0.2.1';
 
     const STYLE_ID = 'lectio-unit-copier-styles';
     const BANNER_ID = 'lectio-unit-copier-banner';
@@ -103,6 +103,10 @@
     let plan = null;            // see newPlan()
     let lastFocus = null;
     let classTimer = 0;
+    // Bumped by every start and by teardown, so a start that was still
+    // waiting on its fetch when a newer one began - a language switch does
+    // that - knows it is stale and does not arm a second, unclearable timer.
+    let copyFormRun = 0;
     let waitingCause = null;    // why lessons are waiting: see checkWaitingCause()
     let checkedClassId = null;   // null: nothing checked yet, not even the empty box
 
@@ -1570,6 +1574,7 @@
     }
 
     async function startCopyForm() {
+        const run = ++copyFormRun;
         const fields = classFields();
 
         if (!fields.box || !fields.stored || !fields.start || !fields.end) {
@@ -1605,6 +1610,9 @@
             }
         }
 
+        if (run !== copyFormRun || lifecycle.signal.aborted) return;
+
+        clearInterval(classTimer);
         checkClass();
         classTimer = setInterval(checkClass, CLASS_CHECK_MS);
     }
@@ -1841,6 +1849,7 @@
     function teardown() {
         requests.abort();
         lifecycle.abort();
+        copyFormRun += 1;
         clearInterval(classTimer);
         classTimer = 0;
         document.getElementById(DIALOG_ID)?.remove();
