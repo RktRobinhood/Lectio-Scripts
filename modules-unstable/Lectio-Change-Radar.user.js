@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Change Radar
 // @namespace    https://github.com/RktRobinhood/Lectio-Scripts
-// @version      0.9.18
+// @version      0.9.19
 // @description  Watches Lectio for the changes you choose to track - timetable, assignments, absence, documents - and keeps a compact recent-change HUD.
 // @author       RktRobinhood
 // @match        https://www.lectio.dk/lectio/*
@@ -46,7 +46,7 @@
     id: 'change-radar',
     aliases: ['schedule-change-radar', 'lectio-change-radar', 'change-log'],
     name: 'Lectio Change Radar',
-    version: '0.9.18',
+    version: '0.9.19',
     channel: 'unstable'
   });
 
@@ -2762,7 +2762,26 @@
         color: var(--lcr-text) !important;
         box-shadow: 0 10px 32px rgba(0, 0, 0, .22);
         overflow: hidden;
+        /*
+         * One scroller, and it is the list. The head and footer keep their
+         * height and the list gives way, so Mark seen and Clear stay on screen
+         * however long the log gets. The cap is what is left of the viewport
+         * below the floating button (top 92px, button 42px, gap 7px, a margin).
+         */
+        display: flex;
+        flex-direction: column;
+        max-height: calc(100vh - 153px);
       }
+      /*
+       * In the dock the Manager's flyout scrolls on its own at
+       * min(76vh, 560px), less its 14px padding and 1px border each side, and
+       * this panel sits below its 26px close button rather than beside it.
+       * Fit inside what is left, or the flyout scrolls too and carries the
+       * footer away.
+       */
+      #${UI.panel}.is-dock-panel { max-height: calc(min(76vh, 560px) - 56px); }
+      #${UI.panel} > .lcr-panel-head, #${UI.panel} > .lcr-footer { flex: none; }
+      #${UI.panel} > #${UI.list}, #${UI.panel} > .lcr-settings { flex: 0 1 auto; min-height: 0; }
 
       .lcr-panel-head {
         display: flex;

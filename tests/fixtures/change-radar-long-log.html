@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Lectio Change Radar long log fixture</title>
+    <script>
+        /*
+         * A log long enough to overflow, in the dock and floating. There must
+         * be one scroller - the list - and the footer with Mark seen and Clear
+         * must stay on screen. In the dock the list's own cap plus the head and
+         * footer were taller than the Manager's flyout, so the flyout scrolled
+         * as well and the footer sat below its fold.
+         *
+         * `mode=dock` or `mode=floating`.
+         */
+        const params = new URLSearchParams(location.search);
+        const mode = params.get('mode') === 'floating' ? 'floating' : 'dock';
+
+        const catalogue = {
+            schemaVersion: 1,
+            generatedAt: '2026-09-20T00:00:00.000Z',
+            modules: [{
+                id: 'change-radar',
+                name: 'Lectio Change Radar',
+                version: '0.4.0',
+                description: 'Test radar',
+                status: 'unstable',
+                installUrl: 'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-Change-Radar.user.js'
+            }]
+        };
+        const storage = new Map([
+            ['lectioManager.catalogue.v1', JSON.stringify(catalogue)],
+            ['lectioManager.lastRefresh.v1', Date.now()],
+            ['lectioManager.updateTipDismissed.v1', true]
+        ]);
+
+        window.GM_getValue = (key, fallback) => storage.has(key) ? storage.get(key) : fallback;
+        window.GM_setValue = (key, value) => storage.set(key, value);
+        window.GM_xmlhttpRequest = () => {};
+        window.fetch = () => new Promise(() => {});
+
+        const base = 'lectioChangeRadar.v1.223.current-user';
+        localStorage.setItem(`${base}.settings`, JSON.stringify({
+            schema: 3, displayMode: mode, pollMinutes: 10
+        }));
+        const now = Date.now();
+        localStorage.setItem(`${base}.state`, JSON.stringify({
+            version: 1,
+            snapshot: { events: {} },
+            history: Array.from({ length: 14 }, (_, index) => ({
+                eventId: `event-${index}`,
+                kind: 'changed',
+                title: `Lesson ${index + 1}`,
+                detail: 'Room changed from 12 to 14, and the teacher left a note on the lesson',
+                noticedAt: now - index * 60000
+            }))
+        }));
+        localStorage.removeItem(`${base}.lastViewed`);
+    </script>
+    <script src="/manager/Lectio-Manager.user.js"></script>
+    <script src="/modules-unstable/Lectio-Change-Radar.user.js"></script>
+</head>
+<body>
+    <main id="masterContent">Lectio fixture</main>
+    <script>
+        const assert = (condition, message) => {
+            if (!condition) throw new Error(message);
+        };
+        const scrolls = (element) => element.scrollHeight > element.clientHeight + 1;
+
+        window.addEventListener('load', () => {
+            const result = document.createElement('pre');
+            result.id = 'test-result';
+
+            try {
+                let viewport;
+                if (mode === 'dock') {
+                    const tile = document.querySelector('[data-dock-key="change-radar:radar"]');
+                    assert(tile, 'The radar did not land in the dock');
+                    tile.click();
+                    viewport = document.querySelector('.lectio-manager-dock-flyout');
+                    assert(viewport && !viewport.hidden, 'The dock flyout did not open');
+                } else {
+                    const button = document.getElementById('lectio-change-radar-button');
+                    assert(button, 'The floating radar was not drawn');
+                    button.click();
+                    viewport = null;
+                }
+
+                const panel = document.getElementById('lectio-change-radar-panel');
+                const list = document.getElementById('lectio-change-radar-list');
+                const footer = panel?.querySelector('.lcr-footer');
+                assert(panel && list && footer, 'The radar panel, list or footer is missing');
+                assert(list.querySelectorAll('.lcr-item').length >= 10, 'Test setup: the seeded log did not render');
+
+                assert(scrolls(list), 'The list did not scroll, so the log was not long enough to test anything');
+                if (viewport) {
+                    assert(!scrolls(viewport),
+                        `The flyout scrolls as well as the list (${viewport.scrollHeight} > ${viewport.clientHeight})`);
+                    const box = viewport.getBoundingClientRect();
+                    const foot = footer.getBoundingClientRect();
+                    assert(foot.bottom <= box.bottom + 0.5,
+                        `The footer sits below the flyout's edge (${foot.bottom} > ${box.bottom})`);
+                }
+                const foot = footer.getBoundingClientRect();
+                assert(foot.bottom <= window.innerHeight,
+                    `The footer is below the viewport (${foot.bottom} > ${window.innerHeight})`);
+                assert(!scrolls(panel), 'The panel itself scrolls');
+
+                result.dataset.testResult = 'pass';
+                result.textContent = 'pass';
+            } catch (error) {
+                result.dataset.testResult = 'fail';
+                result.textContent = error.message;
+            }
+            document.body.appendChild(result);
+        });
+    </script>
+</body>
+</html>

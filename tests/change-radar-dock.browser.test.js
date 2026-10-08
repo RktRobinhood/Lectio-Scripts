@@ -103,3 +103,18 @@ test('The floating radar\'s Settings button opens its settings when the Manager 
 test('The floating radar\'s Settings button opens its settings without the Manager', async () => {
     await runFixture('change-radar-floating-settings.html', { query: '?manager=0', ...pastGraceWindow });
 });
+
+/*
+ * A long log keeps one scroller - the list - and the footer on screen. In the
+ * dock the flyout scrolled as well, and Mark seen and Clear fell below its
+ * fold. A fixed window size keeps the geometry the same on every machine.
+ */
+const shortWindow = { chromeArgs: ['--window-size=1280,640'] };
+
+test('A long log scrolls only its list in the dock, with the footer in view', async () => {
+    await runFixture('change-radar-long-log.html', { query: '?mode=dock', ...shortWindow });
+});
+
+test('A long log scrolls only its list when floating, with the footer in view', async () => {
+    await runFixture('change-radar-long-log.html', { query: '?mode=floating', ...shortWindow });
+});
