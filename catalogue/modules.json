@@ -2,13 +2,13 @@
   "schemaVersion": 1,
   "generatedAt": "2026-09-24T12:00:00Z",
   "manager": {
-    "version": "1.33.0",
-    "changelog": "The Manager now recognises whether you are signed in as a teacher or a student. On Stable it offers only the modules and settings meant for your kind of account; Experimental shows everything, for testing.",
+    "version": "1.34.0",
+    "changelog": "If a Lectio page grows unusually large, keeps redrawing itself, or (in Chrome and Edge) uses a lot of memory, the Manager now records it in the Problem log, with the numbers, so it can be reported.",
     "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/manager/Lectio-Manager.user.js",
     "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
     "i18n": {
       "da": {
-        "changelog": "Manageren kan nu se, om du er logget ind som lærer eller elev. På Stabil tilbyder den kun de moduler og indstillinger, der er beregnet til din slags konto; Eksperimentel viser alt, til test."
+        "changelog": "Hvis en Lectio-side bliver usædvanligt stor, bliver ved med at tegne sig selv om eller (i Chrome og Edge) bruger meget hukommelse, skriver Manageren det nu i problemloggen med tallene, så det kan rapporteres."
       }
     }
   },

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio Manager
 // @namespace    https://www.lectio.dk/
-// @version      1.33.0
+// @version      1.34.0
 // @description  Discover, install, and manage independent Lectio Tampermonkey modules, including their settings and shared dock controls.
 // @match        https://www.lectio.dk/lectio/*
 // @noframes
@@ -446,7 +446,7 @@
     // Kept in step with the @version header by scripts/check-versions.mjs. The
     // header is metadata Tampermonkey reads; this is the only copy the running
     // script can see, and it is what the self-update notice compares.
-    const MANAGER_VERSION = '1.33.0';
+    const MANAGER_VERSION = '1.34.0';
 
     const STABLE_CATALOGUE_URL =
         'https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/catalogue/modules.json';
@@ -583,6 +583,7 @@
     const LOG_MESSAGE_LIMIT = 140;
     const LOG_CODE_LIMIT = 48;
     const LOG_REPEAT_LIMIT = 999;
+    const LOG_REPEAT_SAVE_DELAY_MS = 2000;
 
     /*
      * The two fills are deliberately low. The dock is glass: most of what makes
@@ -708,6 +709,54 @@
     const SLOT_QUEUE_LIMIT = 24;
     const SLOT_ID_LIMIT = 64;
 
+    /*
+     * PAGE HEALTH
+     * -----------
+     * A browser that has eaten its memory gives no hint of which page did it,
+     * and a userscript cannot ask: no browser tells a page how much memory one
+     * script holds, Firefox does not tell it how much the page holds at all,
+     * and Chromium only offers a whole-page heap figure. So this is measurement
+     * of the page, never attribution to a module - the same seam as the storage
+     * readout. What it can see is enough to tell "a Lectio page went wrong
+     * while this was installed" from "it was somewhere else in the browser":
+     * the JS heap where the browser exposes one, how many elements the page has
+     * grown to, how many <style> tags have piled up, and how fast the DOM is
+     * changing while nobody is touching it - which is what a redraw loop looks
+     * like (Subject Colours 0.11.4).
+     *
+     * Rare by design. One sample a few minutes after load and then every
+     * fifteen, each holding a MutationObserver for ten seconds and then letting
+     * go of it; one timer at a time, never re-armed twice. Nothing is logged
+     * unless a threshold is crossed, a page logs a metric again only when it has
+     * got half as bad again, and across every tab a metric logs at most once per
+     * HEALTH_RELOG_MS - so a page that stays bad all day costs a handful of rows,
+     * and the rows it costs are the trajectory. Every value stored is a number,
+     * so nothing from the page can reach the log through here.
+     */
+    const HEALTH_FIRST_SAMPLE_MS = 3 * 60 * 1000;
+    const HEALTH_SAMPLE_INTERVAL_MS = 15 * 60 * 1000;
+    const HEALTH_SAMPLE_JITTER_MS = 60 * 1000;
+    const HEALTH_CHURN_WINDOW_MS = 10 * 1000;
+    const HEALTH_HEAP_LIMIT_MB = 500;
+    const HEALTH_ELEMENT_LIMIT = 60000;
+    // Growth since this page's own first sample: a page that triples and has
+    // gained this many elements is growing, whatever size it started at.
+    const HEALTH_GROWTH_FACTOR = 3;
+    const HEALTH_GROWTH_MIN_ELEMENTS = 15000;
+    const HEALTH_GROWTH_MIN_HEAP_MB = 200;
+    const HEALTH_STYLE_LIMIT = 300;
+    // Changes per second, averaged over the window. An idle Lectio page makes
+    // next to none; this is far above anything a person typing produces.
+    const HEALTH_CHURN_LIMIT = 100;
+    const HEALTH_ESCALATION = 1.5;
+    const HEALTH_RELOG_MS = 30 * 60 * 1000;
+    const HEALTH_METRIC_KEYS = ['heapMb', 'elements', 'styles', 'churn', 'openMin'];
+    const STORAGE_HEALTH_LOGGED = 'lectioManager.healthLogged.v1';
+
+    // See rememberInstalled(): how stale an installed record's lastSeenAt may
+    // get before a re-registration that changes nothing else rewrites it.
+    const INSTALLED_RESTAMP_MS = 60 * 60 * 1000;
+
     const ISSUES_URL = 'https://github.com/RktRobinhood/Lectio-Scripts/issues/new/choose';
 
     const AUDIENCE_VIEW_PREFIX = 'audience:';
@@ -747,6 +796,8 @@
     let problemLog = null;
     let logSeenAt = null;
     let logCopiedTimer = null;
+    // A repeat only bumps a counter, so its write can wait - see recordLogEntry().
+    let logSaveTimer = 0;
     let settingsFileCopiedTimer = null;
     let updatedLabelTimer = null;
     let currentView = 'installed';
@@ -833,6 +884,18 @@
      */
     let discoveryPass = null;
 
+    /*
+     * Page health (see PAGE HEALTH above). One pending timer and at most one
+     * short-lived observer, each cleared on the only path that replaces it.
+     * The baseline is this page's first sample, and loggedHealth is the value
+     * each metric was last logged at on this page, so a flat bad page does not
+     * log the same thing every sample.
+     */
+    let healthTimer = 0;
+    let healthObserver = null;
+    let healthBaseline = null;
+    const loggedHealth = new Map();
+
     // ============================================================
     // BOOT
     // ============================================================
@@ -917,6 +980,8 @@
         if (stableStale || unstableStale) {
             refreshCatalogue({ force: false });
         }
+
+        scheduleHealthSample(HEALTH_FIRST_SAMPLE_MS);
     }
 
     // ============================================================
@@ -1693,6 +1758,22 @@
     }
 
     function rememberInstalled(registration) {
+        /*
+         * A module re-registers on every setting change, every language
+         * change, and - for some - on every cross-tab storage event, and each
+         * write here is a GM_setValue that Tampermonkey copies into every open
+         * Lectio tab. lastSeenAt is only ever read in days, so a write that
+         * changes nothing but a fresh stamp is skipped for an hour.
+         */
+        const known = installed.get(registration.id);
+        if (known &&
+            known.name === registration.name &&
+            known.version === registration.version &&
+            Date.now() - known.lastSeenAt >= 0 &&
+            Date.now() - known.lastSeenAt < INSTALLED_RESTAMP_MS) {
+            return;
+        }
+
         installed.set(registration.id, {
             id: registration.id,
             name: registration.name,
@@ -2189,7 +2270,7 @@
             return null;
         }
 
-        return {
+        const entry = {
             at: Date.now(),
             kind,
             moduleId: safeIdentifier(raw.moduleId, 40),
@@ -2199,10 +2280,37 @@
             where: pageType(),
             count: 1
         };
+
+        // Only the Manager's own page-health sampler sets these - a module's
+        // report is picked apart field by field and has no way to reach here.
+        const metrics = normalizeHealthMetrics(raw.metrics);
+        if (metrics) entry.metrics = metrics;
+
+        return entry;
+    }
+
+    // Named keys, whole non-negative numbers, nothing else. A number cannot
+    // carry a name, which is why these may skip redaction.
+    function normalizeHealthMetrics(raw) {
+        if (!raw || typeof raw !== 'object') return null;
+
+        const metrics = {};
+
+        for (const key of HEALTH_METRIC_KEYS) {
+            const number = Number(raw[key]);
+            if (raw[key] !== null && raw[key] !== undefined && Number.isFinite(number) && number >= 0) {
+                metrics[key] = Math.min(Math.round(number), 99999999);
+            }
+        }
+
+        return Object.keys(metrics).length ? metrics : null;
     }
 
     function logSignature(entry) {
-        return [entry.kind, entry.moduleId, entry.code, entry.found, entry.message, entry.where].join('|');
+        // Metrics too: two page-health readings of the same code are two
+        // points on a trajectory, and folding them would keep only the first.
+        return [entry.kind, entry.moduleId, entry.code, entry.found, entry.message, entry.where,
+            entry.metrics ? JSON.stringify(entry.metrics) : ''].join('|');
     }
 
     /*
@@ -2223,12 +2331,25 @@
                 // the next mutation. One row, one counter.
                 newest.count = Math.min(newest.count + 1, LOG_REPEAT_LIMIT);
                 newest.at = entry.at;
+
+                // Something throwing in a loop is exactly when a GM write per
+                // throw hurts: each one is the whole log, copied by
+                // Tampermonkey into every open Lectio tab. A bump waits and
+                // is written with whatever else arrives in the meantime.
+                if (!logSaveTimer) {
+                    logSaveTimer = window.setTimeout(() => {
+                        logSaveTimer = 0;
+                        saveProblemLog();
+                    }, LOG_REPEAT_SAVE_DELAY_MS);
+                }
             } else {
                 log.push(entry);
                 while (log.length > LOG_LIMIT) log.shift();
+                window.clearTimeout(logSaveTimer);
+                logSaveTimer = 0;
+                saveProblemLog();
             }
 
-            saveProblemLog();
             updateLauncherIndicators();
             renderProblemLog();
         } catch (_) {
@@ -2331,6 +2452,172 @@
         saveProblemLog();
         markLogSeen();
         renderProblemLog();
+    }
+
+    // ============================================================
+    // PAGE HEALTH
+    // ============================================================
+
+    function scheduleHealthSample(delay) {
+        window.clearTimeout(healthTimer);
+        healthTimer = window.setTimeout(sampleHealth, delay + Math.random() * HEALTH_SAMPLE_JITTER_MS);
+    }
+
+    /*
+     * Watch the whole document for one short window, then let go. The observer
+     * only counts - it never reads a node - and it is disconnected on the one
+     * path that ends the window, which is also the only path that arms the
+     * next sample. A throw anywhere still arms it, so one bad sample cannot
+     * stop the next.
+     */
+    function sampleHealth() {
+        healthTimer = 0;
+
+        let changes = 0;
+        const started = performance.now();
+
+        try {
+            healthObserver?.disconnect();
+            healthObserver = new MutationObserver((records) => {
+                changes += records.length;
+            });
+            healthObserver.observe(document.documentElement, {
+                childList: true,
+                subtree: true,
+                attributes: true,
+                characterData: true
+            });
+        } catch (_) {
+            healthObserver = null;
+        }
+
+        healthTimer = window.setTimeout(() => {
+            healthTimer = 0;
+
+            try {
+                const observed = Boolean(healthObserver);
+                healthObserver?.disconnect();
+                healthObserver = null;
+
+                // Real elapsed time, not the window asked for: a background
+                // tab's timer can fire a minute late, and a count spread over
+                // a minute is not the same rate as one spread over ten seconds.
+                const seconds = Math.max((performance.now() - started) / 1000, 1);
+                evaluateHealth(measurePageHealth(observed ? changes / seconds : null));
+            } catch (_) {
+                // Measurement is never a reason to break the Manager.
+            }
+
+            scheduleHealthSample(HEALTH_SAMPLE_INTERVAL_MS);
+        }, HEALTH_CHURN_WINDOW_MS);
+    }
+
+    function measurePageHealth(churn) {
+        // Chromium only, whole page, and coarse - but it is the one memory
+        // figure any browser will give a page. Firefox gives none.
+        const heap = Number(performance?.memory?.usedJSHeapSize);
+
+        return {
+            heapMb: Number.isFinite(heap) && heap > 0 ? Math.round(heap / (1024 * 1024)) : null,
+            elements: document.getElementsByTagName('*').length,
+            styles: document.getElementsByTagName('style').length,
+            churn: churn === null || churn === undefined ? null : Math.round(churn),
+            openMin: Math.round(performance.now() / 60000)
+        };
+    }
+
+    function evaluateHealth(sample) {
+        if (!healthBaseline) healthBaseline = sample;
+
+        const base = healthBaseline;
+        const findings = [];
+
+        const grownTo = (now, before, minimum) =>
+            now !== null && before !== null && before !== undefined &&
+            now - before >= minimum && now >= before * HEALTH_GROWTH_FACTOR;
+
+        if (sample.heapMb !== null &&
+            (sample.heapMb >= HEALTH_HEAP_LIMIT_MB || grownTo(sample.heapMb, base.heapMb, HEALTH_GROWTH_MIN_HEAP_MB))) {
+            findings.push(['page-memory-high', sample.heapMb]);
+        }
+
+        if (sample.elements >= HEALTH_ELEMENT_LIMIT ||
+            grownTo(sample.elements, base.elements, HEALTH_GROWTH_MIN_ELEMENTS)) {
+            findings.push(['page-elements-high', sample.elements]);
+        }
+
+        if (sample.styles >= HEALTH_STYLE_LIMIT) {
+            findings.push(['page-styles-high', sample.styles]);
+        }
+
+        if (sample.churn !== null && sample.churn >= HEALTH_CHURN_LIMIT) {
+            findings.push(['page-churn-high', sample.churn]);
+        }
+
+        for (const [code, value] of findings) {
+            const previous = loggedHealth.get(code);
+            if (previous !== undefined && value < previous * HEALTH_ESCALATION) continue;
+            if (!claimHealthLogTurn(code)) continue;
+
+            loggedHealth.set(code, value);
+            recordLogEntry({
+                moduleId: 'manager',
+                kind: 'notice',
+                code,
+                metrics: sample
+            });
+        }
+    }
+
+    /*
+     * Across tabs: ten Lectio tabs left open on one bad page type would
+     * otherwise each log the same thing and push every other entry out of a
+     * twenty-five-row log. GM storage is shared by every tab of this script.
+     */
+    function claimHealthLogTurn(code) {
+        try {
+            let stamps = {};
+
+            try {
+                const parsed = JSON.parse(GM_getValue(STORAGE_HEALTH_LOGGED, '') || '{}');
+                if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) stamps = parsed;
+            } catch (_) {
+                stamps = {};
+            }
+
+            const now = Date.now();
+            const last = Number(stamps[code]) || 0;
+            if (last && now - last < HEALTH_RELOG_MS && now >= last) return false;
+
+            const next = {};
+            for (const key of Object.keys(stamps)) {
+                if (/^page-[a-z-]{1,32}$/.test(key) && Number(stamps[key])) next[key] = Number(stamps[key]);
+            }
+            next[code] = now;
+            GM_setValue(STORAGE_HEALTH_LOGGED, JSON.stringify(next));
+            return true;
+        } catch (_) {
+            return true;
+        }
+    }
+
+    // English in both the panel and the report, like the codes beside it: it
+    // is read by whoever is fixing the problem, and the report is English.
+    function describeHealthMetrics(metrics) {
+        if (!metrics) return '';
+
+        const count = (value) => Number(value).toLocaleString('en-US');
+        const parts = [];
+
+        parts.push(metrics.heapMb !== undefined
+            ? `JS heap ${count(metrics.heapMb)} MB`
+            : 'JS heap not reported by this browser');
+        if (metrics.elements !== undefined) parts.push(`${count(metrics.elements)} elements`);
+        if (metrics.styles !== undefined) parts.push(`${count(metrics.styles)} style tags`);
+        if (metrics.churn !== undefined) parts.push(`${count(metrics.churn)} DOM changes/s`);
+        if (metrics.openMin !== undefined) parts.push(`page open ${count(metrics.openMin)} min`);
+
+        return parts.join(', ');
     }
 
     // ============================================================
@@ -2459,7 +2746,20 @@
             return t('logDrift', entry.code || '?', entry.found ?? 0);
         }
 
-        return [entry.code, entry.message].filter(Boolean).join(': ');
+        return logEntryDetail(entry);
+    }
+
+    /*
+     * Code, then whatever else the entry carries. A count on a notice used to
+     * be stored and never shown - slot-queue-full and duplicate-copies both
+     * send one - so it is shown now, beside the code it counts.
+     */
+    function logEntryDetail(entry) {
+        const code = entry.code && entry.found !== null && entry.found !== undefined && !entry.metrics
+            ? `${entry.code} (${entry.found})`
+            : entry.code;
+
+        return [code, entry.message, describeHealthMetrics(entry.metrics)].filter(Boolean).join(': ');
     }
 
     /*
@@ -2623,8 +2923,17 @@
             lines.push(`  ${formatTime(entry.at)} [${entry.kind}] ${entry.moduleId || 'page'} @ ${entry.where}: ${
                 entry.kind === 'drift'
                     ? `looked for ${entry.code || '?'}, found ${entry.found ?? 0}`
-                    : [entry.code, entry.message].filter(Boolean).join(': ')
+                    : logEntryDetail(entry)
             }${repeat}`);
+        }
+
+        // Where this page stands right now, whether or not anything crossed a
+        // line - so a report written about a slow browser says whether the
+        // Lectio page in front of it was the heavy one.
+        try {
+            lines.push('', `This page now: ${describeHealthMetrics(normalizeHealthMetrics(measurePageHealth(null)))}`);
+        } catch (_) {
+            // The report is still worth copying without it.
         }
 
         lines.push(

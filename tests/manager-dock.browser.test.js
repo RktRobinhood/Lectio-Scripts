@@ -81,7 +81,7 @@ test('manager builds its panel on first open, not on every page load', async () 
 // a name, a message subject and a school-scoped URL in a captured error message
 // do not survive into what a user copies.
 test('manager records a bounded, redacted problem log before its panel exists', async () => {
-    await runFixture('manager-problem-log.html', 'lectio-manager-log-', '?phase=one', ['--virtual-time-budget=6000']);
+    await runFixture('manager-problem-log.html', 'lectio-manager-log-', '?phase=one', ['--virtual-time-budget=9000']);
 });
 
 // The state most browsers are in is the empty one, and it used to answer

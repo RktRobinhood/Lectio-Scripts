@@ -52,6 +52,43 @@ report repeated bumps a counter rather than adding a row.
 - Uncaught errors and unhandled rejections that reach its window, with the error
   type and a redacted message.
 - Its own catalogue-refresh failures.
+- **Page health**, when a Lectio page crosses a line. This measures the page,
+  never a module, because no browser lets a page ask how much memory one script
+  holds.
+
+### Page health
+
+About three minutes after a page loads, and every fifteen minutes after that,
+the Manager takes one sample. It watches the whole document for ten seconds with
+a `MutationObserver` that only counts, then disconnects it. A sample reads:
+
+| Metric | Source | Logged as | When |
+| --- | --- | --- | --- |
+| JS heap, MB | `performance.memory` (Chromium only; Firefox and Safari report nothing) | `page-memory-high` | ≥ 500 MB, or tripled and up 200 MB since the page's first sample |
+| Elements | `getElementsByTagName('*').length` | `page-elements-high` | ≥ 60,000, or tripled and up 15,000 since the first sample |
+| `<style>` tags | `getElementsByTagName('style').length` | `page-styles-high` | ≥ 300 |
+| DOM changes/s | mutation records over the window | `page-churn-high` | ≥ 100 per second while the page is just sitting there, which is what a redraw loop looks like |
+| Minutes open | `performance.now()` | (context only) | — |
+
+An entry is a `notice` from `manager`, so it marks the gear. It carries a
+`metrics` object holding only those numbers, and no message. A number cannot
+carry a name, so `metrics` is the one field that skips redaction. Modules cannot
+set it, because `lectio-module:report` is picked apart field by field and has no
+`metrics`.
+
+It stays quiet on purpose. A page logs a metric again only when that metric has
+grown to 1.5× the value it last logged. Across all tabs, one metric logs at most
+once every 30 minutes; the timestamps live in `lectioManager.healthLogged.v1`. A
+page that stays bad all day costs a few rows, and those rows show the trend.
+
+The copied report also ends with a `This page now:` line, measured at the moment
+it is built, so a report about a slow browser says whether the Lectio page was
+the heavy one.
+
+What this cannot see: memory held by Tampermonkey's own extension process (where
+`GM_*` storage lives), or by any other tab. For those, Firefox's `about:processes`
+breaks memory down by tab and by extension, and Chromium's Task Manager
+(Shift+Esc) does the same.
 
 ## Redaction
 
