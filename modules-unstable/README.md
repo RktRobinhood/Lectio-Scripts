@@ -57,6 +57,12 @@ Issue #74, rebuilt after the owner's first test of 0.1.0. That version put a pla
 
 **To try it:** in Lectio's unit list, choose your class at the top, press **Kopiér** on last year's unit, and follow the box. After Kopiér, open the new unit and press **Place last year's lessons**.
 
+### English Mode 1.11.11 (Stable has 1.11.10)
+
+- **No switch inside dialogs** (#90). *Vælg materiale* is another Lectio page in a frame, and English Mode built a second DA / EN switch there. Inside a frame it now translates and stays silent: no switch, no toast, no styles for them, and no Registration. Translation in the dialog follows the mode chosen on the top page. `tests/module-frames.browser.test.js` covers it.
+
+To try it: in English, open a lesson and press the green **+** to open *Vælg materiale*. The dialog should be in English, with no switch over its top right.
+
 ## When nothing is under test
 
 `modules.json` must never be emptied. Every shipped Manager rejects an overlay with no modules in it, keeps the overlay it cached last, and reports the failure on every refresh; a Manager older than 1.22.1 also lets that cached overlay win outright, so it would keep offering installs from the `modules-unstable/` URLs a promotion deletes. So when the last module here is promoted, the overlay keeps one entry that is an exact copy of its entry in `catalogue/modules.json`, `installUrl` included. A current Manager resolves equal versions to Stable, and an old one installs the Stable file whichever entry it picks. `node scripts/check-versions.mjs` accepts an overlay entry with no file here only when it is that exact copy, and fails an overlay with no entries at all.

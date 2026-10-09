@@ -36,6 +36,14 @@
             window.fetchCalls += 1;
             return Promise.reject(new Error('offline fixture'));
         };
+
+        window.googleRequests = 0;
+        window.GM_getValue = (key, fallback) => key === 'lectioEnglish.mode' ? 'en' : fallback;
+        window.GM_setValue = () => {};
+        window.GM_xmlhttpRequest = (details) => {
+            window.googleRequests += 1;
+            setTimeout(() => details.onerror(new Error('offline fixture')), 0);
+        };
     </script>
 </head>
 <body>
@@ -49,7 +57,12 @@
         </tr>
     </table>
 
+    <!-- One word English Mode knows, and one sentence it has to ask Google for. -->
+    <p><span id="em-word">Gem</span></p>
+    <p>Den lille blå fugl synger smukt i haven om morgenen.</p>
+
     <script src="/chairs-up.user.js" onload="window.scriptsLoaded += 1"></script>
     <script src="/change-radar.user.js" onload="window.scriptsLoaded += 1"></script>
+    <script src="/english-mode.user.js" onload="window.scriptsLoaded += 1"></script>
 </body>
 </html>

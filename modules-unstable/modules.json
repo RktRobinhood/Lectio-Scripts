@@ -50,6 +50,28 @@
           "changelog": "Bygget om efter første test: hjælp på Lectios Kopiér-side og en \"Placér sidste års lektioner\"-knap på det kopierede forløb. 0.2.1 forhindrer, at et tjek på siden kører to gange efter et sprogskift."
         }
       }
+    },
+    {
+      "id": "english-mode",
+      "name": "English Mode",
+      "description": "Adds a DA / EN switch and translates the Lectio interface into context-aware English.",
+      "category": "Interface",
+      "audience": [
+        "student",
+        "teacher"
+      ],
+      "status": "unstable",
+      "version": "1.11.11",
+      "changelog": "The DA / EN switch no longer appears a second time inside dialogs such as Vælg materiale. The dialog is still translated.",
+      "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules-unstable/Lectio-English-Mode.user.js",
+      "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
+      "i18n": {
+        "da": {
+          "name": "English Mode",
+          "description": "Tilføjer en DA / EN-knap og oversætter Lectios brugerflade til kontekstbevidst engelsk.",
+          "changelog": "DA / EN-knappen dukker ikke længere op en ekstra gang inde i dialoger som Vælg materiale. Dialogen bliver stadig oversat."
+        }
+      }
     }
   ]
 }

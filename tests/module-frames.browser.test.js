@@ -1,6 +1,8 @@
 /*
  * Modules that draw UI or fetch in the background run on the top page only,
- * as the Manager does (issues #80, #81). The fixture explains what it asserts.
+ * as the Manager does (issues #80, #81). English Mode runs in frames on
+ * purpose, and there translates without drawing anything (issue #90). The
+ * fixture explains what it asserts.
  */
 
 const { createServer } = require('node:http');
@@ -22,10 +24,11 @@ const ROUTES = new Map([
     [TOP_PATH, resolve(__dirname, 'fixtures', 'module-frames.html')],
     ['/lectio/223/SkemaNy.aspx', resolve(__dirname, 'fixtures', 'module-frames-inner.html')],
     ['/chairs-up.user.js', moduleFile('Lectio-Chairs-Up.user.js')],
-    ['/change-radar.user.js', moduleFile('Lectio-Change-Radar.user.js')]
+    ['/change-radar.user.js', moduleFile('Lectio-Change-Radar.user.js')],
+    ['/english-mode.user.js', moduleFile('Lectio-English-Mode.user.js')]
 ]);
 
-test('Chairs Up and Change Radar run on the top page and stand aside inside a frame', async () => {
+test('Chairs Up and Change Radar stand aside inside a frame; English Mode translates there and draws nothing', async () => {
     const profileDirectory = await createProfile('lectio-module-frames-');
     const server = createServer(async (request, response) => {
         const file = ROUTES.get(new URL(request.url, 'http://localhost').pathname);

@@ -24,9 +24,21 @@
          * report as drift, and no Manager for Change Radar to dock into. It
          * must build nothing, announce nothing, report nothing, fetch
          * nothing and write nothing, even after the grace window.
+         *
+         * English Mode is the exception that runs in frames on purpose: the
+         * dialog's Danish still wants translating. There it must translate
+         * and stay silent (issue #90) - no DA / EN switch, which would reload
+         * only the frame, no toast, no styles for either, and no problem
+         * report or Registration. Its mode is English in both realms, and
+         * the frame's Google fallback fails, so the frame's translation is
+         * its own and a failed fallback is what would raise a toast.
          */
         window.registrations = [];
         window.fetchCalls = 0;
+
+        window.GM_getValue = (key, fallback) => key === 'lectioEnglish.mode' ? 'en' : fallback;
+        window.GM_setValue = () => {};
+        window.GM_xmlhttpRequest = (details) => setTimeout(() => details.onerror(new Error('offline fixture')), 0);
 
         window.addEventListener('lectio-module:register', (event) => {
             window.registrations.push(event.detail.id);
@@ -47,6 +59,7 @@
 
     <script src="/chairs-up.user.js"></script>
     <script src="/change-radar.user.js"></script>
+    <script src="/english-mode.user.js"></script>
     <script>
         function assert(condition, message) {
             if (!condition) throw new Error(message);
@@ -67,21 +80,35 @@
                     const child = frame.contentWindow;
                     const childDocument = frame.contentDocument;
 
-                    for (const id of ['chairs-up', 'change-radar']) {
+                    for (const id of ['chairs-up', 'change-radar', 'english-mode']) {
                         assert(window.registrations.includes(id), `${id} did not register on the top page`);
                     }
                     assert(document.getElementById('lectio-change-radar'),
                         'Change Radar drew no radar on the top page');
 
-                    assert(child.scriptsLoaded === 2,
-                        `the frame ran ${child.scriptsLoaded || 0} of 2 module files`);
+                    assert(document.querySelectorAll('#lectio-english-switch').length === 1,
+                        'English Mode did not build exactly one switch on the top page');
+
+                    assert(child.scriptsLoaded === 3,
+                        `the frame ran ${child.scriptsLoaded || 0} of 3 module files`);
                     assert(child.registrations.length === 0,
                         `a module registered inside the frame: ${child.registrations.join(', ')}`);
                     assert(child.reports.length === 0,
                         `a module reported from inside the frame: ${JSON.stringify(child.reports)}`);
                     assert(!childDocument.getElementById('lectio-change-radar'),
                         'Change Radar drew a second radar inside the frame');
-                    assert(childDocument.querySelectorAll('style').length === 0,
+                    assert(!childDocument.getElementById('lectio-english-switch'),
+                        'English Mode built a DA / EN switch inside the frame');
+                    assert(!childDocument.getElementById('lectio-english-toast'),
+                        'English Mode showed a toast inside the frame');
+                    assert(child.googleRequests > 0,
+                        'the frame never reached the Google fallback, so the toast was not exercised');
+                    assert(childDocument.getElementById('em-word').textContent.trim() === 'Save',
+                        `English Mode did not translate inside the frame: "${childDocument.getElementById('em-word').textContent}"`);
+                    // English Mode's boot cover is part of translating, so it may stay.
+                    const frameStyles = [...childDocument.querySelectorAll('style')]
+                        .filter((style) => !style.textContent.startsWith('html.lectio-en-booting'));
+                    assert(frameStyles.length === 0,
                         'a module injected styles into the frame');
                     assert(child.fetchCalls === 0, `a module fetched ${child.fetchCalls} times from the frame`);
                     assert(child.storageWrites.length === 0,
