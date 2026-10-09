@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lectio English Mode
 // @namespace    lectio-english-mode
-// @version      1.11.10
+// @version      1.11.12
 // @description  Context-aware English layer for Lectio with instant core UI translation, persistent cache and Google fallback.
 // @match        https://www.lectio.dk/lectio/*
 // @run-at       document-start
@@ -34,6 +34,27 @@
      */
     const STORAGE_CACHE = 'lectioEnglish.learned.v5';
     const LOG = '[Lectio English Mode]';
+
+    /*
+     * Inside a frame - a dialog such as Vælg materiale, which is another
+     * Lectio page in iframe#iframedocchooser - this module translates and
+     * stays silent (issue #90). It still runs there, unlike the modules that
+     * carry @noframes, because the dialog's Danish wants translating too. But
+     * it draws no switch, no toast and no styles for them, and neither
+     * registers nor reports: the switch would reload only the frame, and
+     * there is no Manager in it to hear either. The mode it translates into is the one
+     * chosen on the top page, read from the same shared GM storage.
+     *
+     * frameElement is null on the top page, and for a frame of another origin.
+     * Anything unexpected is read as "top page", so the worst this check can
+     * do is leave the old behaviour in place.
+     */
+    let IN_FRAME = false;
+    try {
+        IN_FRAME = Boolean(window.frameElement);
+    } catch (_) {
+        IN_FRAME = false;
+    }
 
     function readSwitchPosition() {
         const savedPosition = GM_getValue(
@@ -69,7 +90,7 @@
      * could not see a const scoped to that function. Keep it above the boot
      * block (scripts/check-boot-order.mjs).
      */
-    const MODULE_VERSION = '1.11.10';
+    const MODULE_VERSION = '1.11.12';
 
     /*
      * Lectio Manager handshake.
@@ -77,6 +98,8 @@
      * touching its private storage. See catalogue/modules.json.
      */
     (function registerWithLectioManager() {
+        if (IN_FRAME) return;
+
         const MODULE_ID = 'english-mode';
         const MODULE_NAME = 'Lectio English Mode';
 
@@ -2778,6 +2801,9 @@
     let reportedTranslateFailure = false;
 
     function reportToManager(kind, code, found) {
+        // No Manager listens inside a frame (see IN_FRAME).
+        if (IN_FRAME) return;
+
         window.dispatchEvent(
             new CustomEvent(
                 'lectio-module:report',
@@ -4557,6 +4583,7 @@
 
     function installStyles() {
         if (
+            IN_FRAME ||
             document.getElementById(
                 'lectio-english-style'
             )
@@ -4646,6 +4673,7 @@
 
     function installSwitch() {
         if (
+            IN_FRAME ||
             document.getElementById(
                 'lectio-english-switch'
             )
@@ -4717,6 +4745,10 @@
     }
 
     function showToast(text) {
+        if (IN_FRAME) {
+            return;
+        }
+
         document
             .getElementById(
                 'lectio-english-toast'

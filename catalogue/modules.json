@@ -23,15 +23,15 @@
         "teacher"
       ],
       "status": "stable",
-      "version": "1.11.10",
-      "changelog": "Nothing inside the homework editor is translated any more, so English cannot end up in homework you save. Switching language no longer re-sends a form you just sent, which could add a file or link twice.",
+      "version": "1.11.12",
+      "changelog": "The DA / EN switch no longer appears a second time inside dialogs such as Vælg materiale. The dialog is still translated.",
       "installUrl": "https://raw.githubusercontent.com/RktRobinhood/Lectio-Scripts/main/modules/Lectio-English-Mode.user.js",
       "supportUrl": "https://github.com/RktRobinhood/Lectio-Scripts/issues",
       "i18n": {
         "da": {
           "name": "English Mode",
           "description": "Tilføjer en DA / EN-knap og oversætter Lectios brugerflade til kontekstbevidst engelsk.",
-          "changelog": "Intet i lektie-editoren bliver oversat længere, så der kan ikke havne engelsk i lektier, du gemmer. Skift af sprog sender ikke længere en formular, du lige har sendt, igen - det kunne tilføje en fil eller et link to gange."
+          "changelog": "DA / EN-knappen dukker ikke længere op en ekstra gang inde i dialoger som Vælg materiale. Dialogen bliver stadig oversat."
         }
       }
     },
